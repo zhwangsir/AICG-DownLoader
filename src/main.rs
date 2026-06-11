@@ -462,6 +462,14 @@ fn resolve_url(cfg: &Config, url: &str) -> Result<Resolved, String> {
         .or_else(|| if re_num.is_match(url) { Some(url.to_string()) } else { None });
     if let Some(mid) = model_id {
         let want_ver = re_ver.captures(url).map(|c| c[1].to_string());
+        return resolve_civitai_model(cfg, &mid, want_ver);
+    }
+    resolve_url_rest(cfg, url)
+}
+
+// 经 /api/v1/models/{id} 解析 Civitai 模型为可下载项；want_ver 指定版本（作品页资源带版本号）
+fn resolve_civitai_model(cfg: &Config, mid: &str, want_ver: Option<String>) -> Result<Resolved, String> {
+    {
         let api = format!("https://civitai.com/api/v1/models/{}", mid);
         let mut req = agent().get(&api);
         if !cfg.civitai_token.is_empty() {
@@ -509,7 +517,7 @@ fn resolve_url(cfg: &Config, url: &str) -> Result<Resolved, String> {
                 }
             })
             .collect();
-        return Ok(Resolved {
+        Ok(Resolved {
             source: "civitai".into(),
             model_name,
             kind: kind.clone(),
@@ -527,8 +535,12 @@ fn resolve_url(cfg: &Config, url: &str) -> Result<Resolved, String> {
                 .and_then(|x| x.as_str())
                 .unwrap_or("")
                 .to_lowercase(),
-        });
+        })
     }
+}
+
+// resolve_url 的非 Civitai-模型页部分（HF 等）
+fn resolve_url_rest(cfg: &Config, url: &str) -> Result<Resolved, String> {
     // HuggingFace
     let re_hf = regex::Regex::new(r"https?://(?:hf-mirror\.com|huggingface\.co)/(.+?)/(?:resolve|blob)/([^/]+)/(.+)").unwrap();
     if let Some(c) = re_hf.captures(url) {
@@ -552,7 +564,51 @@ fn resolve_url(cfg: &Config, url: &str) -> Result<Resolved, String> {
             sha256: hf_sha256(cfg, &repo, &branch, &percent_decode(&path)).unwrap_or_default(),
         });
     }
-    Err("无法识别的链接（支持 Civitai 模型页 / HuggingFace 文件页）".into())
+    Err("无法识别的链接（支持 Civitai 模型页·作品页 / HuggingFace 文件页）".into())
+}
+
+// 从作品页 HTML 的 "Resources used" 区块提取模型链接 (model_id, 可选 version_id)。
+// 该区块是服务端渲染的 <ul>，链接格式 /models/{id}?modelVersionId={vid}——这是页面里
+// 唯一依赖 DOM 结构的地方，后续解析全走稳定的公开 API
+fn extract_media_resources(html: &str) -> Vec<(String, Option<String>)> {
+    let Some(start) = html.find("Resources used") else { return Vec::new() };
+    let tail = &html[start..];
+    let end = tail.find("</ul>").map(|i| i + 5).unwrap_or_else(|| tail.len().min(20000));
+    let section = &tail[..end];
+    let re = regex::Regex::new(r#"href="/models/(\d+)[^"]*""#).unwrap();
+    let re_ver = regex::Regex::new(r"modelVersionId=(\d+)").unwrap();
+    let mut out: Vec<(String, Option<String>)> = Vec::new();
+    for c in re.captures_iter(section) {
+        let href = c.get(0).map(|m| m.as_str()).unwrap_or("");
+        let mid = c[1].to_string();
+        let vid = re_ver.captures(href).map(|v| v[1].to_string());
+        if !out.iter().any(|(m, v)| *m == mid && *v == vid) {
+            out.push((mid, vid));
+        }
+    }
+    out
+}
+
+// 解析 Civitai 作品页（图片/视频/帖子）：抓页面 → 提取 Resources used → 逐个经 API 解析。
+// 每次粘贴只抓一页，等同浏览器访问一次，不做批量爬取
+fn resolve_media_page(cfg: &Config, url: &str) -> Result<Vec<Resolved>, String> {
+    let body = agent().get(url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let res = extract_media_resources(&body);
+    if res.is_empty() {
+        return Err("未在该作品页找到 Resources used（作品可能隐藏了生成信息，或需要登录查看）".into());
+    }
+    let mut out = Vec::new();
+    let mut last_err = String::new();
+    for (mid, vid) in res {
+        match resolve_civitai_model(cfg, &mid, vid) {
+            Ok(r) => out.push(r),
+            Err(e) => last_err = e,
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("作品资源解析全部失败：{}", last_err));
+    }
+    Ok(out)
 }
 
 fn urlencode(s: &str) -> String {
@@ -1127,6 +1183,7 @@ enum Msg {
     // bool = append（加载更多时追加而非替换）
     Search(Result<(Vec<SearchItem>, Option<String>), String>, bool),
     Resolve(Box<Result<Resolved, String>>),
+    ResolveSet(Result<Vec<Resolved>, String>),
     Library(Vec<(String, Vec<(String, u64)>)>),
     Workflow(Result<Vec<WfModel>, String>),
 }
@@ -1159,6 +1216,8 @@ struct App {
     resolve_err: String,
     // 解析弹窗
     pending: Option<Resolved>,
+    // 作品页批量解析结果（资源清单勾选弹窗），空 = 不显示
+    pending_set: Vec<(Resolved, bool)>,
     edit_name: String,
     edit_subdir: String,
     sel_version: i64,
@@ -1233,6 +1292,7 @@ impl App {
             link: String::new(),
             resolve_err: String::new(),
             pending: None,
+            pending_set: Vec::new(),
             edit_name: String::new(),
             edit_subdir: String::new(),
             sel_version: 0,
@@ -1349,9 +1409,17 @@ impl App {
         let tx = self.tx.clone();
         self.busy = true;
         self.resolve_err.clear();
-        std::thread::spawn(move || {
-            let _ = tx.send(Msg::Resolve(Box::new(resolve_url(&cfg, &url))));
-        });
+        // 作品页（图片/视频/帖子）走爬取+批量解析，其余走单链接解析
+        let re_media = regex::Regex::new(r"civitai\.(?:com|red|work)/(?:images|videos|posts)/\d+").unwrap();
+        if re_media.is_match(&url) {
+            std::thread::spawn(move || {
+                let _ = tx.send(Msg::ResolveSet(resolve_media_page(&cfg, &url)));
+            });
+        } else {
+            std::thread::spawn(move || {
+                let _ = tx.send(Msg::Resolve(Box::new(resolve_url(&cfg, &url))));
+            });
+        }
     }
 
     fn do_scan(&mut self) {
@@ -1389,6 +1457,10 @@ impl eframe::App for App {
                     Ok(r) => self.open_pending(r),
                     Err(e) => self.resolve_err = friendly_err(e),
                 },
+                Msg::ResolveSet(Ok(list)) => {
+                    self.pending_set = list.into_iter().map(|r| (r, true)).collect();
+                }
+                Msg::ResolveSet(Err(e)) => self.resolve_err = friendly_err(e),
                 Msg::Library(l) => self.library = l,
                 Msg::Workflow(Ok(l)) => self.wf_models = l,
                 Msg::Workflow(Err(e)) => self.wf_err = e,
@@ -1640,6 +1712,7 @@ impl eframe::App for App {
 
         // 解析弹窗
         self.ui_pending(ctx);
+        self.ui_pending_set(ctx);
 
         ctx.request_repaint_after(Duration::from_millis(500));
     }
@@ -1755,10 +1828,10 @@ impl App {
     }
 
     fn ui_link(&mut self, ui: &mut egui::Ui) {
-        ui.weak("支持 civitai.com/models/... 和 huggingface 的 .../resolve|blob/... 文件页");
+        ui.weak("支持：Civitai 模型页 (/models/...)、作品页 (/images|posts/... 自动解析 Resources used 整套下载)、HuggingFace 文件页 (.../resolve|blob/...)");
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.link).desired_width(520.0).hint_text("粘贴 Civitai 模型页 或 HuggingFace 文件链接"));
+            ui.add(egui::TextEdit::singleline(&mut self.link).desired_width(520.0).hint_text("粘贴 Civitai 模型页 / 作品(视频)页 或 HuggingFace 文件链接"));
             if ui.add(accent_btn("解析")).clicked() {
                 let url = self.link.clone();
                 self.do_resolve(url);
@@ -1978,6 +2051,80 @@ impl App {
         });
         ui.weak(egui::RichText::new(format!("配置文件: {}", config_path().display())).size(11.5));
             });
+    }
+
+    // 作品页资源清单：勾选后批量入队
+    fn ui_pending_set(&mut self, ctx: &egui::Context) {
+        if self.pending_set.is_empty() {
+            return;
+        }
+        let mut open = true;
+        let mut act: Option<bool> = None; // Some(true)=下载选中, Some(false)=取消
+        let n_sel = self.pending_set.iter().filter(|(_, on)| *on).count();
+        egui::Window::new(format!("作品引用的资源 ({})", self.pending_set.len()))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.weak("解析自作品页的 Resources used，勾选要下载的项（自动归类目录并校验 SHA256）：");
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+                    for (r, on) in self.pending_set.iter_mut() {
+                        ui.horizontal(|ui| {
+                            ui.checkbox(on, "");
+                            ui.vertical(|ui| {
+                                ui.strong(&r.model_name);
+                                ui.horizontal(|ui| {
+                                    chip(ui, &r.kind, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                                    if !r.base.is_empty() {
+                                        chip(ui, &r.base, egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                                    }
+                                    if r.size_kb > 0.0 {
+                                        ui.small(fmt_size((r.size_kb * 1024.0) as u64));
+                                    }
+                                });
+                                ui.weak(format!("{} → {}", r.filename, r.subdir));
+                            });
+                        });
+                        ui.separator();
+                    }
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(n_sel > 0, accent_btn(&format!("下载选中 ({})", n_sel))).clicked() {
+                        act = Some(true);
+                    }
+                    if ui.button("取消").clicked() {
+                        act = Some(false);
+                    }
+                });
+            });
+        match act {
+            Some(true) => {
+                let items: Vec<Resolved> = std::mem::take(&mut self.pending_set)
+                    .into_iter()
+                    .filter(|(_, on)| *on)
+                    .map(|(r, _)| r)
+                    .collect();
+                for r in items {
+                    let sha = Some(r.sha256.clone()).filter(|s| !s.is_empty());
+                    start_task(
+                        self.cfg.clone(),
+                        self.downloads.clone(),
+                        r.filename.clone(),
+                        r.subdir.clone(),
+                        DlMeta { download_url: r.download_url.clone(), source: "civitai".into(), expected_sha256: sha },
+                        r.size_kb,
+                    );
+                }
+            }
+            Some(false) => self.pending_set.clear(),
+            None => {
+                if !open {
+                    self.pending_set.clear();
+                }
+            }
+        }
     }
 
     fn ui_pending(&mut self, ctx: &egui::Context) {
@@ -2404,6 +2551,30 @@ mod tests {
             }
         }
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn media_resources_extraction() {
+        // 模拟作品页：Resources used 区块内两个资源（一个带版本号），区块外的链接不得被采集
+        let html = r#"<p class="x">Resources used</p><ul class="list"><li><a href="/models/2563220/chatgpt-images-20?modelVersionId=2880272">A</a></li><li><a href="/models/12345/some-lora">B</a></li><li><a href="/models/2563220/chatgpt-images-20?modelVersionId=2880272">重复</a></li></ul><div><a href="/models/99999?modelVersionId=1">推荐位（区块外）</a></div>"#;
+        let r = extract_media_resources(html);
+        assert_eq!(r.len(), 2, "应去重且不采集区块外链接: {:?}", r);
+        assert_eq!(r[0], ("2563220".to_string(), Some("2880272".to_string())));
+        assert_eq!(r[1], ("12345".to_string(), None));
+        assert!(extract_media_resources("<html>没有资源区块</html>").is_empty());
+    }
+
+    /// 作品页爬取+解析的真实网络测试。
+    /// 手动运行: cargo test --release -- --ignored
+    #[test]
+    #[ignore]
+    fn media_page_resolve_e2e() {
+        let cfg = Config::default(); // 公开作品无需 token
+        let list = resolve_media_page(&cfg, "https://civitai.com/images/132805523").unwrap();
+        assert!(!list.is_empty(), "应至少解析出一个资源");
+        assert_eq!(list[0].source, "civitai");
+        assert!(!list[0].filename.is_empty(), "资源应有文件名");
+        assert!(list[0].download_url.contains("/api/download/models/"), "下载链接应是 API 直链");
     }
 
     /// Civitai 搜索分页 + 底模过滤的真实网络测试（无 token 也可搜索）。
