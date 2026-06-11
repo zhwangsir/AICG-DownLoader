@@ -220,6 +220,34 @@ fn sanitize_filename(name: &str) -> String {
     if out.is_empty() { "unnamed".into() } else { out }
 }
 
+// Civitai 模型描述是 HTML，剥成纯文本并截断，用于下载前的简介展示
+fn html_to_text(html: &str, max: usize) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    let out = out
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'");
+    let collapsed: String = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > max {
+        let s: String = collapsed.chars().take(max).collect();
+        format!("{}…", s)
+    } else {
+        collapsed
+    }
+}
+
 // HF URL 末段可能带 %20 等百分号编码，按字节解码后再做 UTF-8 还原
 fn percent_decode(s: &str) -> String {
     fn hex(c: u8) -> Option<u8> {
@@ -304,6 +332,7 @@ struct Resolved {
     versions: Vec<VerInfo>,
     version_id: i64,
     sha256: String,
+    desc: String,
 }
 
 #[allow(dead_code)]
@@ -535,6 +564,7 @@ fn resolve_civitai_model(cfg: &Config, mid: &str, want_ver: Option<String>) -> R
                 .and_then(|x| x.as_str())
                 .unwrap_or("")
                 .to_lowercase(),
+            desc: html_to_text(v.get("description").and_then(|x| x.as_str()).unwrap_or(""), 240),
         })
     }
 }
@@ -562,46 +592,129 @@ fn resolve_url_rest(cfg: &Config, url: &str) -> Result<Resolved, String> {
             versions: Vec::new(),
             version_id: 0,
             sha256: hf_sha256(cfg, &repo, &branch, &percent_decode(&path)).unwrap_or_default(),
+            desc: String::new(),
         });
     }
     Err("无法识别的链接（支持 Civitai 模型页·作品页 / HuggingFace 文件页）".into())
 }
 
-// 从作品页 HTML 的 "Resources used" 区块提取模型链接 (model_id, 可选 version_id)。
-// 该区块是服务端渲染的 <ul>，链接格式 /models/{id}?modelVersionId={vid}——这是页面里
-// 唯一依赖 DOM 结构的地方，后续解析全走稳定的公开 API
-fn extract_media_resources(html: &str) -> Vec<(String, Option<String>)> {
-    let Some(start) = html.find("Resources used") else { return Vec::new() };
-    let tail = &html[start..];
-    let end = tail.find("</ul>").map(|i| i + 5).unwrap_or_else(|| tail.len().min(20000));
-    let section = &tail[..end];
-    let re = regex::Regex::new(r#"href="/models/(\d+)[^"]*""#).unwrap();
-    let re_ver = regex::Regex::new(r"modelVersionId=(\d+)").unwrap();
-    let mut out: Vec<(String, Option<String>)> = Vec::new();
-    for c in re.captures_iter(section) {
-        let href = c.get(0).map(|m| m.as_str()).unwrap_or("");
-        let mid = c[1].to_string();
-        let vid = re_ver.captures(href).map(|v| v[1].to_string());
-        if !out.iter().any(|(m, v)| *m == mid && *v == vid) {
-            out.push((mid, vid));
+// 资源引用：(可选 model_id, 可选 version_id)，至少一个为 Some
+type MediaRef = (Option<String>, Option<String>);
+
+// 从作品页 HTML 的 __NEXT_DATA__ 内嵌 JSON 提取资源引用。比抓渲染后的 <ul> 可靠得多：
+// 图片/视频页（同走 /images/ 路由）有完整 resources[]（含 modelId+modelVersionId）；
+// 帖子页只有裸 modelVersionIds[]/modelVersionIdsManual[]。两者都从结构化 JSON 拿，字段稳定。
+fn extract_media_resources(html: &str) -> Vec<MediaRef> {
+    let mut out: Vec<MediaRef> = Vec::new();
+    if let Some(json) = next_data_json(html) {
+        if let Ok(v) = serde_json::from_str::<Value>(json) {
+            collect_media_refs(&v, &mut out);
+        }
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    // 回退：抓渲染后的 "Resources used" <ul>（老页面或 JSON 结构变动时兜底）
+    if let Some(start) = html.find("Resources used") {
+        let tail = &html[start..];
+        let end = tail.find("</ul>").map(|i| i + 5).unwrap_or_else(|| tail.len().min(20000));
+        let section = &tail[..end];
+        let re = regex::Regex::new(r#"href="/models/(\d+)[^"]*""#).unwrap();
+        let re_ver = regex::Regex::new(r"modelVersionId=(\d+)").unwrap();
+        for c in re.captures_iter(section) {
+            let href = c.get(0).map(|m| m.as_str()).unwrap_or("");
+            let mid = Some(c[1].to_string());
+            let vid = re_ver.captures(href).map(|v| v[1].to_string());
+            if !out.iter().any(|(m, v)| *m == mid && *v == vid) {
+                out.push((mid, vid));
+            }
         }
     }
     out
 }
 
-// 解析 Civitai 作品页（图片/视频/帖子）：抓页面 → 提取 Resources used → 逐个经 API 解析。
+fn next_data_json(html: &str) -> Option<&str> {
+    let start = html.find("__NEXT_DATA__")?;
+    let gt = html[start..].find('>')? + start + 1;
+    let end = html[gt..].find("</script>")? + gt;
+    Some(&html[gt..end])
+}
+
+// 递归收集资源引用：含 modelVersionId+modelId 的对象（图片/视频 resources[]），
+// 以及 modelVersionIds/modelVersionIdsManual 数组里的裸版本号（帖子页）
+fn collect_media_refs(v: &Value, out: &mut Vec<MediaRef>) {
+    let push = |out: &mut Vec<MediaRef>, m: Option<String>, vid: Option<String>| {
+        if m.is_none() && vid.is_none() {
+            return;
+        }
+        if !out.iter().any(|(em, ev)| *em == m && *ev == vid) {
+            out.push((m, vid));
+        }
+    };
+    match v {
+        Value::Object(o) => {
+            let vid = o.get("modelVersionId").and_then(|x| x.as_i64());
+            let mid = o.get("modelId").and_then(|x| x.as_i64());
+            if let Some(vid) = vid {
+                push(out, mid.map(|x| x.to_string()), Some(vid.to_string()));
+            }
+            for key in ["modelVersionIds", "modelVersionIdsManual"] {
+                if let Some(arr) = o.get(key).and_then(|x| x.as_array()) {
+                    for x in arr {
+                        if let Some(id) = x.as_i64() {
+                            push(out, None, Some(id.to_string()));
+                        }
+                    }
+                }
+            }
+            for x in o.values() {
+                collect_media_refs(x, out);
+            }
+        }
+        Value::Array(a) => {
+            for x in a {
+                collect_media_refs(x, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+// 按版本号解析（帖子页只有裸 versionId）：/api/v1/model-versions/{id} → Resolved
+fn resolve_civitai_version(cfg: &Config, vid: &str) -> Result<Resolved, String> {
+    let api = format!("https://civitai.com/api/v1/model-versions/{}", vid);
+    let mut req = agent().get(&api);
+    if !cfg.civitai_token.is_empty() {
+        req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
+    }
+    let body = req.call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let mid = v.get("modelId").and_then(|x| x.as_i64()).ok_or("版本无对应模型")?;
+    resolve_civitai_model(cfg, &mid.to_string(), Some(vid.to_string()))
+}
+
+// 解析 Civitai 作品页（图片/视频/帖子）：抓页面 → 解析 __NEXT_DATA__ 资源 → 逐个经 API 解析。
 // 每次粘贴只抓一页，等同浏览器访问一次，不做批量爬取
 fn resolve_media_page(cfg: &Config, url: &str) -> Result<Vec<Resolved>, String> {
     let body = agent().get(url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
-    let res = extract_media_resources(&body);
-    if res.is_empty() {
-        return Err("未在该作品页找到 Resources used（作品可能隐藏了生成信息，或需要登录查看）".into());
+    let refs = extract_media_resources(&body);
+    if refs.is_empty() {
+        return Err("未在该作品页找到模型资源（作品可能隐藏了生成信息，或该页面需要登录查看）".into());
     }
     let mut out = Vec::new();
     let mut last_err = String::new();
-    for (mid, vid) in res {
-        match resolve_civitai_model(cfg, &mid, vid) {
-            Ok(r) => out.push(r),
+    for (mid, vid) in refs {
+        let r = match (&mid, &vid) {
+            (Some(m), _) => resolve_civitai_model(cfg, m, vid.clone()),
+            (None, Some(ver)) => resolve_civitai_version(cfg, ver),
+            (None, None) => continue,
+        };
+        match r {
+            Ok(r) => {
+                if !out.iter().any(|e: &Resolved| e.download_url == r.download_url) {
+                    out.push(r);
+                }
+            }
             Err(e) => last_err = e,
         }
     }
@@ -2084,6 +2197,10 @@ impl App {
                                     }
                                 });
                                 ui.weak(format!("{} → {}", r.filename, r.subdir));
+                                if !r.desc.is_empty() {
+                                    ui.add(egui::Label::new(egui::RichText::new(&r.desc).small().color(C_GRAY)).truncate())
+                                        .on_hover_text(&r.desc);
+                                }
                             });
                         });
                         ui.separator();
@@ -2152,6 +2269,10 @@ impl App {
                         let has_sha = sel_ver.map(|v| !v.sha256.is_empty()).unwrap_or(!r.sha256.is_empty());
                         if has_sha { ui.small("· 将校验 SHA256"); }
                     });
+                    if !r.desc.is_empty() {
+                        ui.add_space(2.0);
+                        ui.add(egui::Label::new(egui::RichText::new(&r.desc).small().color(C_GRAY)));
+                    }
                     if r.versions.len() > 1 {
                         let prev_ver = self.sel_version;
                         egui::ComboBox::from_label("版本")
@@ -2554,14 +2675,39 @@ mod tests {
     }
 
     #[test]
-    fn media_resources_extraction() {
-        // 模拟作品页：Resources used 区块内两个资源（一个带版本号），区块外的链接不得被采集
-        let html = r#"<p class="x">Resources used</p><ul class="list"><li><a href="/models/2563220/chatgpt-images-20?modelVersionId=2880272">A</a></li><li><a href="/models/12345/some-lora">B</a></li><li><a href="/models/2563220/chatgpt-images-20?modelVersionId=2880272">重复</a></li></ul><div><a href="/models/99999?modelVersionId=1">推荐位（区块外）</a></div>"#;
+    fn media_resources_from_next_data() {
+        // 图片/视频页：__NEXT_DATA__ 里的 resources[]（含 modelId+modelVersionId），应去重
+        let html = r#"<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"trpcState":{"json":{"queries":[{"state":{"data":{"resources":[{"imageId":1,"modelVersionId":290640,"modelId":257749,"modelName":"Pony Diffusion V6 XL","modelType":"Checkpoint"},{"imageId":1,"modelVersionId":330475,"modelId":264290,"modelName":"Some LoRA","modelType":"LORA"},{"imageId":1,"modelVersionId":290640,"modelId":257749,"modelName":"Pony Diffusion V6 XL"}]}}}]}}}}}</script>"#;
         let r = extract_media_resources(html);
-        assert_eq!(r.len(), 2, "应去重且不采集区块外链接: {:?}", r);
-        assert_eq!(r[0], ("2563220".to_string(), Some("2880272".to_string())));
-        assert_eq!(r[1], ("12345".to_string(), None));
-        assert!(extract_media_resources("<html>没有资源区块</html>").is_empty());
+        assert_eq!(r.len(), 2, "应去重: {:?}", r);
+        assert!(r.contains(&(Some("257749".to_string()), Some("290640".to_string()))));
+        assert!(r.contains(&(Some("264290".to_string()), Some("330475".to_string()))));
+    }
+
+    #[test]
+    fn media_resources_post_bare_versions() {
+        // 帖子页：只有裸 modelVersionIds[]，提取为 (None, Some(vid))
+        let html = r#"<script id="__NEXT_DATA__" type="application/json">{"x":{"items":[{"modelVersionIds":[111,222],"modelVersionIdsManual":[333]}]}}</script>"#;
+        let r = extract_media_resources(html);
+        assert!(r.contains(&(None, Some("111".to_string()))));
+        assert!(r.contains(&(None, Some("222".to_string()))));
+        assert!(r.contains(&(None, Some("333".to_string()))));
+    }
+
+    #[test]
+    fn media_resources_ul_fallback() {
+        // 无 __NEXT_DATA__ 时回退抓 Resources used <ul>
+        let html = r#"<p>Resources used</p><ul><li><a href="/models/2563220/x?modelVersionId=2880272">A</a></li></ul>"#;
+        let r = extract_media_resources(html);
+        assert_eq!(r, vec![(Some("2563220".to_string()), Some("2880272".to_string()))]);
+        assert!(extract_media_resources("<html>没有资源</html>").is_empty());
+    }
+
+    #[test]
+    fn html_strip() {
+        assert_eq!(html_to_text("<p>Hello <b>world</b></p>", 100), "Hello world");
+        assert_eq!(html_to_text("a&amp;b&nbsp;c", 100), "a&b c");
+        assert_eq!(html_to_text("<p>0123456789</p>", 5), "01234…");
     }
 
     /// 作品页爬取+解析的真实网络测试。
