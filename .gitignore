@@ -1,0 +1,9 @@
+# 构建产物
+/target/
+
+# 本地运行时文件 —— config.json 含 Civitai token（明文），绝不提交
+config.json
+config.json.bak
+tasks.json
+app.lock
+*.part
