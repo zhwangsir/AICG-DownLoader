@@ -1043,31 +1043,352 @@ const MODEL_DIRS: [&str; 16] = [
 ];
 const MODEL_EXTS: [&str; 7] = [".safetensors", ".gguf", ".ckpt", ".pt", ".pth", ".bin", ".sft"];
 
-fn scan_library(cfg: &Config) -> Vec<(String, Vec<(String, u64)>)> {
-    let exts = MODEL_EXTS;
+// 模型识别状态（懒加载，按需对单个文件算哈希 + Civitai 反查）
+#[derive(Clone, PartialEq)]
+enum Ident {
+    Unknown,
+    Working,
+    Found { model_name: String, version_name: String, model_type: String, model_id: i64 },
+    NotFound, // 哈希算出但 Civitai 无记录（本地训练/HF 来源）
+    Failed(String),
+}
+
+#[derive(Clone)]
+struct LibFile {
+    name: String,
+    path: PathBuf,
+    size: u64,
+    preview: Option<String>, // file:// 预览图 URI
+    ident: Ident,
+}
+
+#[derive(Clone)]
+struct LibDir {
+    key: String, // 逻辑目录名 models/loras
+    files: Vec<LibFile>,
+}
+
+// 模型可能的伴随文件（预览图 + sidecar 元数据），删除模型时一并清理
+fn sidecar_paths(model_path: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for d in MODEL_DIRS {
-        let sub: PathBuf = d.split('/').collect();
-        let full = expand_root(&cfg.comfy_root).join(sub);
+    if let (Some(stem), Some(dir)) = (model_path.file_stem(), model_path.parent()) {
+        let stem = stem.to_string_lossy();
+        for suffix in [
+            ".png", ".preview.png", ".jpeg", ".jpg", ".webp", // 预览图
+            ".civitai.info", ".json", ".cm-info.json",         // sidecar 元数据
+        ] {
+            let p = dir.join(format!("{}{}", stem, suffix));
+            if p.exists() {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+// 找模型文件的同名预览图（ComfyUI / civitai 下载器惯例：foo.safetensors → foo.png / foo.preview.png）
+fn find_preview(model_path: &Path) -> Option<String> {
+    let stem = model_path.file_stem()?.to_string_lossy().into_owned();
+    let dir = model_path.parent()?;
+    for cand in [
+        format!("{}.png", stem),
+        format!("{}.preview.png", stem),
+        format!("{}.jpeg", stem),
+        format!("{}.jpg", stem),
+        format!("{}.webp", stem),
+    ] {
+        let p = dir.join(&cand);
+        if p.exists() {
+            // egui_extras 的 file loader 需要 file:// URI；统一用正斜杠
+            return Some(format!("file://{}", p.to_string_lossy().replace('\\', "/")));
+        }
+    }
+    None
+}
+
+// a111/comfyui 块里的类型名 → 我们的 models/* 逻辑名
+fn extra_path_key(k: &str) -> Option<&'static str> {
+    match k {
+        "checkpoints" => Some("models/checkpoints"),
+        "loras" => Some("models/loras"),
+        "vae" => Some("models/vae"),
+        "unet" | "diffusion_models" => Some("models/unet"),
+        "text_encoders" | "clip" => Some("models/text_encoders"),
+        "clip_vision" => Some("models/clip_vision"),
+        "controlnet" => Some("models/controlnet"),
+        "embeddings" => Some("models/embeddings"),
+        "upscale_models" => Some("models/upscale_models"),
+        "style_models" => Some("models/style_models"),
+        _ => None,
+    }
+}
+
+fn join_extra(out: &mut Vec<(String, PathBuf)>, logical: &str, base: &str, rel: &str) {
+    let rel = rel.trim().trim_matches('"').trim_matches('\'');
+    if rel.is_empty() {
+        return;
+    }
+    let p = if Path::new(rel).is_absolute() || base.is_empty() {
+        PathBuf::from(rel)
+    } else {
+        Path::new(base).join(rel)
+    };
+    out.push((logical.to_string(), p));
+}
+
+// 解析 ComfyUI 的 extra_model_paths.yaml，返回 [(逻辑目录名, 路径)]，让模型放在别的盘也能被管理。
+// 手解析（避免引入 YAML 依赖），支持官方默认的块标量(|)多路径写法：
+//   text_encoders: |
+//       models/text_encoders/
+//       models/clip/
+fn parse_extra_paths(yaml: &str) -> Vec<(String, PathBuf)> {
+    let lines: Vec<&str> = yaml.lines().collect();
+    let indent_of = |s: &str| s.len() - s.trim_start().len();
+    let mut out = Vec::new();
+    let mut base = String::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let raw = lines[i];
+        let t = raw.trim();
+        if t.is_empty() || t.starts_with('#') {
+            i += 1;
+            continue;
+        }
+        let indent = indent_of(raw);
+        if indent == 0 {
+            base.clear(); // 新的来源块
+            i += 1;
+            continue;
+        }
+        // split_once 只在首个冒号切分，Windows 盘符冒号(D:/...)留在值里
+        if let Some((k, v)) = t.split_once(':') {
+            let k = k.trim();
+            let v = v.split(" #").next().unwrap_or(v).trim(); // 去行内注释
+            if k == "base_path" {
+                base = v.trim_matches('"').trim_matches('\'').to_string();
+                i += 1;
+                continue;
+            }
+            let logical = extra_path_key(k);
+            let is_block = v.is_empty() || v == "|" || v == "|-" || v == ">" || v == ">-";
+            if !is_block {
+                if let Some(lg) = logical {
+                    join_extra(&mut out, lg, &base, v);
+                }
+                i += 1;
+                continue;
+            }
+            // 块标量：后续比 key 更深缩进的行都是该类型的路径
+            let mut j = i + 1;
+            while j < lines.len() {
+                let r = lines[j];
+                let tt = r.trim();
+                if tt.is_empty() {
+                    j += 1;
+                    continue;
+                }
+                if indent_of(r) <= indent {
+                    break;
+                }
+                if !tt.starts_with('#') {
+                    if let Some(lg) = logical {
+                        join_extra(&mut out, lg, &base, tt);
+                    }
+                }
+                j += 1;
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+// 收集所有要扫描的 (逻辑目录名, 绝对路径)：comfy_root 下的标准目录 + extra_model_paths.yaml 里的额外路径
+fn scan_targets(cfg: &Config) -> Vec<(String, PathBuf)> {
+    let root = expand_root(&cfg.comfy_root);
+    let mut targets: Vec<(String, PathBuf)> = MODEL_DIRS
+        .iter()
+        .map(|d| {
+            let sub: PathBuf = d.split('/').collect();
+            (d.to_string(), root.join(sub))
+        })
+        .collect();
+    let yaml_path = root.join("extra_model_paths.yaml");
+    if let Ok(text) = fs::read_to_string(&yaml_path) {
+        for (key, path) in parse_extra_paths(&text) {
+            targets.push((key, path));
+        }
+    }
+    targets
+}
+
+fn scan_library(cfg: &Config) -> Vec<LibDir> {
+    let exts = MODEL_EXTS;
+    // 同一逻辑目录可能对应多个物理路径（extra paths），合并到一个 LibDir 下。
+    // 按规范化后的绝对路径全局去重：extra path 与标准目录指向同一物理文件时只算一次，
+    // 否则磁盘统计翻倍、正常文件全被误标「疑似重复」
+    let mut merged: Vec<LibDir> = Vec::new();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    for (key, full) in scan_targets(cfg) {
         let mut files = Vec::new();
         if let Ok(rd) = fs::read_dir(&full) {
             let mut v: Vec<_> = rd.flatten().collect();
             v.sort_by_key(|e| e.file_name());
             for e in v {
-                if let Ok(ft) = e.file_type() {
-                    if ft.is_file() {
-                        let name = e.file_name().to_string_lossy().to_string();
-                        if exts.iter().any(|x| name.to_lowercase().ends_with(x)) {
-                            let sz = e.metadata().map(|m| m.len()).unwrap_or(0);
-                            files.push((name, sz));
+                if e.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if exts.iter().any(|x| name.to_lowercase().ends_with(x)) {
+                        let path = e.path();
+                        let canon = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                        if !seen.insert(canon) {
+                            continue; // 已从别的逻辑目录/extra 路径收录过同一物理文件
                         }
+                        let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+                        files.push(LibFile {
+                            preview: find_preview(&path),
+                            name,
+                            path,
+                            size,
+                            ident: Ident::Unknown,
+                        });
                     }
                 }
             }
         }
-        out.push((d.to_string(), files));
+        if files.is_empty() {
+            continue;
+        }
+        if let Some(d) = merged.iter_mut().find(|d| d.key == key) {
+            d.files.extend(files);
+        } else {
+            merged.push(LibDir { key, files });
+        }
     }
-    out
+    merged
+}
+
+// ============ 哈希缓存（避免重复对多 GB 文件算 SHA256）============
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct HashCache {
+    // key = 绝对路径；value = (size, mtime_secs, sha256)
+    entries: std::collections::HashMap<String, (u64, u64, String)>,
+}
+
+fn hash_cache_path() -> PathBuf {
+    config_path().with_file_name("hash-cache.json")
+}
+
+fn load_hash_cache() -> HashCache {
+    fs::read_to_string(hash_cache_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_hash_cache(c: &HashCache) {
+    if let Ok(s) = serde_json::to_string(c) {
+        let _ = fs::write(hash_cache_path(), s);
+    }
+}
+
+// 删除文件后清掉其哈希缓存条目，避免缓存无限增长 + 同路径新文件误命中旧哈希
+fn forget_hash_cache(path: &Path) {
+    let _g = HASH_CACHE_LOCK.lock().unwrap();
+    let mut cache = load_hash_cache();
+    if cache.entries.remove(&path.to_string_lossy().to_string()).is_some() {
+        save_hash_cache(&cache);
+    }
+}
+
+fn file_mtime_secs(p: &Path) -> u64 {
+    fs::metadata(p)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// 缓存文件读改写的全局锁：多个识别线程并发时避免互相覆盖 hash-cache.json 丢更新/损坏
+static HASH_CACHE_LOCK: Mutex<()> = Mutex::new(());
+
+// 取文件 SHA256：命中缓存（路径+大小+mtime 都匹配）直接返回，否则算并写回缓存。
+// 慢哈希在锁外进行，仅查询与合并写入持锁，保证并发安全又不串行化磁盘读取
+fn cached_file_hash(p: &Path) -> Result<String, String> {
+    let size = fs::metadata(p).map(|m| m.len()).map_err(|e| e.to_string())?;
+    let mtime = file_mtime_secs(p);
+    let key = p.to_string_lossy().to_string();
+    {
+        let _g = HASH_CACHE_LOCK.lock().unwrap();
+        if let Some((s, m, h)) = load_hash_cache().entries.get(&key) {
+            if *s == size && *m == mtime {
+                return Ok(h.clone());
+            }
+        }
+    }
+    let mut f = fs::File::open(p).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let hash = hex_str(&hasher.finalize());
+    {
+        // 持锁期间重新读取再插入，避免覆盖其他线程刚写入的条目
+        let _g = HASH_CACHE_LOCK.lock().unwrap();
+        let mut cache = load_hash_cache();
+        cache.entries.insert(key, (size, mtime, hash.clone()));
+        save_hash_cache(&cache);
+    }
+    Ok(hash)
+}
+
+// 识别单个文件：算哈希（带缓存）→ Civitai by-hash 反查
+fn identify_one(cfg: &Config, path: &Path) -> Ident {
+    match cached_file_hash(path) {
+        Ok(h) => civitai_by_hash(cfg, &h),
+        Err(e) => Ident::Failed(e),
+    }
+}
+
+// Civitai by-hash 反查：本地模型 → 是什么模型/哪个版本
+fn civitai_by_hash(cfg: &Config, sha256: &str) -> Ident {
+    let url = format!("https://civitai.com/api/v1/model-versions/by-hash/{}", sha256);
+    let mut req = agent().get(&url);
+    if !cfg.civitai_token.is_empty() {
+        req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
+    }
+    match req.call() {
+        Ok(resp) => {
+            let body = match resp.into_string() {
+                Ok(b) => b,
+                Err(e) => return Ident::Failed(e.to_string()),
+            };
+            // 200 但 body 不是合法 JSON（代理插页/空响应等）是瞬时错误，判 Failed 可重试；
+            // 只有明确的 404 才是「Civitai 确无此模型」
+            let v: Value = match serde_json::from_str(&body) {
+                Ok(v) => v,
+                Err(_) => return Ident::Failed("响应异常（非 JSON），可重试".into()),
+            };
+            match v.get("modelId").and_then(|x| x.as_i64()) {
+                Some(mid) => Ident::Found {
+                    model_name: v.get("model").and_then(|m| m.get("name")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    version_name: v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    model_type: v.get("model").and_then(|m| m.get("type")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    model_id: mid,
+                },
+                None => Ident::NotFound,
+            }
+        }
+        Err(ureq::Error::Status(404, _)) => Ident::NotFound,
+        Err(e) => Ident::Failed(friendly_err(e.to_string())),
+    }
 }
 
 // ============ 工作流缺失模型分析 ============
@@ -1297,7 +1618,8 @@ enum Msg {
     Search(Result<(Vec<SearchItem>, Option<String>), String>, bool),
     Resolve(Box<Result<Resolved, String>>),
     ResolveSet(Result<Vec<Resolved>, String>),
-    Library(Vec<(String, Vec<(String, u64)>)>),
+    Library(Vec<LibDir>),
+    Identify { path: PathBuf, ident: Ident },
     Workflow(Result<Vec<WfModel>, String>),
 }
 
@@ -1335,7 +1657,10 @@ struct App {
     edit_subdir: String,
     sel_version: i64,
     // 模型库
-    library: Vec<(String, Vec<(String, u64)>)>,
+    library: Vec<LibDir>,
+    lib_scanned: bool,
+    lib_filter: String,
+    delete_confirm: Option<PathBuf>,
     // 工作流分析
     wf_input: String,
     wf_models: Vec<WfModel>,
@@ -1383,6 +1708,14 @@ impl App {
                 );
             }
         }
+        // 启动即后台扫描模型库（仅读目录，很快），打开「模型库」标签页时已有内容
+        {
+            let cfg = cfg.clone();
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(Msg::Library(scan_library(&cfg)));
+            });
+        }
         // 调试/截图辅助：COMFY_START_TAB=link|preset|workflow|library|settings 指定启动页
         let tab = match std::env::var("COMFY_START_TAB").as_deref() {
             Ok("link") => Tab::Link,
@@ -1410,6 +1743,9 @@ impl App {
             edit_subdir: String::new(),
             sel_version: 0,
             library: Vec::new(),
+            lib_scanned: false,
+            lib_filter: String::new(),
+            delete_confirm: None,
             wf_input: String::new(),
             wf_models: Vec::new(),
             wf_err: String::new(),
@@ -1543,6 +1879,55 @@ impl App {
         });
     }
 
+    // 后台识别单个模型：算哈希（带缓存）→ Civitai by-hash 反查
+    fn do_identify(&mut self, path: PathBuf) {
+        // 标记为识别中
+        for d in &mut self.library {
+            for f in &mut d.files {
+                if f.path == path {
+                    f.ident = Ident::Working;
+                }
+            }
+        }
+        let cfg = self.cfg.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let ident = identify_one(&cfg, &path);
+            let _ = tx.send(Msg::Identify { path, ident });
+        });
+    }
+
+    // 识别全部尚未识别的模型：单个 worker 顺序处理，避免并发轰炸 by-hash 触发 429
+    fn do_identify_all(&mut self) {
+        let pending: Vec<PathBuf> = self
+            .library
+            .iter()
+            .flat_map(|d| d.files.iter())
+            .filter(|f| f.ident == Ident::Unknown || matches!(f.ident, Ident::Failed(_)))
+            .map(|f| f.path.clone())
+            .collect();
+        if pending.is_empty() {
+            return;
+        }
+        for d in &mut self.library {
+            for f in &mut d.files {
+                if pending.contains(&f.path) {
+                    f.ident = Ident::Working;
+                }
+            }
+        }
+        let cfg = self.cfg.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            for path in pending {
+                let ident = identify_one(&cfg, &path);
+                if tx.send(Msg::Identify { path, ident }).is_err() {
+                    break; // UI 已关闭
+                }
+            }
+        });
+    }
+
     fn open_pending(&mut self, r: Resolved) {
         self.edit_name = r.filename.clone();
         self.edit_subdir = r.subdir.clone();
@@ -1574,7 +1959,19 @@ impl eframe::App for App {
                     self.pending_set = list.into_iter().map(|r| (r, true)).collect();
                 }
                 Msg::ResolveSet(Err(e)) => self.resolve_err = friendly_err(e),
-                Msg::Library(l) => self.library = l,
+                Msg::Library(l) => {
+                    self.library = l;
+                    self.lib_scanned = true;
+                }
+                Msg::Identify { path, ident } => {
+                    for d in &mut self.library {
+                        for f in &mut d.files {
+                            if f.path == path {
+                                f.ident = ident.clone();
+                            }
+                        }
+                    }
+                }
                 Msg::Workflow(Ok(l)) => self.wf_models = l,
                 Msg::Workflow(Err(e)) => self.wf_err = e,
             }
@@ -2077,43 +2474,198 @@ impl App {
     }
 
     fn ui_library(&mut self, ui: &mut egui::Ui) {
-        if ui.button("🔄 刷新").clicked() {
-            self.do_scan();
-        }
+        let total_size: u64 = self.library.iter().flat_map(|d| d.files.iter()).map(|f| f.size).sum();
+        let total_count: usize = self.library.iter().map(|d| d.files.len()).sum();
+        let unknown: usize = self
+            .library
+            .iter()
+            .flat_map(|d| d.files.iter())
+            .filter(|f| f.ident == Ident::Unknown)
+            .count();
+        ui.horizontal(|ui| {
+            if ui.add(accent_btn("🔄 刷新")).clicked() {
+                self.do_scan();
+            }
+            if total_count > 0 && ui.add_enabled(unknown > 0, egui::Button::new(format!("识别全部 ({})", unknown))).clicked() {
+                self.do_identify_all();
+            }
+            if total_count > 0 {
+                ui.add(egui::TextEdit::singleline(&mut self.lib_filter).desired_width(180.0).hint_text("按名称筛选"));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if total_count > 0 {
+                    chip(ui, &format!("{} 个 · {}", total_count, fmt_size(total_size)), egui::Color32::from_rgb(38, 38, 50), C_GRAY);
+                }
+            });
+        });
+        ui.weak("识别 = 算 SHA256 后到 Civitai 反查这是什么模型（结果会缓存）。支持 extra_model_paths.yaml 里的额外路径。");
         ui.add_space(4.0);
-        if self.library.is_empty() {
+        if !self.lib_scanned {
             ui.centered_and_justified(|ui| {
                 ui.weak("点「刷新」扫描 ComfyUI 模型目录");
             });
             return;
         }
+        if total_count == 0 {
+            ui.centered_and_justified(|ui| {
+                ui.weak("未扫描到模型文件 — 检查「设置」里的 ComfyUI 根目录是否正确");
+            });
+            return;
+        }
+        // 大库一次性解码几百张原图会撑爆显存（egui_extras 不按显示尺寸降采样），超阈值就不显示缩略图
+        let show_thumbs = total_count <= 200;
+        if !show_thumbs {
+            ui.weak("模型较多，已隐藏缩略图以节省内存");
+        }
+        let filter = self.lib_filter.to_lowercase();
+        // 同名文件出现在多个位置 → 标记疑似重复（无需哈希的廉价提示）
+        let mut name_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for d in &self.library {
+            for f in &d.files {
+                *name_count.entry(f.name.to_lowercase()).or_default() += 1;
+            }
+        }
+        let mut identify: Option<PathBuf> = None;
+        let mut open_dir: Option<PathBuf> = None;
+        let mut del: Option<PathBuf> = None;
+        let mut open_model: Option<i64> = None;
+        let library = self.library.clone();
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (dir, files) in &self.library {
-                if files.is_empty() {
-                    continue; // 空目录不占版面
+            for d in &library {
+                let shown: Vec<&LibFile> = d.files.iter().filter(|f| filter.is_empty() || f.name.to_lowercase().contains(&filter)).collect();
+                if shown.is_empty() {
+                    continue;
                 }
+                let dir_size: u64 = shown.iter().map(|f| f.size).sum();
                 ui.horizontal(|ui| {
-                    ui.strong(dir);
-                    chip(ui, &files.len().to_string(), egui::Color32::from_rgb(38, 38, 50), C_GRAY);
+                    ui.strong(&d.key);
+                    chip(ui, &shown.len().to_string(), egui::Color32::from_rgb(38, 38, 50), C_GRAY);
+                    ui.weak(fmt_size(dir_size));
                 });
-                egui::Frame::none()
-                    .fill(C_CARD)
-                    .rounding(egui::Rounding::same(8.0))
-                    .inner_margin(egui::Margin::symmetric(10.0, 6.0))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        for (name, sz) in files {
+                for f in shown {
+                    egui::Frame::none()
+                        .fill(C_CARD)
+                        .rounding(egui::Rounding::same(8.0))
+                        .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                ui.label(name);
+                                if show_thumbs {
+                                    if let Some(uri) = &f.preview {
+                                        ui.add(
+                                            egui::Image::from_uri(uri.clone())
+                                                .max_height(46.0)
+                                                .max_width(46.0)
+                                                .rounding(egui::Rounding::same(5.0)),
+                                        );
+                                    }
+                                }
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(&f.name);
+                                        if name_count.get(&f.name.to_lowercase()).copied().unwrap_or(0) > 1 {
+                                            chip(ui, "疑似重复", egui::Color32::from_rgb(66, 54, 26), egui::Color32::from_rgb(230, 190, 100));
+                                        }
+                                    });
+                                    match &f.ident {
+                                        Ident::Working => {
+                                            ui.horizontal(|ui| {
+                                                ui.spinner();
+                                                ui.weak("识别中…");
+                                            });
+                                        }
+                                        Ident::Found { model_name, version_name, model_type, .. } => {
+                                            ui.horizontal(|ui| {
+                                                chip(ui, model_type, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                                                ui.colored_label(C_GREEN, format!("{} · {}", model_name, version_name));
+                                            });
+                                        }
+                                        Ident::NotFound => {
+                                            ui.weak("Civitai 无记录（本地训练 / HF 来源）");
+                                        }
+                                        Ident::Failed(e) => {
+                                            ui.colored_label(C_RED, format!("识别失败: {}", e));
+                                        }
+                                        Ident::Unknown => {}
+                                    }
+                                });
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.weak(fmt_size(*sz));
+                                    if ui.small_button("删除").clicked() {
+                                        del = Some(f.path.clone());
+                                    }
+                                    if ui.small_button("目录").clicked() {
+                                        open_dir = Some(f.path.clone());
+                                    }
+                                    if let Ident::Found { model_id, .. } = &f.ident {
+                                        if ui.small_button("Civitai").clicked() {
+                                            open_model = Some(*model_id);
+                                        }
+                                    } else if matches!(f.ident, Ident::Unknown | Ident::Failed(_)) && ui.small_button("识别").clicked() {
+                                        identify = Some(f.path.clone());
+                                    }
+                                    ui.weak(fmt_size(f.size));
                                 });
                             });
-                        }
-                    });
+                        });
+                }
                 ui.add_space(8.0);
             }
         });
+        if let Some(p) = identify {
+            self.do_identify(p);
+        }
+        if let Some(p) = open_dir {
+            open_in_file_manager(&p);
+        }
+        if let Some(mid) = open_model {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(format!("https://civitai.com/models/{}", mid)));
+        }
+        if let Some(p) = del {
+            self.delete_confirm = Some(p);
+        }
+        self.ui_delete_confirm(ui.ctx());
+    }
+
+    fn ui_delete_confirm(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.delete_confirm.clone() else { return };
+        let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut close = false;
+        egui::Window::new("确认删除")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!("永久删除模型文件？\n{}", name));
+                ui.weak(path.to_string_lossy());
+                let extras = sidecar_paths(&path).len();
+                if extras > 0 {
+                    ui.weak(format!("将一并删除 {} 个伴随文件（预览图 / 元数据）", extras));
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let danger = egui::Button::new(egui::RichText::new("删除").color(egui::Color32::WHITE)).fill(C_RED);
+                    if ui.add(danger).clicked() {
+                        if fs::remove_file(&path).is_ok() {
+                            // 连带清理预览图/sidecar 与哈希缓存条目，避免孤儿文件与缓存膨胀
+                            for sc in sidecar_paths(&path) {
+                                let _ = fs::remove_file(&sc);
+                            }
+                            forget_hash_cache(&path);
+                            // 从内存列表移除，避免重扫
+                            for d in &mut self.library {
+                                d.files.retain(|f| f.path != path);
+                            }
+                        }
+                        close = true;
+                    }
+                    if ui.button("取消").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if close {
+            self.delete_confirm = None;
+        }
     }
 
     fn ui_settings(&mut self, ui: &mut egui::Ui) {
@@ -2343,6 +2895,24 @@ impl App {
             }
         } else if cancel || !open {
             self.pending = None;
+        }
+    }
+}
+
+// 在系统文件管理器里定位文件（Windows 资源管理器选中 / macOS Finder / Linux 打开目录）
+fn open_in_file_manager(path: &Path) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("explorer").arg("/select,").arg(path).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(dir) = path.parent() {
+            let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
         }
     }
 }
@@ -2704,6 +3274,32 @@ mod tests {
     }
 
     #[test]
+    fn extra_paths_parse() {
+        let yaml = "comfyui:\n    base_path: D:/Other/ComfyUI/\n    checkpoints: models/checkpoints\n    loras: models/loras\n    # comment\n\na111:\n    base_path: E:/sd-webui\n    checkpoints: models/Stable-diffusion\n    vae: models/VAE\n";
+        let r = parse_extra_paths(yaml);
+        assert!(r.iter().any(|(k, p)| k == "models/checkpoints" && p == &PathBuf::from("D:/Other/ComfyUI/").join("models/checkpoints")));
+        assert!(r.iter().any(|(k, p)| k == "models/loras" && p == &PathBuf::from("D:/Other/ComfyUI/").join("models/loras")));
+        assert!(r.iter().any(|(k, p)| k == "models/checkpoints" && p == &PathBuf::from("E:/sd-webui").join("models/Stable-diffusion")));
+        assert!(r.iter().any(|(k, p)| k == "models/vae" && p == &PathBuf::from("E:/sd-webui").join("models/VAE")));
+    }
+
+    #[test]
+    fn extra_paths_block_scalar() {
+        // ComfyUI 官方默认写法：块标量 | 多路径 + 行内注释 + 绝对路径
+        let yaml = "comfyui:\n    base_path: /data/comfy\n    text_encoders: |\n        models/text_encoders/\n        models/clip/\n    checkpoints: models/checkpoints  # 主目录\n    loras: /abs/loras\n";
+        let r = parse_extra_paths(yaml);
+        // 块标量两行都被收录
+        assert!(r.iter().any(|(k, p)| k == "models/text_encoders" && p == &PathBuf::from("/data/comfy").join("models/text_encoders/")));
+        assert!(r.iter().any(|(k, p)| k == "models/text_encoders" && p == &PathBuf::from("/data/comfy").join("models/clip/")));
+        // 行内注释被剥掉
+        assert!(r.iter().any(|(k, p)| k == "models/checkpoints" && p == &PathBuf::from("/data/comfy").join("models/checkpoints")));
+        // 绝对路径不再拼 base
+        assert!(r.iter().any(|(k, p)| k == "models/loras" && p == &PathBuf::from("/abs/loras")));
+        // 不应产生含字面竖线的伪路径
+        assert!(!r.iter().any(|(_, p)| p.to_string_lossy().contains('|')));
+    }
+
+    #[test]
     fn html_strip() {
         assert_eq!(html_to_text("<p>Hello <b>world</b></p>", 100), "Hello world");
         assert_eq!(html_to_text("a&amp;b&nbsp;c", 100), "a&b c");
@@ -2721,6 +3317,31 @@ mod tests {
         assert_eq!(list[0].source, "civitai");
         assert!(!list[0].filename.is_empty(), "资源应有文件名");
         assert!(list[0].download_url.contains("/api/download/models/"), "下载链接应是 API 直链");
+    }
+
+    /// 本地模型 by-hash 反查的真实网络测试。
+    /// 手动运行: cargo test --release -- --ignored
+    #[test]
+    #[ignore]
+    fn library_identify_e2e() {
+        let cfg = Config::default();
+        // 已知存在的 SHA256（Pony LoRA "Not Artists Styles"）→ 应识别为 Found
+        let h = "DF7C757437EF3696E76EE5CC18C063681478639132547B6292B0B4D773814BA5";
+        match civitai_by_hash(&cfg, h) {
+            Ident::Found { model_name, model_type, model_id, .. } => {
+                assert!(!model_name.is_empty(), "应有模型名");
+                assert_eq!(model_type, "LORA");
+                assert!(model_id > 0);
+            }
+            other => panic!("期望 Found，实得 {:?}", match other {
+                Ident::NotFound => "NotFound",
+                Ident::Failed(_) => "Failed",
+                _ => "其他",
+            }),
+        }
+        // 伪造哈希 → NotFound
+        let bogus = "0".repeat(64);
+        assert!(matches!(civitai_by_hash(&cfg, &bogus), Ident::NotFound), "伪哈希应 NotFound");
     }
 
     /// Civitai 搜索分页 + 底模过滤的真实网络测试（无 token 也可搜索）。
