@@ -2786,41 +2786,61 @@ impl App {
         }
         let results = self.results.clone();
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for it in &results {
-                    egui::Frame::none()
-                        .fill(C_CARD)
-                        .rounding(egui::Rounding::same(10.0))
-                        .inner_margin(egui::Margin::same(10.0))
-                        .show(ui, |ui| {
-                            ui.set_width(190.0);
-                            ui.vertical(|ui| {
-                                if !it.image.is_empty() {
-                                    ui.add(
-                                        egui::Image::from_uri(it.image.clone())
-                                            .max_height(200.0)
-                                            .max_width(190.0)
-                                            .rounding(egui::Rounding::same(8.0)),
-                                    );
-                                }
-                                ui.add(egui::Label::new(egui::RichText::new(&it.name).strong()).truncate());
-                                ui.horizontal(|ui| {
-                                    chip(ui, &it.kind, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
-                                    if !it.base.is_empty() {
-                                        chip(ui, &it.base, egui::Color32::from_rgb(42, 42, 52), C_GRAY);
-                                    }
-                                    if it.nsfw {
-                                        chip(ui, "NSFW", egui::Color32::from_rgb(66, 34, 38), C_RED);
-                                    }
-                                });
-                                ui.small(format!("⬇ {}", it.downloads));
-                                if ui.add_sized([ui.available_width(), 28.0], egui::Button::new("下载")).clicked() {
-                                    self.do_resolve(format!("https://civitai.com/models/{}?modelVersionId={}", it.id, it.version_id));
-                                }
-                            });
-                        });
-                }
-            });
+            // 自适应网格：根据可用宽度计算列数，卡片宽度自动填充
+            let gap = 12.0;
+            let min_card_width = 170.0;
+            let available = ui.available_width();
+            let cols = ((available + gap) / (min_card_width + gap)).floor() as usize;
+            let cols = cols.max(1).min(results.len().max(1));
+            let card_width = (available - gap * (cols.saturating_sub(1)) as f32) / cols as f32;
+
+            for chunk in results.chunks(cols) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for (idx, it) in chunk.iter().enumerate() {
+                        if idx > 0 {
+                            ui.add_space(gap);
+                        }
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(card_width, 0.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                egui::Frame::none()
+                                    .fill(C_CARD)
+                                    .rounding(egui::Rounding::same(10.0))
+                                    .inner_margin(egui::Margin::same(10.0))
+                                    .show(ui, |ui| {
+                                        ui.vertical(|ui| {
+                                            if !it.image.is_empty() {
+                                                ui.add(
+                                                    egui::Image::from_uri(it.image.clone())
+                                                        .max_height(200.0)
+                                                        .max_width(ui.available_width())
+                                                        .rounding(egui::Rounding::same(8.0)),
+                                                );
+                                            }
+                                            ui.add(egui::Label::new(egui::RichText::new(&it.name).strong()).truncate());
+                                            ui.horizontal(|ui| {
+                                                chip(ui, &it.kind, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                                                if !it.base.is_empty() {
+                                                    chip(ui, &it.base, egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                                                }
+                                                if it.nsfw {
+                                                    chip(ui, "NSFW", egui::Color32::from_rgb(66, 34, 38), C_RED);
+                                                }
+                                            });
+                                            ui.small(format!("⬇ {}", it.downloads));
+                                            if ui.add_sized([ui.available_width(), 28.0], egui::Button::new("下载")).clicked() {
+                                                self.do_resolve(format!("https://civitai.com/models/{}?modelVersionId={}", it.id, it.version_id));
+                                            }
+                                        });
+                                    });
+                            },
+                        );
+                    }
+                });
+                ui.add_space(gap);
+            }
             if self.next_page.is_some() {
                 ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
