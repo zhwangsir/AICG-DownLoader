@@ -14,6 +14,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use eframe::egui;
 
+mod sys_info;
+
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 // 全局暂停：置位后排队任务不取并发槽、下载中任务在下一个分块边界退出为「已暂停」
@@ -128,6 +130,9 @@ struct Config {
     // 下载完成/失败时弹出系统通知
     #[serde(default = "default_true")]
     notify_on_complete: bool,
+    // ComfyUI 启动附加参数，如 --lowvram --listen
+    #[serde(default)]
+    comfy_args: String,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -140,6 +145,7 @@ impl Default for Config {
             proxy_url: None,
             tray_minimize: true,
             notify_on_complete: true,
+            comfy_args: String::new(),
         }
     }
 }
@@ -2077,6 +2083,54 @@ enum Msg {
     ComfyStatus(Result<String, String>),
     // model_id → 最新版本查询结果
     UpdateCheck { model_id: i64, result: Result<UpdateInfo, String> },
+    // ComfyUI 子进程输出 / 退出 / 启动 PID
+    ComfyOutput(String),
+    ComfyExited(Option<i32>),
+    ComfyStarted(u32),
+    // ComfyUI 安装过程输出 / 完成
+    ComfyInstallOutput(String),
+    ComfyInstallDone(Result<(), String>),
+    // 系统画像检测结果
+    ComfyProfile(Result<sys_info::SystemProfile, String>),
+}
+
+// 运行外部命令并把 stdout/stderr 按行发送到消息队列（install=true 用 ComfyInstallOutput，否则 ComfyOutput）
+fn run_cmd_stream(cmd: &mut std::process::Command, tx: &std::sync::mpsc::Sender<Msg>, install: bool) -> Result<(), String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    if let Some(stdout) = stdout {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                let _ = if install {
+                    tx.send(Msg::ComfyInstallOutput(line))
+                } else {
+                    tx.send(Msg::ComfyOutput(line))
+                };
+            }
+        });
+    }
+    if let Some(stderr) = stderr {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let _ = if install {
+                    tx.send(Msg::ComfyInstallOutput(format!("[stderr] {}", line)))
+                } else {
+                    tx.send(Msg::ComfyOutput(format!("[stderr] {}", line)))
+                };
+            }
+        });
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("退出码 {:?}", status.code()))
+    }
 }
 
 // ============ egui 应用 ============
@@ -2088,6 +2142,7 @@ enum Tab {
     Workflow,
     Library,
     Downloads,
+    ComfyUI,
     Settings,
 }
 
@@ -2147,6 +2202,13 @@ struct App {
     dl_filter: DownloadsFilter,
     dl_sort_newest_first: bool,
     dl_detail: Option<u64>, // 当前打开详情弹窗的任务 id
+    // ComfyUI 管理
+    profile: Option<sys_info::SystemProfile>,
+    profile_err: String,
+    comfy_log: Vec<String>,
+    comfy_pid: Option<u32>,
+    comfy_installing: bool,
+    comfy_install_log: String,
     // 托盘图标必须存活，否则会立即从任务栏消失
     #[allow(dead_code)]
     tray: Option<tray_icon::TrayIcon>,
@@ -2191,6 +2253,13 @@ impl App {
             let tx = tx.clone();
             std::thread::spawn(move || {
                 let _ = tx.send(Msg::Library(scan_library(&cfg)));
+            });
+        }
+        // 启动时后台检测系统配置
+        {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(Msg::ComfyProfile(Ok(sys_info::detect())));
             });
         }
         // 调试/截图辅助：COMFY_START_TAB=link|preset|workflow|library|settings 指定启动页
@@ -2241,6 +2310,12 @@ impl App {
             dl_filter: DownloadsFilter::All,
             dl_sort_newest_first: true,
             dl_detail: None,
+            profile: None,
+            profile_err: String::new(),
+            comfy_log: Vec::new(),
+            comfy_pid: None,
+            comfy_installing: false,
+            comfy_install_log: String::new(),
             tray: None,
             tray_initialized: false,
             cfg,
@@ -2511,6 +2586,33 @@ impl eframe::App for App {
                     self.lib_checking_updates.remove(&model_id);
                     self.lib_updates.insert(model_id, result);
                 }
+                Msg::ComfyProfile(Ok(p)) => self.profile = Some(p),
+                Msg::ComfyProfile(Err(e)) => self.profile_err = e,
+                Msg::ComfyOutput(line) => {
+                    self.comfy_log.push(line);
+                    if self.comfy_log.len() > 500 {
+                        self.comfy_log.remove(0);
+                    }
+                }
+                Msg::ComfyExited(code) => {
+                    self.comfy_pid = None;
+                    self.comfy_log.push(format!("[ComfyUI 已退出，退出码: {:?}]", code));
+                }
+                Msg::ComfyStarted(pid) => self.comfy_pid = Some(pid),
+                Msg::ComfyInstallOutput(line) => {
+                    self.comfy_install_log.push_str(&line);
+                    self.comfy_install_log.push('\n');
+                    if self.comfy_install_log.len() > 20000 {
+                        self.comfy_install_log = self.comfy_install_log.split_off(self.comfy_install_log.len() - 15000);
+                    }
+                }
+                Msg::ComfyInstallDone(result) => {
+                    self.comfy_installing = false;
+                    match result {
+                        Ok(()) => self.comfy_install_log.push_str("\n[安装完成]"),
+                        Err(e) => self.comfy_install_log.push_str(&format!("\n[安装失败: {}]", e)),
+                    }
+                }
             }
         }
 
@@ -2599,6 +2701,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.tab, Tab::Workflow, "📋 工作流");
                 ui.selectable_value(&mut self.tab, Tab::Library, "📁 模型库");
                 ui.selectable_value(&mut self.tab, Tab::Downloads, "⬇ 下载");
+                ui.selectable_value(&mut self.tab, Tab::ComfyUI, "🚀 ComfyUI");
                 ui.selectable_value(&mut self.tab, Tab::Settings, "⚙ 设置");
             });
         });
@@ -2715,6 +2818,7 @@ impl eframe::App for App {
             Tab::Workflow => self.ui_workflow(ui),
             Tab::Library => self.ui_library(ui),
             Tab::Downloads => self.ui_downloads(ui),
+            Tab::ComfyUI => self.ui_comfy(ui),
             Tab::Settings => self.ui_settings(ui),
         });
 
@@ -3411,6 +3515,281 @@ impl App {
         });
         ui.weak(egui::RichText::new(format!("配置文件: {}", config_path().display())).size(11.5));
             });
+    }
+
+    // ============ ComfyUI 管理页 ============
+    fn ui_comfy(&mut self, ui: &mut egui::Ui) {
+        ui.heading("ComfyUI 管理");
+        ui.add_space(8.0);
+
+        // 系统画像
+        egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+            ui.strong("系统配置");
+            if let Some(ref p) = self.profile {
+                ui.horizontal(|ui| {
+                    ui.label(format!("系统: {} {}", p.os_name, p.os_arch));
+                    ui.label(format!("CPU: {}", p.cpu));
+                    ui.label(format!("内存: {} GB", p.ram_mb / 1024));
+                });
+                if let Some(ref gpu) = p.gpu {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("GPU: {} · VRAM {} MB · 驱动 {}", gpu.name, gpu.vram_mb, gpu.driver_version));
+                        if let Some(ref cuda) = p.cuda_version {
+                            ui.label(format!("CUDA {}", cuda));
+                        }
+                    });
+                    ui.label(format!("模型档位建议: {}", sys_info::vram_tier(gpu.vram_mb)));
+                } else {
+                    ui.colored_label(C_YELLOW, "未检测到 NVIDIA GPU，视频生成可能无法使用");
+                }
+                ui.horizontal(|ui| {
+                    ui.label(format!("Python: {}", p.python_version.as_deref().unwrap_or("未安装")));
+                    ui.label(format!("Git: {}", p.git_version.as_deref().unwrap_or("未安装")));
+                });
+                if !p.comfy_installs.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.weak("已发现 ComfyUI:");
+                        for path in &p.comfy_installs {
+                            ui.weak(path.to_string_lossy().to_string());
+                        }
+                    });
+                }
+            } else if !self.profile_err.is_empty() {
+                ui.colored_label(C_RED, &self.profile_err);
+            } else {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.weak("正在检测系统配置…");
+                });
+            }
+            if ui.button("刷新检测").clicked() {
+                let tx = self.tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::ComfyProfile(Ok(sys_info::detect())));
+                });
+            }
+        });
+
+        ui.add_space(12.0);
+
+        // 安装目录与参数
+        ui.horizontal(|ui| {
+            ui.label("ComfyUI 目录:");
+            ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_root).desired_width(360.0));
+            if ui.button("浏览…").clicked() {
+                if let Some(p) = rfd::FileDialog::new().set_title("选择 ComfyUI 目录").pick_folder() {
+                    self.cfg.comfy_root = p.display().to_string();
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("启动参数:");
+            ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_args).desired_width(400.0).hint_text("--lowvram --listen"));
+            ui.weak("例: --lowvram --normalvram --listen --port 8188");
+        });
+
+        let installed = Path::new(&self.cfg.comfy_root).join("main.py").is_file();
+        ui.add_space(12.0);
+
+        if !installed {
+            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+                ui.strong("一键安装");
+                ui.weak("将自动执行: git clone → 创建 venv → 安装 PyTorch(cu130) → 安装依赖 → 安装 ComfyUI-Manager");
+                if self.comfy_installing {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.weak("安装中…");
+                    });
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                        ui.monospace(&self.comfy_install_log);
+                    });
+                } else if ui.add(accent_btn("开始安装 ComfyUI")).clicked() {
+                    self.do_comfy_install();
+                }
+            });
+        } else {
+            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+                ui.strong("运行控制");
+                ui.horizontal(|ui| {
+                    if self.comfy_pid.is_some() {
+                        if ui.add(egui::Button::new("停止 ComfyUI").fill(C_RED)).clicked() {
+                            self.do_comfy_stop();
+                        }
+                    } else {
+                        if ui.add(accent_btn("启动 ComfyUI")).clicked() {
+                            self.do_comfy_start();
+                        }
+                    }
+                    if ui.button("在浏览器打开").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&self.cfg.comfy_url));
+                    }
+                });
+            });
+
+            ui.add_space(8.0);
+            ui.strong("运行日志");
+            egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26)).rounding(8.0).inner_margin(8.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(300.0).stick_to_bottom(true).show(ui, |ui| {
+                    if self.comfy_log.is_empty() {
+                        ui.weak("日志为空");
+                    } else {
+                        for line in &self.comfy_log {
+                            ui.monospace(line);
+                        }
+                    }
+                });
+            });
+        }
+    }
+
+    fn do_comfy_install(&mut self) {
+        if self.comfy_installing {
+            return;
+        }
+        self.comfy_installing = true;
+        self.comfy_install_log.clear();
+        let dir = self.cfg.comfy_root.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let send = |s: &str| {
+                let _ = tx.send(Msg::ComfyInstallOutput(s.to_string()));
+            };
+            let done = |r: Result<(), String>| {
+                let _ = tx.send(Msg::ComfyInstallDone(r));
+            };
+
+            if !Path::new(&dir).join("main.py").exists() {
+                send("[1/5] 克隆 ComfyUI ...");
+                let mut cmd = std::process::Command::new("git");
+                cmd.args(["clone", "https://github.com/comfyanonymous/ComfyUI.git", &dir]);
+                if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                    done(Err(e));
+                    return;
+                }
+            } else {
+                send("ComfyUI 目录已存在，跳过克隆");
+            }
+
+            send("[2/5] 创建虚拟环境 ...");
+            let mut cmd = std::process::Command::new("python");
+            cmd.args(["-m", "venv", &format!("{}/venv", dir)]);
+            if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                done(Err(e));
+                return;
+            }
+
+            let python = format!("{}\\venv\\Scripts\\python.exe", dir);
+            send("[3/5] 升级 pip 并安装 PyTorch cu130 ...");
+            let mut cmd = std::process::Command::new(&python);
+            cmd.args(["-m", "pip", "install", "--upgrade", "pip"]);
+            if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                done(Err(e));
+                return;
+            }
+            let mut cmd = std::process::Command::new(&python);
+            cmd.args([
+                "-m", "pip", "install", "torch", "torchvision", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cu130",
+            ]);
+            if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                done(Err(e));
+                return;
+            }
+
+            send("[4/5] 安装 ComfyUI 依赖 ...");
+            let mut cmd = std::process::Command::new(&python);
+            cmd.args(["-m", "pip", "install", "-r", &format!("{}/requirements.txt", dir)]);
+            cmd.current_dir(&dir);
+            if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                done(Err(e));
+                return;
+            }
+
+            send("[5/5] 安装 ComfyUI-Manager ...");
+            let manager_dir = format!("{}/custom_nodes/ComfyUI-Manager", dir);
+            if !Path::new(&manager_dir).join("__init__.py").exists() {
+                let mut cmd = std::process::Command::new("git");
+                cmd.args(["clone", "https://github.com/ltdrdata/ComfyUI-Manager.git", &manager_dir]);
+                if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                    done(Err(e));
+                    return;
+                }
+            } else {
+                send("ComfyUI-Manager 已存在，跳过");
+            }
+
+            send("验证 PyTorch ...");
+            let mut cmd = std::process::Command::new(&python);
+            cmd.args([
+                "-c",
+                "import torch; print(torch.__version__); print('CUDA可用:', torch.cuda.is_available())",
+            ]);
+            if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                done(Err(e));
+                return;
+            }
+            done(Ok(()));
+        });
+    }
+
+    fn do_comfy_start(&mut self) {
+        if self.comfy_pid.is_some() {
+            return;
+        }
+        let dir = self.cfg.comfy_root.clone();
+        let args = self.cfg.comfy_args.clone();
+        let tx = self.tx.clone();
+        self.comfy_log.clear();
+        std::thread::spawn(move || {
+            let python = format!("{}\\venv\\Scripts\\python.exe", dir);
+            let mut cmd = std::process::Command::new(&python);
+            cmd.arg(format!("{}\\main.py", dir)).current_dir(&dir);
+            for a in args.split_whitespace() {
+                cmd.arg(a);
+            }
+            cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+            match cmd.spawn() {
+                Ok(mut child) => {
+                    let pid = child.id();
+                    let _ = tx.send(Msg::ComfyStarted(pid));
+                    let _ = tx.send(Msg::ComfyOutput(format!("[启动 PID: {}]", pid)));
+                    if let Some(stdout) = child.stdout.take() {
+                        let tx = tx.clone();
+                        std::thread::spawn(move || {
+                            use std::io::{BufRead, BufReader};
+                            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                                let _ = tx.send(Msg::ComfyOutput(line));
+                            }
+                        });
+                    }
+                    if let Some(stderr) = child.stderr.take() {
+                        let tx = tx.clone();
+                        std::thread::spawn(move || {
+                            use std::io::{BufRead, BufReader};
+                            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                                let _ = tx.send(Msg::ComfyOutput(format!("[stderr] {}", line)));
+                            }
+                        });
+                    }
+                    let code = child.wait().ok().and_then(|s| s.code());
+                    let _ = tx.send(Msg::ComfyExited(code));
+                }
+                Err(e) => {
+                    let _ = tx.send(Msg::ComfyOutput(format!("[启动失败: {}]", e)));
+                    let _ = tx.send(Msg::ComfyExited(None));
+                }
+            }
+        });
+    }
+
+    fn do_comfy_stop(&mut self) {
+        if let Some(pid) = self.comfy_pid {
+            self.comfy_log.push(format!("[正在停止 PID {}]", pid));
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .output();
+            self.comfy_pid = None;
+        }
     }
 
     // ============ 下载队列完整管理页 ============
@@ -4393,6 +4772,7 @@ mod tests {
             proxy_url: None,
             tray_minimize: true,
             notify_on_complete: true,
+            comfy_args: String::new(),
         }
     }
 
