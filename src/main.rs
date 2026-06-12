@@ -106,6 +106,9 @@ fn status_chip(ui: &mut egui::Ui, status: &str) {
 fn default_comfy_url() -> String {
     "http://127.0.0.1:8188".into()
 }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
@@ -116,6 +119,15 @@ struct Config {
     // serde(default)：老 config.json 没有此字段也能正常反序列化，不会回退默认丢失 token
     #[serde(default = "default_comfy_url")]
     comfy_url: String,
+    // 显式代理地址，优先于系统代理环境变量；例：http://127.0.0.1:7890
+    #[serde(default)]
+    proxy_url: Option<String>,
+    // 关闭窗口时最小化到系统托盘（而非退出），后台继续下载
+    #[serde(default = "default_true")]
+    tray_minimize: bool,
+    // 下载完成/失败时弹出系统通知
+    #[serde(default = "default_true")]
+    notify_on_complete: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -125,6 +137,9 @@ impl Default for Config {
             hf_mirror: true,
             max_concurrent: 2,
             comfy_url: default_comfy_url(),
+            proxy_url: None,
+            tray_minimize: true,
+            notify_on_complete: true,
         }
     }
 }
@@ -348,10 +363,12 @@ struct Resolved {
     download_url: String,
     versions: Vec<VerInfo>,
     version_id: i64,
+    model_id: i64,
     sha256: String,
     desc: String,
 }
 
+#[derive(Clone)]
 #[allow(dead_code)]
 struct Task {
     id: u64,
@@ -367,6 +384,14 @@ struct Task {
     source: String,
     expected_sha256: Option<String>,
     verified: bool,
+    // 下载状态扩展字段
+    started_at: Option<Instant>,
+    completed_at: Option<Instant>,
+    local_path: Option<PathBuf>,
+    // 模型简介（Civitai 来源通常有，HF 无）
+    desc: String,
+    // 是否已发送过完成/失败通知（避免重复弹窗）
+    notified: bool,
 }
 type TaskRef = Arc<Mutex<Task>>;
 
@@ -379,6 +404,9 @@ struct PersistTask {
     source: String,
     size_kb: f64,
     sha256: Option<String>,
+    // serde(default)：老 tasks.json 没有此字段也能正常反序列化
+    #[serde(default)]
+    desc: String,
 }
 
 fn tasks_path() -> PathBuf {
@@ -401,21 +429,128 @@ fn load_tasks_from(p: &Path) -> Vec<PersistTask> {
         .unwrap_or_default()
 }
 
+// 本地模型索引：记录下载过的模型元数据，用于工作流缺失项直接补齐
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ModelRecord {
+    filename: String,
+    subdir: String,
+    source: String,
+    download_url: String,
+    sha256: Option<String>,
+    desc: String,
+    model_id: Option<String>,
+    version_id: Option<String>,
+    size_kb: f64,
+    downloaded_at: Option<String>, // ISO 8601 简单字符串
+}
+
+fn models_path() -> PathBuf {
+    config_path().with_file_name("models.json")
+}
+
+fn load_models_index(p: &Path) -> Vec<ModelRecord> {
+    fs::read_to_string(p)
+        .ok()
+        .and_then(|s| serde_json::from_str(s.trim_start_matches('\u{feff}')).ok())
+        .unwrap_or_default()
+}
+
+fn save_models_index(p: &Path, list: &[ModelRecord]) {
+    if let Ok(s) = serde_json::to_string_pretty(list) {
+        if let Some(dir) = p.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let _ = fs::write(p, s);
+    }
+}
+
+// 用 filename+subdir 作唯一键，已存在则更新，不存在则追加
+fn upsert_model_record(list: &mut Vec<ModelRecord>, rec: ModelRecord) {
+    let key = format!("{}|{}", rec.filename, rec.subdir);
+    if let Some(pos) = list.iter().position(|r| format!("{}|{}", r.filename, r.subdir) == key) {
+        list[pos] = rec;
+    } else {
+        list.push(rec);
+    }
+}
+
+fn now_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default()
+}
+
+// 从已完成的任务写入/更新 models.json
+fn record_task_to_index(t: &Task) {
+    if t.status != "完成" && t.status != "已存在" {
+        return;
+    }
+    let mut list = load_models_index(&models_path());
+    let rec = ModelRecord {
+        filename: t.filename.clone(),
+        subdir: t.subdir.clone(),
+        source: t.source.clone(),
+        download_url: t.download_url.clone(),
+        sha256: t.expected_sha256.clone().filter(|s| !s.is_empty()),
+        desc: t.desc.clone(),
+        model_id: None,
+        version_id: None,
+        size_kb: (t.total as f64 / 1024.0).max(0.0),
+        downloaded_at: Some(now_iso()),
+    };
+    upsert_model_record(&mut list, rec);
+    save_models_index(&models_path(), &list);
+}
+
+// 从链接解析结果写入/更新 models.json
+fn record_resolved_to_index(r: &Resolved) {
+    let mut list = load_models_index(&models_path());
+    let rec = ModelRecord {
+        filename: r.filename.clone(),
+        subdir: r.subdir.clone(),
+        source: r.source.clone(),
+        download_url: r.download_url.clone(),
+        sha256: Some(r.sha256.clone()).filter(|s| !s.is_empty()),
+        desc: r.desc.clone(),
+        model_id: Some(r.model_id.to_string()).filter(|_| r.model_id > 0),
+        version_id: Some(r.version_id.to_string()).filter(|_| r.version_id > 0),
+        size_kb: r.size_kb,
+        downloaded_at: None,
+    };
+    upsert_model_record(&mut list, rec);
+    save_models_index(&models_path(), &list);
+}
+
 // ============ 网络 ============
-fn agent() -> ureq::Agent {
+fn agent(cfg: &Config) -> ureq::Agent {
     let mut b = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(20))
         // 读超时：连接僵死时让 read 出错返回，否则任务永久卡死且占住并发槽
         .timeout_read(Duration::from_secs(30))
         .user_agent("ComfyToolbox/1.0");
-    // 尊重系统代理环境变量（ureq 默认不读）：Clash 仅系统代理模式、或 TUN 对 rustls
-    // 指纹不友好的节点下，走本地代理端口仍可联网
-    for key in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
-        if let Ok(v) = std::env::var(key) {
-            if !v.is_empty() {
-                if let Ok(p) = ureq::Proxy::new(&v) {
-                    b = b.proxy(p);
-                    break;
+    // 配置里的显式代理优先（用户可在设置页填写），其次才读系统代理环境变量
+    let mut proxy_set = false;
+    if let Some(ref url) = cfg.proxy_url {
+        let url = url.trim();
+        if !url.is_empty() {
+            if let Ok(p) = ureq::Proxy::new(url) {
+                b = b.proxy(p);
+                proxy_set = true;
+            }
+        }
+    }
+    if !proxy_set {
+        // 尊重系统代理环境变量（ureq 默认不读）：Clash 仅系统代理模式、或 TUN 对 rustls
+        // 指纹不友好的节点下，走本地代理端口仍可联网
+        for key in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+            if let Ok(v) = std::env::var(key) {
+                if !v.is_empty() {
+                    if let Ok(p) = ureq::Proxy::new(&v) {
+                        b = b.proxy(p);
+                        break;
+                    }
                 }
             }
         }
@@ -457,7 +592,7 @@ fn civitai_search(cfg: &Config, query: &str, types: &str, base: &str) -> Result<
 
 // 拉取一页搜索结果；nextPage 是 Civitai 在 metadata 里给的完整下一页 URL（游标分页）
 fn civitai_fetch_page(cfg: &Config, url: &str) -> Result<(Vec<SearchItem>, Option<String>), String> {
-    let mut req = agent().get(url);
+    let mut req = agent(cfg).get(url);
     if !cfg.civitai_token.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
     }
@@ -517,7 +652,7 @@ fn resolve_url(cfg: &Config, url: &str) -> Result<Resolved, String> {
 fn resolve_civitai_model(cfg: &Config, mid: &str, want_ver: Option<String>) -> Result<Resolved, String> {
     {
         let api = format!("https://civitai.com/api/v1/models/{}", mid);
-        let mut req = agent().get(&api);
+        let mut req = agent(cfg).get(&api);
         if !cfg.civitai_token.is_empty() {
             req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
         }
@@ -575,6 +710,7 @@ fn resolve_civitai_model(cfg: &Config, mid: &str, want_ver: Option<String>) -> R
             download_url: format!("https://civitai.com/api/download/models/{}", version_id),
             versions,
             version_id,
+            model_id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
             sha256: file
                 .get("hashes")
                 .and_then(|h| h.get("SHA256"))
@@ -608,6 +744,7 @@ fn resolve_url_rest(cfg: &Config, url: &str) -> Result<Resolved, String> {
             download_url: format!("{}/{}/resolve/{}/{}", hf_base(cfg), repo, branch, path),
             versions: Vec::new(),
             version_id: 0,
+            model_id: 0,
             sha256: hf_sha256(cfg, &repo, &branch, &percent_decode(&path)).unwrap_or_default(),
             desc: String::new(),
         });
@@ -700,7 +837,7 @@ fn collect_media_refs(v: &Value, out: &mut Vec<MediaRef>) {
 // 按版本号解析（帖子页只有裸 versionId）：/api/v1/model-versions/{id} → Resolved
 fn resolve_civitai_version(cfg: &Config, vid: &str) -> Result<Resolved, String> {
     let api = format!("https://civitai.com/api/v1/model-versions/{}", vid);
-    let mut req = agent().get(&api);
+    let mut req = agent(cfg).get(&api);
     if !cfg.civitai_token.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
     }
@@ -713,7 +850,7 @@ fn resolve_civitai_version(cfg: &Config, vid: &str) -> Result<Resolved, String> 
 // 解析 Civitai 作品页（图片/视频/帖子）：抓页面 → 解析 __NEXT_DATA__ 资源 → 逐个经 API 解析。
 // 每次粘贴只抓一页，等同浏览器访问一次，不做批量爬取
 fn resolve_media_page(cfg: &Config, url: &str) -> Result<Vec<Resolved>, String> {
-    let body = agent().get(url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let body = agent(cfg).get(url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
     let refs = extract_media_resources(&body);
     if refs.is_empty() {
         return Err("未在该作品页找到模型资源（作品可能隐藏了生成信息，或该页面需要登录查看）".into());
@@ -754,10 +891,12 @@ fn urlencode(s: &str) -> String {
 }
 
 // ============ 下载 ============
+#[derive(Clone)]
 struct DlMeta {
     download_url: String,
     source: String,
     expected_sha256: Option<String>,
+    desc: String,
 }
 
 fn hex_str(b: &[u8]) -> String {
@@ -773,7 +912,7 @@ fn hf_sha256(cfg: &Config, repo: &str, branch: &str, path: &str) -> Option<Strin
     } else {
         format!("{}/api/models/{}/tree/{}/{}", hf_base(cfg), repo, branch, parent)
     };
-    let body = agent().get(&url).call().ok()?.into_string().ok()?;
+    let body = agent(cfg).get(&url).call().ok()?.into_string().ok()?;
     let v: Value = serde_json::from_str(&body).ok()?;
     v.as_array()?
         .iter()
@@ -820,6 +959,11 @@ fn start_task(cfg: Config, downloads: Arc<Mutex<Vec<TaskRef>>>, filename: String
         source: meta.source.clone(),
         expected_sha256: meta.expected_sha256.clone().filter(|s| !s.is_empty()),
         verified: false,
+        started_at: None,
+        completed_at: None,
+        local_path: None,
+        desc: meta.desc.clone(),
+        notified: false,
     }));
     downloads.lock().unwrap().push(task.clone());
     std::thread::spawn(move || {
@@ -908,6 +1052,12 @@ fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, met
         t.status = "已存在".into();
         t.downloaded = sz;
         t.total = sz;
+        t.local_path = Some(dest.clone());
+        t.completed_at = Some(Instant::now());
+        let (source, url, desc, sha) = (t.source.clone(), t.download_url.clone(), t.desc.clone(), t.expected_sha256.clone());
+        drop(t);
+        write_info_sidecar(&dest, &source, &url, &desc, sha.as_deref());
+        record_task_to_index(&task.lock().unwrap());
         return Ok(());
     }
     let mut existing = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
@@ -917,7 +1067,14 @@ fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, met
     let mut hasher = expected.as_ref().map(|_| Sha256::new());
     if existing > 0 {
         if let Some(h) = hasher.as_mut() {
-            task.lock().unwrap().status = "下载中".into();
+            {
+        let mut t = task.lock().unwrap();
+        t.status = "下载中".into();
+        if t.started_at.is_none() {
+            t.started_at = Some(Instant::now());
+        }
+        t.local_path = Some(dest.clone());
+    }
             let mut pf = fs::File::open(&part).map_err(|e| e.to_string())?;
             let mut hb = vec![0u8; 1024 * 1024];
             loop {
@@ -933,7 +1090,7 @@ fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, met
             }
         }
     }
-    let mut req = agent().get(&meta.download_url);
+    let mut req = agent(cfg).get(&meta.download_url);
     if meta.source == "civitai" && !cfg.civitai_token.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
     }
@@ -965,6 +1122,12 @@ fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, met
                 t.downloaded = existing;
                 t.total = existing;
                 t.verified = expected.is_some();
+                t.local_path = Some(dest.clone());
+                t.completed_at = Some(Instant::now());
+                let (source, url, desc, sha) = (t.source.clone(), t.download_url.clone(), t.desc.clone(), t.expected_sha256.clone());
+                drop(t);
+                write_info_sidecar(&dest, &source, &url, &desc, sha.as_deref());
+                record_task_to_index(&task.lock().unwrap());
                 return Ok(());
             }
             let _ = fs::remove_file(&part);
@@ -1047,6 +1210,12 @@ fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, met
         t.total = downloaded;
     }
     t.downloaded = downloaded;
+    t.local_path = Some(dest.clone());
+    t.completed_at = Some(Instant::now());
+    let (source, url, desc, sha) = (t.source.clone(), t.download_url.clone(), t.desc.clone(), t.expected_sha256.clone());
+    drop(t);
+    write_info_sidecar(&dest, &source, &url, &desc, sha.as_deref());
+    record_task_to_index(&task.lock().unwrap());
     Ok(())
 }
 
@@ -1065,7 +1234,7 @@ const MODEL_EXTS: [&str; 7] = [".safetensors", ".gguf", ".ckpt", ".pt", ".pth", 
 enum Ident {
     Unknown,
     Working,
-    Found { model_name: String, version_name: String, model_type: String, model_id: i64 },
+    Found { model_name: String, version_name: String, version_id: i64, model_type: String, model_id: i64, base: String },
     NotFound, // 哈希算出但 Civitai 无记录（本地训练/HF 来源）
     Failed(String),
 }
@@ -1083,6 +1252,13 @@ struct LibFile {
 struct LibDir {
     key: String, // 逻辑目录名 models/loras
     files: Vec<LibFile>,
+}
+
+// 模型更新检测结果缓存
+#[derive(Clone)]
+struct UpdateInfo {
+    latest_vid: i64,
+    latest_name: String,
 }
 
 // 模型可能的伴随文件（预览图 + sidecar 元数据），删除模型时一并清理
@@ -1464,7 +1640,7 @@ fn identify_one(cfg: &Config, path: &Path) -> Ident {
 // Civitai by-hash 反查：本地模型 → 是什么模型/哪个版本
 fn civitai_by_hash(cfg: &Config, sha256: &str) -> Ident {
     let url = format!("https://civitai.com/api/v1/model-versions/by-hash/{}", sha256);
-    let mut req = agent().get(&url);
+    let mut req = agent(cfg).get(&url);
     if !cfg.civitai_token.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
     }
@@ -1484,8 +1660,10 @@ fn civitai_by_hash(cfg: &Config, sha256: &str) -> Ident {
                 Some(mid) => Ident::Found {
                     model_name: v.get("model").and_then(|m| m.get("name")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     version_name: v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    version_id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
                     model_type: v.get("model").and_then(|m| m.get("type")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
                     model_id: mid,
+                    base: v.get("baseModel").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                 },
                 None => Ident::NotFound,
             }
@@ -1495,13 +1673,119 @@ fn civitai_by_hash(cfg: &Config, sha256: &str) -> Ident {
     }
 }
 
+// 将 ISO 8601/RFC 3339 时间字符串统一为可比较形式（补齐毫秒位）
+fn normalize_date(s: &str) -> String {
+    let Some(prefix) = s.strip_suffix('Z') else {
+        return s.to_string();
+    };
+    if let Some((base, frac)) = prefix.split_once('.') {
+        let mut frac = frac.to_string();
+        while frac.len() < 3 {
+            frac.push('0');
+        }
+        if frac.len() > 3 {
+            frac.truncate(3);
+        }
+        format!("{}.{}{}", base, frac, 'Z')
+    } else {
+        format!("{}.000Z", prefix)
+    }
+}
+
+fn ver_name(ver: &Value) -> &str {
+    ver.get("name").and_then(|x| x.as_str()).unwrap_or("")
+}
+fn ver_base(ver: &Value) -> &str {
+    ver.get("baseModel").and_then(|x| x.as_str()).unwrap_or("")
+}
+
+// 查询 Civitai 模型最新版本：在当前版本同基模/同变体的版本里，按 createdAt 找最新。
+// 若当前版本已不在列表中，则按当前基模筛选后取最新。
+fn civitai_model_latest_version(cfg: &Config, model_id: i64, current_vid: i64, current_base: &str) -> Result<(i64, String, String), String> {
+    let url = format!("https://civitai.com/api/v1/models/{}", model_id);
+    let mut req = agent(cfg).get(&url);
+    if !cfg.civitai_token.is_empty() {
+        req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
+    }
+    let body = req.call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let versions = v
+        .get("modelVersions")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .ok_or("该模型无版本信息")?;
+    if versions.is_empty() {
+        return Err("该模型无版本信息".into());
+    }
+
+    let ver_id = |ver: &Value| ver.get("id").and_then(|x| x.as_i64()).unwrap_or(0);
+    let ver_date = |ver: &Value| ver.get("createdAt").and_then(|x| x.as_str()).map(normalize_date);
+
+    let current = versions.iter().find(|ver| ver_id(ver) == current_vid);
+
+    if let Some(cur) = current {
+        let cur_date = ver_date(cur);
+        let cur_base = ver_base(cur);
+
+        let mut best: Option<&Value> = None;
+        let mut best_date: Option<String> = None;
+        for ver in &versions {
+            let vid = ver_id(ver);
+            if vid == 0 || vid == current_vid {
+                continue;
+            }
+            let Some(d) = ver_date(ver) else { continue };
+            if let Some(ref cd) = cur_date {
+                if d <= *cd {
+                    continue;
+                }
+            }
+            if !cur_base.is_empty() && ver_base(ver) != cur_base {
+                continue;
+            }
+            if best_date.as_ref().map(|bd| d > *bd).unwrap_or(true) {
+                best = Some(ver);
+                best_date = Some(d);
+            }
+        }
+        if let Some(ver) = best {
+            let vid = ver_id(ver);
+            return Ok((vid, ver_name(ver).to_string(), format!("https://civitai.com/api/download/models/{}", vid)));
+        }
+        // 当前变体已是最新，把当前版本作为“最新”返回，让 UI 显示“已是最新”
+        let vid = ver_id(cur);
+        return Ok((vid, ver_name(cur).to_string(), format!("https://civitai.com/api/download/models/{}", vid)));
+    }
+
+    // 当前版本已不在 Civitai 列表中：优先按当前基模筛选，再按发布时间取最新
+    let mut best: Option<&Value> = None;
+    let mut best_date: Option<String> = None;
+    for ver in &versions {
+        let vid = ver_id(ver);
+        if vid == 0 {
+            continue;
+        }
+        if !current_base.is_empty() && ver_base(ver) != current_base {
+            continue;
+        }
+        let Some(d) = ver_date(ver) else { continue };
+        if best_date.as_ref().map(|bd| d > *bd).unwrap_or(true) {
+            best = Some(ver);
+            best_date = Some(d);
+        }
+    }
+    let ver = best.ok_or("该模型无有效版本")?;
+    let vid = ver_id(ver);
+    Ok((vid, ver_name(ver).to_string(), format!("https://civitai.com/api/download/models/{}", vid)))
+}
+
 // ============ 工作流缺失模型分析 ============
 struct WfModel {
     name: String,
     dir: String,
     found_at: String,        // 本地路径，空 = 本地缺失
     in_comfy: bool,          // 运行中的 ComfyUI 实例能看到（即便本地扫描没扫到）
-    dl: Option<(String, String)>, // (下载url, 子目录) 来自预设已知文件表，可一键补齐
+    dl: Option<DlMeta>,      // 本地缺失时，若知道精确下载源，可一键补齐
 }
 
 fn is_model_filename(s: &str) -> bool {
@@ -1672,14 +1956,22 @@ fn analyze_workflow(cfg: &Config, text: &str) -> Result<Vec<WfModel>, String> {
     let root = expand_root(&cfg.comfy_root);
     let index = build_library_index(&root);
     let preset_idx = preset_file_index(cfg);
+    let models_idx = models_index_lookup();
     let mut models: Vec<WfModel> = cand
         .into_iter()
         .map(|(name, dir)| {
             let found_at = find_model_file(&root, &index, dir, &name).unwrap_or_default();
             let dir = if dir.is_empty() { type_dir(guess_type(&name)).to_string() } else { dir.to_string() };
-            // 本地缺失时，从预设已知文件表查精确下载源（覆盖 Wan/Flux 等 HF-only 组件）
+            // 本地缺失时，先查本地 models.json 索引，再查预设已知文件表
             let base = name.replace('\\', "/").rsplit('/').next().unwrap_or(&name).to_lowercase();
-            let dl = if found_at.is_empty() { preset_idx.get(&base).cloned() } else { None };
+            let dl = if found_at.is_empty() {
+                models_idx
+                    .get(&base)
+                    .cloned()
+                    .or_else(|| preset_idx.get(&base).cloned())
+            } else {
+                None
+            };
             WfModel { name, dir, found_at, in_comfy: false, dl }
         })
         .collect();
@@ -1700,12 +1992,37 @@ fn analyze_workflow(cfg: &Config, text: &str) -> Result<Vec<WfModel>, String> {
     Ok(models)
 }
 
-// 预设套餐里所有文件的 文件名(小写) → (下载url, 子目录) 索引，用于工作流缺失模型一键补齐
-fn preset_file_index(cfg: &Config) -> std::collections::HashMap<String, (String, String)> {
+// 本地 models.json 索引：文件名(小写) → DlMeta，用于工作流缺失模型一键补齐
+fn models_index_lookup() -> std::collections::HashMap<String, DlMeta> {
+    let mut idx: std::collections::HashMap<String, DlMeta> = std::collections::HashMap::new();
+    for r in load_models_index(&models_path()) {
+        let base = r.filename.to_lowercase();
+        let meta = DlMeta {
+            download_url: r.download_url,
+            source: r.source,
+            expected_sha256: r.sha256,
+            desc: r.desc,
+        };
+        // 同名文件优先保留有 SHA256 的记录；否则后覆盖先
+        if let Some(existing) = idx.get(&base) {
+            if existing.expected_sha256.is_some() {
+                continue;
+            }
+        }
+        idx.insert(base, meta);
+    }
+    idx
+}
+
+// 预设套餐里所有文件的 文件名(小写) → DlMeta 索引，用于工作流缺失模型一键补齐
+fn preset_file_index(cfg: &Config) -> std::collections::HashMap<String, DlMeta> {
     let mut idx = std::collections::HashMap::new();
     for (_k, _title, files) in presets(cfg) {
-        for (url, name, sub) in files {
-            idx.insert(name.to_lowercase(), (url, sub));
+        for (url, name, _sub) in files {
+            idx.insert(
+                name.to_lowercase(),
+                DlMeta { download_url: url, source: "hf".into(), expected_sha256: None, desc: String::new() },
+            );
         }
     }
     idx
@@ -1758,6 +2075,8 @@ enum Msg {
     Identify { path: PathBuf, ident: Ident },
     Workflow(Result<Vec<WfModel>, String>),
     ComfyStatus(Result<String, String>),
+    // model_id → 最新版本查询结果
+    UpdateCheck { model_id: i64, result: Result<UpdateInfo, String> },
 }
 
 // ============ egui 应用 ============
@@ -1768,7 +2087,17 @@ enum Tab {
     Preset,
     Workflow,
     Library,
+    Downloads,
     Settings,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum DownloadsFilter {
+    All,
+    Active,      // 下载中 / 排队中 / 重试等待
+    Failed,
+    Completed,   // 完成 / 已存在
+    Paused,
 }
 
 struct App {
@@ -1798,6 +2127,8 @@ struct App {
     lib_scanned: bool,
     lib_filter: String,
     delete_confirm: Option<PathBuf>,
+    lib_updates: std::collections::HashMap<i64, Result<UpdateInfo, String>>,
+    lib_checking_updates: std::collections::HashSet<i64>,
     // 工作流分析
     wf_input: String,
     wf_models: Vec<WfModel>,
@@ -1813,10 +2144,18 @@ struct App {
     last_tasks_fp: String,
     single_instance: bool,
     _instance_lock: Option<fs::File>,
+    dl_filter: DownloadsFilter,
+    dl_sort_newest_first: bool,
+    dl_detail: Option<u64>, // 当前打开详情弹窗的任务 id
+    // 托盘图标必须存活，否则会立即从任务栏消失
+    #[allow(dead_code)]
+    tray: Option<tray_icon::TrayIcon>,
+    tray_initialized: bool,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        store_main_hwnd(cc);
         let cjk_font_ok = install_cjk_font(&cc.egui_ctx);
         setup_style(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -1841,7 +2180,7 @@ impl App {
                     downloads.clone(),
                     pt.filename,
                     pt.subdir,
-                    DlMeta { download_url: pt.download_url, source: pt.source, expected_sha256: pt.sha256 },
+                    DlMeta { download_url: pt.download_url, source: pt.source, expected_sha256: pt.sha256, desc: pt.desc },
                     pt.size_kb,
                 );
             }
@@ -1884,6 +2223,8 @@ impl App {
             lib_scanned: false,
             lib_filter: String::new(),
             delete_confirm: None,
+            lib_updates: std::collections::HashMap::new(),
+            lib_checking_updates: std::collections::HashSet::new(),
             wf_input: String::new(),
             wf_models: Vec::new(),
             wf_err: String::new(),
@@ -1897,6 +2238,11 @@ impl App {
             last_tasks_fp: "<init>".into(),
             single_instance,
             _instance_lock: instance_lock,
+            dl_filter: DownloadsFilter::All,
+            dl_sort_newest_first: true,
+            dl_detail: None,
+            tray: None,
+            tray_initialized: false,
             cfg,
         }
     }
@@ -1926,6 +2272,7 @@ impl App {
                             source: t.source.clone(),
                             size_kb: t.total as f64 / 1024.0,
                             sha256: t.expected_sha256.clone(),
+                            desc: t.desc.clone(),
                         })
                     } else {
                         None
@@ -2076,10 +2423,40 @@ impl App {
         self.sel_version = r.version_id;
         self.pending = Some(r);
     }
+
+    // 检查指定 model_id 在 Civitai 上的最新版本
+    fn do_check_update(&mut self, model_id: i64, current_vid: i64, current_base: String) {
+        if !self.lib_checking_updates.insert(model_id) {
+            return; // 已在检查中
+        }
+        let cfg = self.cfg.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = match civitai_model_latest_version(&cfg, model_id, current_vid, &current_base) {
+                Ok((latest_vid, latest_name, _)) => {
+                    Ok(UpdateInfo { latest_vid, latest_name })
+                }
+                Err(e) => Err(e),
+            };
+            let _ = tx.send(Msg::UpdateCheck { model_id, result });
+        });
+    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 第一帧初始化托盘图标，确保与 winit 事件循环同线程且事件循环已在运行
+        if !self.tray_initialized {
+            self.tray = setup_tray();
+            self.tray_initialized = true;
+        }
+
+        // 关闭窗口时若启用托盘最小化，则隐藏窗口而非退出（托盘菜单的退出强制真正关闭）
+        if ctx.input(|i| i.viewport().close_requested()) && !tray_win::FORCE_EXIT.load(Ordering::Relaxed) && self.cfg.tray_minimize {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+
         // 处理后台消息
         while let Ok(m) = self.rx.try_recv() {
             // busy 只代表搜索/解析/工作流分析这类带 spinner 的操作；Identify/ComfyStatus/Library
@@ -2099,10 +2476,16 @@ impl eframe::App for App {
                 }
                 Msg::Search(Err(e), _) => self.resolve_err = friendly_err(e),
                 Msg::Resolve(r) => match *r {
-                    Ok(r) => self.open_pending(r),
+                    Ok(r) => {
+                        record_resolved_to_index(&r);
+                        self.open_pending(r);
+                    }
                     Err(e) => self.resolve_err = friendly_err(e),
                 },
                 Msg::ResolveSet(Ok(list)) => {
+                    for r in &list {
+                        record_resolved_to_index(r);
+                    }
                     self.pending_set = list.into_iter().map(|r| (r, true)).collect();
                 }
                 Msg::ResolveSet(Err(e)) => self.resolve_err = friendly_err(e),
@@ -2123,11 +2506,39 @@ impl eframe::App for App {
                 Msg::Workflow(Err(e)) => self.wf_err = e,
                 Msg::ComfyStatus(Ok(ver)) => self.comfy_status = format!("已连接 · ComfyUI {}", ver),
                 Msg::ComfyStatus(Err(e)) => self.comfy_status = format!("未连接: {}", e),
+                Msg::UpdateCheck { model_id, result } => {
+                    self.lib_checking_updates.remove(&model_id);
+                    self.lib_updates.insert(model_id, result);
+                }
             }
         }
 
         // 未完成任务集合变化时持久化
         self.persist_if_changed();
+
+        // 系统通知：对刚进入终态且未通知的任务弹一次通知
+        if self.cfg.notify_on_complete {
+            let mut to_notify: Vec<(String, String)> = Vec::new();
+            {
+                let dl = self.downloads.lock().unwrap();
+                for t in dl.iter() {
+                    let mut t = t.lock().unwrap();
+                    if !t.notified {
+                        let (title, body) = match t.status.as_str() {
+                            "完成" | "已存在" => ("下载完成".into(), format!("{} 已下载到 {}", t.filename, t.subdir)),
+                            "失败" => ("下载失败".into(), format!("{}: {}", t.filename, t.error)),
+                            "已取消" => ("下载已取消".into(), t.filename.clone()),
+                            _ => continue,
+                        };
+                        t.notified = true;
+                        to_notify.push((title, body));
+                    }
+                }
+            }
+            for (title, body) in to_notify {
+                notify(&title, &body);
+            }
+        }
 
         // 拖拽 .json 工作流文件进窗口 → 直接分析；非 json 或多文件都给出明确提示
         let dropped: Vec<PathBuf> =
@@ -2186,141 +2597,76 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.tab, Tab::Preset, "📦 套餐");
                 ui.selectable_value(&mut self.tab, Tab::Workflow, "📋 工作流");
                 ui.selectable_value(&mut self.tab, Tab::Library, "📁 模型库");
+                ui.selectable_value(&mut self.tab, Tab::Downloads, "⬇ 下载");
                 ui.selectable_value(&mut self.tab, Tab::Settings, "⚙ 设置");
             });
         });
 
-        // 下载队列
-        let mut remove_id: Option<u64> = None;
+        // 下载队列摘要条（完整管理在「下载」标签页）
         let bottom_frame = egui::Frame::none()
             .fill(C_PANEL)
             .inner_margin(egui::Margin { left: 16.0, right: 16.0, top: 10.0, bottom: 10.0 });
-        let queue_empty = self.downloads.lock().unwrap().is_empty();
-        let mut retry: Option<PersistTask> = None;
         let mut toggle_pause = false;
-        // 空队列时面板收成一行，不挤占主工作区
-        let panel = egui::TopBottomPanel::bottom("downloads").frame(bottom_frame);
-        let panel = if queue_empty {
-            panel.exact_height(40.0)
-        } else {
-            panel.resizable(true).default_height(190.0)
-        };
-        panel.show(ctx, |ui| {
-            if queue_empty {
-                ui.horizontal(|ui| {
-                    ui.strong("下载队列");
-                    ui.weak("暂无任务 — 从搜索 / 链接 / 套餐页添加");
-                });
-                return;
-            }
+        egui::TopBottomPanel::bottom("downloads").frame(bottom_frame).exact_height(46.0).show(ctx, |ui| {
+            let (total, active, failed, done, total_speed, total_remaining) = {
+                let dl = self.downloads.lock().unwrap();
+                let mut active = 0usize;
+                let mut failed = 0usize;
+                let mut done = 0usize;
+                let mut total_speed = 0.0f64;
+                let mut total_remaining = 0u64;
+                for t in dl.iter() {
+                    let t = t.lock().unwrap();
+                    match t.status.as_str() {
+                        "下载中" | "排队中" => {
+                            active += 1;
+                            total_speed += t.speed;
+                            if t.total > t.downloaded {
+                                total_remaining += t.total - t.downloaded;
+                            }
+                        }
+                        s if s.starts_with("重试等待") => active += 1,
+                        "失败" | "已取消" => failed += 1,
+                        "完成" | "已存在" => done += 1,
+                        _ => {}
+                    }
+                }
+                (dl.len(), active, failed, done, total_speed, total_remaining)
+            };
             ui.horizontal(|ui| {
                 ui.strong("下载队列");
-                let (act, total) = {
-                    let dl = self.downloads.lock().unwrap();
-                    let act = dl.iter().filter(|t| {
-                        let s = &t.lock().unwrap().status;
-                        s == "下载中" || s == "排队中" || s.starts_with("重试等待")
-                    }).count();
-                    (act, dl.len())
-                };
-                chip(ui, &format!("{} 进行 / {} 总", act, total), egui::Color32::from_rgb(38, 38, 50), C_GRAY);
+                if total == 0 {
+                    ui.weak("暂无任务");
+                } else {
+                    chip(ui, &format!("{} 进行", active), egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                    if done > 0 {
+                        chip(ui, &format!("{} 完成", done), egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                    }
+                    if failed > 0 {
+                        chip(ui, &format!("{} 失败", failed), egui::Color32::from_rgb(66, 34, 38), C_RED);
+                    }
+                    ui.weak(format!("共 {}", total));
+                    if total_speed > 0.0 {
+                        ui.small(format!("· 总 {}/s", fmt_size(total_speed as u64)));
+                        if let Some(eta) = eta_secs(0, total_remaining, total_speed) {
+                            ui.small(format!("· 预计 {} 完成", fmt_duration(eta)));
+                        }
+                    }
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let paused = PAUSED.load(Ordering::Relaxed);
-                    if ui.small_button(if paused { "全部恢复" } else { "全部暂停" }).clicked() {
+                    if total > 0 && ui.small_button(if paused { "全部恢复" } else { "全部暂停" }).clicked() {
                         toggle_pause = true;
+                    }
+                    if self.tab != Tab::Downloads && ui.small_button("打开下载页").clicked() {
+                        self.tab = Tab::Downloads;
                     }
                     if paused {
                         chip(ui, "已全局暂停", egui::Color32::from_rgb(66, 54, 26), egui::Color32::from_rgb(230, 190, 100));
                     }
                 });
             });
-            ui.add_space(4.0);
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let dl = self.downloads.lock().unwrap();
-                for t in dl.iter().rev() {
-                    let t = t.lock().unwrap();
-                    let frac = if t.total > 0 { (t.downloaded as f32 / t.total as f32).min(1.0) } else { 0.0 };
-                    egui::Frame::none()
-                        .fill(C_CARD)
-                        .rounding(egui::Rounding::same(8.0))
-                        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                status_chip(ui, &t.status);
-                                ui.strong(&t.filename);
-                                ui.weak(&t.subdir);
-                                if t.verified {
-                                    chip(ui, "SHA256 ✓", egui::Color32::from_rgb(26, 56, 40), C_GREEN);
-                                }
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if (t.status == "下载中" || t.status == "排队中" || t.status.starts_with("重试等待"))
-                                        && ui.small_button("取消").clicked()
-                                    {
-                                        t.cancel.store(true, Ordering::Relaxed);
-                                    }
-                                    // 移除失败任务同时把它从 tasks.json 清掉（不再重启重试）
-                                    if (t.status == "失败" || t.status == "已取消" || t.status == "完成" || t.status == "已存在" || t.status == "已暂停")
-                                        && ui.small_button("移除").clicked()
-                                    {
-                                        remove_id = Some(t.id);
-                                    }
-                                    if t.status == "失败" && ui.small_button("重试").clicked() {
-                                        retry = Some(PersistTask {
-                                            filename: t.filename.clone(),
-                                            subdir: t.subdir.clone(),
-                                            download_url: t.download_url.clone(),
-                                            source: t.source.clone(),
-                                            size_kb: t.total as f64 / 1024.0,
-                                            sha256: t.expected_sha256.clone(),
-                                        });
-                                        remove_id = Some(t.id);
-                                    }
-                                });
-                            });
-                            // 进度条颜色跟随状态语义：蓝=进行、绿=成功、红=失败
-                            let bar = egui::ProgressBar::new(frac).desired_height(7.0).rounding(egui::Rounding::same(3.5));
-                            let bar = match t.status.as_str() {
-                                "失败" | "已取消" => bar.fill(egui::Color32::from_rgb(118, 58, 64)),
-                                "完成" | "已存在" => bar.fill(egui::Color32::from_rgb(46, 118, 82)),
-                                _ => bar,
-                            };
-                            ui.add(bar);
-                            ui.horizontal(|ui| {
-                                ui.small(format!(
-                                    "{} / {}",
-                                    fmt_size(t.downloaded),
-                                    if t.total > 0 { fmt_size(t.total) } else { "?".into() }
-                                ));
-                                if t.speed > 0.0 {
-                                    ui.small(format!("· {}/s", fmt_size(t.speed as u64)));
-                                }
-                                if frac > 0.0 {
-                                    ui.small(format!("· {:.0}%", frac * 100.0));
-                                }
-                                if !t.error.is_empty() {
-                                    // 单行截断，悬停看完整错误（长 URL 不撑爆布局）
-                                    ui.add(egui::Label::new(egui::RichText::new(&t.error).small().color(C_RED)).truncate())
-                                        .on_hover_text(&t.error);
-                                }
-                            });
-                        });
-                    ui.add_space(6.0);
-                }
-            });
         });
-        if let Some(rid) = remove_id {
-            self.downloads.lock().unwrap().retain(|t| t.lock().unwrap().id != rid);
-        }
-        if let Some(p) = retry {
-            start_task(
-                self.cfg.clone(),
-                self.downloads.clone(),
-                p.filename,
-                p.subdir,
-                DlMeta { download_url: p.download_url, source: p.source, expected_sha256: p.sha256 },
-                p.size_kb,
-            );
-        }
         if toggle_pause {
             let was_paused = PAUSED.load(Ordering::Relaxed);
             PAUSED.store(!was_paused, Ordering::Relaxed);
@@ -2340,6 +2686,7 @@ impl eframe::App for App {
                                 source: t.source.clone(),
                                 size_kb: t.total as f64 / 1024.0,
                                 sha256: t.expected_sha256.clone(),
+                                desc: t.desc.clone(),
                             }
                         })
                         .collect();
@@ -2352,7 +2699,7 @@ impl eframe::App for App {
                         self.downloads.clone(),
                         p.filename,
                         p.subdir,
-                        DlMeta { download_url: p.download_url, source: p.source, expected_sha256: p.sha256 },
+                        DlMeta { download_url: p.download_url, source: p.source, expected_sha256: p.sha256, desc: p.desc },
                         p.size_kb,
                     );
                 }
@@ -2366,6 +2713,7 @@ impl eframe::App for App {
             Tab::Preset => self.ui_preset(ui),
             Tab::Workflow => self.ui_workflow(ui),
             Tab::Library => self.ui_library(ui),
+            Tab::Downloads => self.ui_downloads(ui),
             Tab::Settings => self.ui_settings(ui),
         });
 
@@ -2522,7 +2870,7 @@ impl App {
                                         self.downloads.clone(),
                                         name.clone(),
                                         sub.clone(),
-                                        DlMeta { download_url: url.clone(), source: "hf".into(), expected_sha256: None },
+                                        DlMeta { download_url: url.clone(), source: "hf".into(), expected_sha256: None, desc: String::new() },
                                         0.0,
                                     );
                                 }
@@ -2582,11 +2930,11 @@ impl App {
         let truly_missing = self.wf_models.iter().filter(|m| m.found_at.is_empty() && !m.in_comfy).count();
         // 工作流引用名可能带子目录前缀（xl/foo.safetensors），落盘用 basename，否则被 sanitize 把 / 替成 _
         let basename = |n: &str| n.replace('\\', "/").rsplit('/').next().unwrap_or(n).to_string();
-        let fillable: Vec<(String, String, String)> = self
+        let fillable: Vec<(String, String, DlMeta)> = self
             .wf_models
             .iter()
             .filter(|m| m.found_at.is_empty() && !m.in_comfy)
-            .filter_map(|m| m.dl.as_ref().map(|(u, s)| (basename(&m.name), u.clone(), s.clone())))
+            .filter_map(|m| m.dl.as_ref().map(|meta| (basename(&m.name), m.dir.clone(), meta.clone())))
             .collect();
         ui.horizontal(|ui| {
             ui.strong(format!("共引用 {} 个模型", self.wf_models.len()));
@@ -2598,13 +2946,15 @@ impl App {
             if !fillable.is_empty() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(accent_btn(&format!("一键补齐 {} 个", fillable.len()))).clicked() {
-                        for (name, url, sub) in &fillable {
+                        for (name, sub, meta) in &fillable {
+                            let mut meta = meta.clone();
+                            meta.download_url = apply_mirror(&meta.download_url, &self.cfg);
                             start_task(
                                 self.cfg.clone(),
                                 self.downloads.clone(),
                                 name.clone(),
                                 sub.clone(),
-                                DlMeta { download_url: apply_mirror(url, &self.cfg), source: "hf".into(), expected_sha256: None },
+                                meta,
                                 0.0,
                             );
                         }
@@ -2613,7 +2963,7 @@ impl App {
             }
         });
         let mut jump: Option<String> = None;
-        let mut fill_one: Option<(String, String, String)> = None;
+        let mut fill_one: Option<(String, String, DlMeta)> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for m in &self.wf_models {
                 egui::Frame::none()
@@ -2635,9 +2985,9 @@ impl App {
                                 ui.label(&m.name);
                                 ui.weak(format!("应放入 {}", m.dir));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if let Some((url, sub)) = &m.dl {
+                                    if let Some(meta) = &m.dl {
                                         if ui.add(accent_btn("下载")).clicked() {
-                                            fill_one = Some((basename(&m.name), url.clone(), sub.clone()));
+                                            fill_one = Some((basename(&m.name), m.dir.clone(), meta.clone()));
                                         }
                                     } else if ui.small_button("去搜索").clicked() {
                                         jump = Some(search_term(&m.name));
@@ -2649,14 +2999,14 @@ impl App {
                 ui.add_space(5.0);
             }
         });
-        if let Some((name, url, sub)) = fill_one {
-            let url = apply_mirror(&url, &self.cfg);
+        if let Some((name, sub, mut meta)) = fill_one {
+            meta.download_url = apply_mirror(&meta.download_url, &self.cfg);
             start_task(
                 self.cfg.clone(),
                 self.downloads.clone(),
                 name,
                 sub,
-                DlMeta { download_url: url, source: "hf".into(), expected_sha256: None },
+                meta,
                 0.0,
             );
         }
@@ -2676,12 +3026,28 @@ impl App {
             .flat_map(|d| d.files.iter())
             .filter(|f| f.ident == Ident::Unknown)
             .count();
+        let updatable: Vec<(i64, i64, String)> = self
+            .library
+            .iter()
+            .flat_map(|d| d.files.iter())
+            .filter_map(|f| match &f.ident {
+                Ident::Found { model_id, version_id, base, .. } if *model_id > 0 && *version_id > 0 => Some((*model_id, *version_id, base.clone())),
+                _ => None,
+            })
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
         ui.horizontal(|ui| {
             if ui.add(accent_btn("🔄 刷新")).clicked() {
                 self.do_scan();
             }
             if total_count > 0 && ui.add_enabled(unknown > 0, egui::Button::new(format!("识别全部 ({})", unknown))).clicked() {
                 self.do_identify_all();
+            }
+            if total_count > 0 && !updatable.is_empty() && ui.add_enabled(!updatable.iter().all(|(m, _, _)| self.lib_checking_updates.contains(m)), egui::Button::new(format!("检查全部更新 ({})", updatable.len()))).clicked() {
+                for (mid, vid, base) in &updatable {
+                    self.do_check_update(*mid, *vid, base.clone());
+                }
             }
             if total_count > 0 {
                 ui.add(egui::TextEdit::singleline(&mut self.lib_filter).desired_width(180.0).hint_text("按名称筛选"));
@@ -2723,6 +3089,8 @@ impl App {
         let mut open_dir: Option<PathBuf> = None;
         let mut del: Option<PathBuf> = None;
         let mut open_model: Option<i64> = None;
+        let mut check_update: Option<(i64, i64, String)> = None; // (model_id, current_version_id, current_base)
+        let mut download_update: Option<(String, String, DlMeta)> = None; // (filename, subdir, meta)
         let library = self.library.clone();
         egui::ScrollArea::vertical().show(ui, |ui| {
             for d in &library {
@@ -2768,10 +3136,28 @@ impl App {
                                                 ui.weak("识别中…");
                                             });
                                         }
-                                        Ident::Found { model_name, version_name, model_type, .. } => {
+                                        Ident::Found { model_name, version_name, version_id, model_id, model_type, .. } => {
                                             ui.horizontal(|ui| {
                                                 chip(ui, model_type, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
                                                 ui.colored_label(C_GREEN, format!("{} · {}", model_name, version_name));
+                                                if *model_id > 0 {
+                                                    if self.lib_checking_updates.contains(model_id) {
+                                                        ui.spinner();
+                                                        ui.weak("检查中…");
+                                                    } else if let Some(res) = self.lib_updates.get(model_id) {
+                                                        match res {
+                                                            Ok(info) if info.latest_vid != *version_id => {
+                                                                chip(ui, &format!("有新版本: {}", info.latest_name), egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                                                            }
+                                                            Ok(_) => {
+                                                                chip(ui, "已是最新", egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                                                            }
+                                                            Err(e) => {
+                                                                ui.colored_label(C_RED, format!("检查失败: {}", e));
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             });
                                         }
                                         Ident::NotFound => {
@@ -2790,9 +3176,24 @@ impl App {
                                     if ui.small_button("目录").clicked() {
                                         open_dir = Some(f.path.clone());
                                     }
-                                    if let Ident::Found { model_id, .. } = &f.ident {
+                                    if let Ident::Found { model_id, version_id, model_name, base, .. } = &f.ident {
                                         if ui.small_button("Civitai").clicked() {
                                             open_model = Some(*model_id);
+                                        }
+                                        if *model_id > 0 && *version_id > 0 && ui.small_button("检查更新").clicked() {
+                                            check_update = Some((*model_id, *version_id, base.clone()));
+                                        }
+                                        if let Some(Ok(info)) = self.lib_updates.get(model_id) {
+                                            if info.latest_vid != *version_id && ui.small_button("下载新版").clicked() {
+                                                let url = format!("https://civitai.com/api/download/models/{}", info.latest_vid);
+                                                let meta = DlMeta {
+                                                    download_url: url,
+                                                    source: "civitai".into(),
+                                                    expected_sha256: None,
+                                                    desc: format!("{} - {}", model_name, info.latest_name),
+                                                };
+                                                download_update = Some((f.name.clone(), d.key.clone(), meta));
+                                            }
                                         }
                                     } else if matches!(f.ident, Ident::Unknown | Ident::Failed(_)) && ui.small_button("识别").clicked() {
                                         identify = Some(f.path.clone());
@@ -2813,6 +3214,19 @@ impl App {
         }
         if let Some(mid) = open_model {
             ui.ctx().open_url(egui::OpenUrl::new_tab(format!("https://civitai.com/models/{}", mid)));
+        }
+        if let Some((mid, vid, base)) = check_update {
+            self.do_check_update(mid, vid, base);
+        }
+        if let Some((name, sub, meta)) = download_update {
+            start_task(
+                self.cfg.clone(),
+                self.downloads.clone(),
+                name,
+                sub,
+                meta,
+                0.0,
+            );
         }
         if let Some(p) = del {
             self.delete_confirm = Some(p);
@@ -2893,6 +3307,24 @@ impl App {
             ui.label("同时下载数");
             ui.add(egui::Slider::new(&mut self.cfg.max_concurrent, 1..=4));
             ui.end_row();
+            ui.label("网络代理");
+            ui.horizontal(|ui| {
+                let proxy = self.cfg.proxy_url.get_or_insert_with(String::new);
+                ui.add(egui::TextEdit::singleline(proxy).desired_width(260.0).hint_text("http://127.0.0.1:7897"));
+                if ui.button("填入 Clash 默认").clicked() {
+                    *proxy = "http://127.0.0.1:7897".into();
+                }
+                if ui.button("清空").clicked() {
+                    self.cfg.proxy_url = None;
+                }
+            });
+            ui.end_row();
+            ui.label("关闭时最小化到托盘");
+            ui.checkbox(&mut self.cfg.tray_minimize, "关闭窗口后保留在系统托盘，后台继续下载");
+            ui.end_row();
+            ui.label("下载完成通知");
+            ui.checkbox(&mut self.cfg.notify_on_complete, "任务完成或失败时弹出系统通知");
+            ui.end_row();
             ui.label("ComfyUI 服务地址");
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_url).desired_width(300.0).hint_text("http://127.0.0.1:8188"));
@@ -2930,6 +3362,375 @@ impl App {
         });
         ui.weak(egui::RichText::new(format!("配置文件: {}", config_path().display())).size(11.5));
             });
+    }
+
+    // ============ 下载队列完整管理页 ============
+    fn ui_downloads(&mut self, ui: &mut egui::Ui) {
+        // 先把任务数据快照出来，避免渲染过程中频繁加锁
+        let mut tasks: Vec<Task> = {
+            self.downloads.lock().unwrap().iter().map(|t| t.lock().unwrap().clone()).collect()
+        };
+        // 排序
+        if self.dl_sort_newest_first {
+            tasks.reverse();
+        }
+        // 筛选
+        let filtered: Vec<&Task> = tasks
+            .iter()
+            .filter(|t| match self.dl_filter {
+                DownloadsFilter::All => true,
+                DownloadsFilter::Active => t.status == "下载中" || t.status == "排队中" || t.status.starts_with("重试等待"),
+                DownloadsFilter::Failed => t.status == "失败" || t.status == "已取消",
+                DownloadsFilter::Completed => t.status == "完成" || t.status == "已存在",
+                DownloadsFilter::Paused => t.status == "已暂停",
+            })
+            .collect();
+
+        // 统计
+        let total = tasks.len();
+        let active = tasks.iter().filter(|t| t.status == "下载中" || t.status == "排队中" || t.status.starts_with("重试等待")).count();
+        let failed = tasks.iter().filter(|t| t.status == "失败" || t.status == "已取消").count();
+        let done = tasks.iter().filter(|t| t.status == "完成" || t.status == "已存在").count();
+        let paused = tasks.iter().filter(|t| t.status == "已暂停").count();
+        let total_downloaded: u64 = tasks.iter().map(|t| t.downloaded.min(t.total)).sum();
+        let total_size: u64 = tasks.iter().map(|t| t.total).sum();
+        let total_speed: f64 = tasks.iter().filter(|t| t.status == "下载中").map(|t| t.speed).sum();
+        let total_remaining: u64 = tasks
+            .iter()
+            .filter(|t| t.status == "下载中" || t.status == "排队中")
+            .map(|t| t.total.saturating_sub(t.downloaded))
+            .sum();
+        let global_frac = if total_size > 0 { (total_downloaded as f32 / total_size as f32).min(1.0) } else { 0.0 };
+
+        ui.heading("下载队列");
+        ui.add_space(8.0);
+
+        // 统计卡片行
+        ui.horizontal(|ui| {
+            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.weak("总任务");
+                    ui.strong(total.to_string());
+                });
+            });
+            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.weak("进行中");
+                    ui.strong(active.to_string());
+                });
+            });
+            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.weak("已完成");
+                    ui.strong(done.to_string());
+                });
+            });
+            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.weak("失败");
+                    ui.strong(failed.to_string());
+                });
+            });
+            if paused > 0 {
+                egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.weak("已暂停");
+                        ui.strong(paused.to_string());
+                    });
+                });
+            }
+            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.weak("总速度");
+                    ui.strong(format!("{}/s", fmt_size(total_speed as u64)));
+                });
+            });
+            if total_speed > 0.0 {
+                if let Some(eta) = eta_secs(0, total_remaining, total_speed) {
+                    egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.weak("预计完成");
+                            ui.strong(fmt_duration(eta));
+                        });
+                    });
+                }
+            }
+        });
+        ui.add_space(8.0);
+
+        // 全局进度条 + 批量操作
+        ui.horizontal(|ui| {
+            ui.add(egui::ProgressBar::new(global_frac).desired_height(10.0).rounding(egui::Rounding::same(5.0)).text(format!("{:.0}% · {} / {}", global_frac * 100.0, fmt_size(total_downloaded), fmt_size(total_size))));
+        });
+        ui.add_space(8.0);
+
+        let mut batch_remove_done = false;
+        let mut batch_retry_failed = false;
+        let mut batch_cancel_queued = false;
+        ui.horizontal(|ui| {
+            ui.label("筛选:");
+            ui.selectable_value(&mut self.dl_filter, DownloadsFilter::All, "全部");
+            ui.selectable_value(&mut self.dl_filter, DownloadsFilter::Active, "进行中");
+            ui.selectable_value(&mut self.dl_filter, DownloadsFilter::Paused, "已暂停");
+            ui.selectable_value(&mut self.dl_filter, DownloadsFilter::Failed, "失败");
+            ui.selectable_value(&mut self.dl_filter, DownloadsFilter::Completed, "已完成");
+            ui.separator();
+            if ui.button(if self.dl_sort_newest_first { "最新在前" } else { "最早在前" }).clicked() {
+                self.dl_sort_newest_first = !self.dl_sort_newest_first;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("清空已完成").clicked() {
+                    batch_remove_done = true;
+                }
+                if ui.button("全部重试失败").clicked() {
+                    batch_retry_failed = true;
+                }
+                if ui.button("取消全部排队").clicked() {
+                    batch_cancel_queued = true;
+                }
+            });
+        });
+        ui.add_space(10.0);
+
+        // 任务列表
+        let mut action_remove: Option<u64> = None;
+        let mut action_retry: Vec<PersistTask> = Vec::new();
+        let mut action_detail: Option<u64> = None;
+        let mut action_detail_close = false;
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if filtered.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.weak("没有符合当前筛选条件的任务");
+                });
+            } else {
+                for t in filtered {
+                    let frac = if t.total > 0 { (t.downloaded as f32 / t.total as f32).min(1.0) } else { 0.0 };
+                    egui::Frame::none()
+                        .fill(C_CARD)
+                        .rounding(egui::Rounding::same(10.0))
+                        .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                status_chip(ui, &t.status);
+                                ui.strong(&t.filename);
+                                ui.weak(&t.subdir);
+                                if t.verified {
+                                    chip(ui, "SHA256 ✓", egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                                }
+                                if !t.desc.is_empty() {
+                                    ui.add(egui::Label::new(egui::RichText::new(&t.desc).small().color(C_GRAY)).truncate())
+                                        .on_hover_text(&t.desc);
+                                }
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.small_button("详情").clicked() {
+                                        action_detail = Some(t.id);
+                                    }
+                                    if (t.status == "完成" || t.status == "已存在") && ui.small_button("打开文件夹").clicked() {
+                                        if let Some(ref p) = t.local_path {
+                                            open_in_file_manager(p);
+                                        }
+                                    }
+                                    if (t.status == "失败" || t.status == "已取消" || t.status == "完成" || t.status == "已存在" || t.status == "已暂停")
+                                        && ui.small_button("移除").clicked()
+                                    {
+                                        action_remove = Some(t.id);
+                                    }
+                                    if t.status == "失败" && ui.small_button("重试").clicked() {
+                                        action_retry.push(PersistTask {
+                                            filename: t.filename.clone(),
+                                            subdir: t.subdir.clone(),
+                                            download_url: t.download_url.clone(),
+                                            source: t.source.clone(),
+                                            size_kb: t.total as f64 / 1024.0,
+                                            sha256: t.expected_sha256.clone(),
+                                            desc: t.desc.clone(),
+                                        });
+                                        action_remove = Some(t.id);
+                                    }
+                                    if (t.status == "下载中" || t.status == "排队中" || t.status.starts_with("重试等待"))
+                                        && ui.small_button("取消").clicked()
+                                    {
+                                        if let Some(task_ref) = self.downloads.lock().unwrap().iter().find(|x| x.lock().unwrap().id == t.id) {
+                                            task_ref.lock().unwrap().cancel.store(true, Ordering::Relaxed);
+                                        }
+                                    }
+                                });
+                            });
+                            ui.add_space(4.0);
+                            let bar = egui::ProgressBar::new(frac).desired_height(8.0).rounding(egui::Rounding::same(4.0));
+                            let bar = match t.status.as_str() {
+                                "失败" | "已取消" => bar.fill(egui::Color32::from_rgb(118, 58, 64)),
+                                "完成" | "已存在" => bar.fill(egui::Color32::from_rgb(46, 118, 82)),
+                                _ => bar,
+                            };
+                            ui.add(bar);
+                            ui.horizontal(|ui| {
+                                ui.small(format!("{} / {}", fmt_size(t.downloaded), if t.total > 0 { fmt_size(t.total) } else { "?".into() }));
+                                if t.speed > 0.0 {
+                                    ui.small(format!("· {}/s", fmt_size(t.speed as u64)));
+                                }
+                                if frac > 0.0 {
+                                    ui.small(format!("· {:.0}%", frac * 100.0));
+                                }
+                                if t.status == "下载中" {
+                                    if let Some(eta) = eta_secs(t.downloaded, t.total, t.speed) {
+                                        ui.small(format!("· 剩余 {}", fmt_duration(eta)));
+                                    }
+                                }
+                                if let Some(started) = t.started_at {
+                                    let elapsed = started.elapsed().as_secs();
+                                    ui.small(format!("· 已用 {}", fmt_duration(elapsed)));
+                                }
+                                if !t.error.is_empty() {
+                                    ui.add(egui::Label::new(egui::RichText::new(&t.error).small().color(C_RED)).truncate())
+                                        .on_hover_text(&t.error);
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                let src_label = if t.source == "civitai" { "Civitai" } else { "HuggingFace" };
+                                chip(ui, src_label, egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                                if let Some(ref p) = t.local_path {
+                                    ui.weak(format!("→ {}", p.display()));
+                                }
+                            });
+                        });
+                    ui.add_space(8.0);
+                }
+            }
+        });
+
+        // 详情弹窗
+        if let Some(detail_id) = self.dl_detail {
+            let detail_task = tasks.iter().find(|t| t.id == detail_id).cloned();
+            if let Some(t) = detail_task {
+                let mut open = true;
+                egui::Window::new("任务详情").collapsible(false).resizable(false).open(&mut open).show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.strong(&t.filename);
+                        status_chip(ui, &t.status);
+                    });
+                    ui.add_space(6.0);
+                    egui::Grid::new("dl_detail").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                        ui.label("目录:");
+                        ui.label(&t.subdir);
+                        ui.label("来源:");
+                        ui.label(&t.source);
+                        ui.label("链接:");
+                        ui.add(egui::Label::new(egui::RichText::new(&t.download_url).small().color(C_ACCENT)).truncate());
+                        ui.label("本地路径:");
+                        if let Some(ref p) = t.local_path {
+                            ui.label(p.display().to_string());
+                        } else {
+                            ui.weak("未确定");
+                        }
+                        ui.label("简介:");
+                        if !t.desc.is_empty() {
+                            ui.colored_label(C_GRAY, &t.desc);
+                        } else {
+                            ui.weak("无");
+                        }
+                        ui.label("SHA256:");
+                        if let Some(ref h) = t.expected_sha256 {
+                            ui.label(format!("{}... {}", &h[..16.min(h.len())], if t.verified { "✓ 已校验" } else { "待校验/跳过" }));
+                        } else {
+                            ui.weak("无");
+                        }
+                        ui.label("大小:");
+                        ui.label(format!("{} / {}", fmt_size(t.downloaded), if t.total > 0 { fmt_size(t.total) } else { "?".into() }));
+                        if let Some(started) = t.started_at {
+                            ui.label("已用时间:");
+                            ui.label(fmt_duration(started.elapsed().as_secs()));
+                        }
+                        if let Some(completed) = t.completed_at {
+                            if let Some(started) = t.started_at {
+                                let dur = completed.checked_duration_since(started).unwrap_or(Duration::ZERO).as_secs();
+                                ui.label("下载耗时:");
+                                ui.label(fmt_duration(dur));
+                            }
+                        }
+                        if !t.error.is_empty() {
+                            ui.label("错误:");
+                            ui.colored_label(C_RED, &t.error);
+                        }
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if let Some(ref p) = t.local_path {
+                            if ui.button("打开所在文件夹").clicked() {
+                                open_in_file_manager(p);
+                            }
+                        }
+                        if ui.button("复制下载链接").clicked() {
+                            ui.ctx().output_mut(|o| o.copied_text = t.download_url.clone());
+                        }
+                        if t.status == "失败" && ui.button("重试").clicked() {
+                            action_retry.push(PersistTask {
+                                filename: t.filename.clone(),
+                                subdir: t.subdir.clone(),
+                                download_url: t.download_url.clone(),
+                                source: t.source.clone(),
+                                size_kb: t.total as f64 / 1024.0,
+                                sha256: t.expected_sha256.clone(),
+                                desc: t.desc.clone(),
+                            });
+                            action_remove = Some(t.id);
+                            action_detail_close = true;
+                        }
+                    });
+                });
+                if !open || action_detail_close {
+                    self.dl_detail = None;
+                }
+            } else {
+                self.dl_detail = None;
+            }
+        }
+
+        // 执行批量/单条操作
+        if batch_remove_done {
+            let ids: Vec<u64> = tasks.iter().filter(|t| t.status == "完成" || t.status == "已存在").map(|t| t.id).collect();
+            self.downloads.lock().unwrap().retain(|t| !ids.contains(&t.lock().unwrap().id));
+        }
+        if batch_retry_failed {
+            for t in tasks.iter().filter(|t| t.status == "失败") {
+                action_retry.push(PersistTask {
+                    filename: t.filename.clone(),
+                    subdir: t.subdir.clone(),
+                    download_url: t.download_url.clone(),
+                    source: t.source.clone(),
+                    size_kb: t.total as f64 / 1024.0,
+                    sha256: t.expected_sha256.clone(),
+                    desc: t.desc.clone(),
+                });
+            }
+            let ids: Vec<u64> = tasks.iter().filter(|t| t.status == "失败").map(|t| t.id).collect();
+            self.downloads.lock().unwrap().retain(|t| !ids.contains(&t.lock().unwrap().id));
+        }
+        if batch_cancel_queued {
+            for t in tasks.iter().filter(|t| t.status == "排队中") {
+                if let Some(task_ref) = self.downloads.lock().unwrap().iter().find(|x| x.lock().unwrap().id == t.id) {
+                    task_ref.lock().unwrap().cancel.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+        if let Some(rid) = action_remove {
+            self.downloads.lock().unwrap().retain(|t| t.lock().unwrap().id != rid);
+        }
+        for p in action_retry {
+            start_task(
+                self.cfg.clone(),
+                self.downloads.clone(),
+                p.filename,
+                p.subdir,
+                DlMeta { download_url: p.download_url, source: p.source, expected_sha256: p.sha256, desc: p.desc },
+                p.size_kb,
+            );
+        }
+        if let Some(id) = action_detail {
+            self.dl_detail = Some(id);
+        }
     }
 
     // 作品页资源清单：勾选后批量入队
@@ -2996,7 +3797,7 @@ impl App {
                         self.downloads.clone(),
                         r.filename.clone(),
                         r.subdir.clone(),
-                        DlMeta { download_url: r.download_url.clone(), source: "civitai".into(), expected_sha256: sha },
+                        DlMeta { download_url: r.download_url.clone(), source: "civitai".into(), expected_sha256: sha, desc: r.desc.clone() },
                         r.size_kb,
                     );
                 }
@@ -3103,7 +3904,7 @@ impl App {
                     self.downloads.clone(),
                     self.edit_name.clone(),
                     self.edit_subdir.clone(),
-                    DlMeta { download_url: url, source: r.source.clone(), expected_sha256: sha },
+                    DlMeta { download_url: url, source: r.source.clone(), expected_sha256: sha, desc: r.desc.clone() },
                     size_kb,
                 );
             }
@@ -3131,6 +3932,29 @@ fn open_in_file_manager(path: &Path) {
     }
 }
 
+// 下载完成后写一个侧写文件，保存简介、来源、SHA256 等元数据，便于日后查找
+fn write_info_sidecar(dest: &Path, source: &str, url: &str, desc: &str, sha256: Option<&str>) {
+    let info = dest.with_extension(format!(
+        "{}.info.txt",
+        dest.extension().and_then(|s| s.to_str()).unwrap_or("")
+    ));
+    if info.exists() {
+        return; // 不覆盖已有信息文件
+    }
+    let mut s = String::new();
+    s.push_str(&format!("source: {}\n", source));
+    s.push_str(&format!("url: {}\n", url));
+    if let Some(h) = sha256 {
+        s.push_str(&format!("sha256: {}\n", h));
+    }
+    if !desc.is_empty() {
+        s.push_str("\n--- description ---\n");
+        s.push_str(desc);
+        s.push('\n');
+    }
+    let _ = fs::write(&info, s);
+}
+
 fn fmt_size(b: u64) -> String {
     let units = ["B", "KB", "MB", "GB"];
     let mut x = b as f64;
@@ -3140,6 +3964,25 @@ fn fmt_size(b: u64) -> String {
         i += 1;
     }
     format!("{:.1}{}", x, units[i])
+}
+
+fn fmt_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
+// 基于当前速度和剩余大小估算剩余秒数；速度为 0 或任务未开始返回 None
+fn eta_secs(downloaded: u64, total: u64, speed: f64) -> Option<u64> {
+    if speed <= 0.0 || total <= downloaded {
+        return None;
+    }
+    let remaining = (total - downloaded) as f64;
+    Some((remaining / speed) as u64)
 }
 
 // 字节头校验：损坏/零字节的字体喂给 egui 会让 epaint 在首帧 panic（启动必闪退）
@@ -3228,6 +4071,199 @@ fn install_cjk_font(ctx: &egui::Context) -> bool {
     true
 }
 
+// 发送系统通知；失败时静默忽略，不干扰下载流程
+fn notify(title: &str, body: &str) {
+    let _ = notify_rust::Notification::new()
+        .summary(title)
+        .body(body)
+        .timeout(notify_rust::Timeout::Milliseconds(6000))
+        .show();
+}
+
+// 创建 32x32 的简单托盘图标（蓝底白 C），失败返回 None
+fn tray_icon_rgba() -> Option<(Vec<u8>, u32, u32)> {
+    const W: u32 = 32;
+    const H: u32 = 32;
+    let mut rgba = vec![0u8; (W * H * 4) as usize];
+    for y in 0..H {
+        for x in 0..W {
+            let idx = ((y * W + x) * 4) as usize;
+            // 圆角蓝底
+            let cx = x as f32 - W as f32 / 2.0 + 0.5;
+            let cy = y as f32 - H as f32 / 2.0 + 0.5;
+            let r = (cx * cx + cy * cy).sqrt();
+            if r < 14.0 {
+                rgba[idx] = 96;
+                rgba[idx + 1] = 145;
+                rgba[idx + 2] = 240;
+                rgba[idx + 3] = 255;
+                // 简单的 "C" 字形（白色）
+                let angle = cy.atan2(cx);
+                if r > 6.0 && r < 11.0 && angle.abs() > 0.7 {
+                    rgba[idx] = 255;
+                    rgba[idx + 1] = 255;
+                    rgba[idx + 2] = 255;
+                }
+            }
+        }
+    }
+    Some((rgba, W, H))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TrayCmd {
+    Show,
+    Hide,
+    Toggle,
+    PauseResume,
+    Exit,
+}
+
+#[cfg(windows)]
+mod tray_win {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Mutex;
+    pub type Hwnd = isize;
+    pub const SW_HIDE: i32 = 0;
+    pub const SW_SHOW: i32 = 5;
+    pub const WM_CLOSE: u32 = 0x0010;
+    extern "system" {
+        pub fn ShowWindow(hWnd: Hwnd, nCmdShow: i32) -> i32;
+        pub fn IsWindowVisible(hWnd: Hwnd) -> i32;
+        pub fn SetForegroundWindow(hWnd: Hwnd) -> i32;
+        pub fn PostMessageW(hWnd: Hwnd, Msg: u32, wParam: usize, lParam: isize) -> i32;
+    }
+    pub static FORCE_EXIT: AtomicBool = AtomicBool::new(false);
+    pub static TRAY_HWND: Mutex<Option<Hwnd>> = Mutex::new(None);
+
+    pub fn is_visible(hwnd: Hwnd) -> bool {
+        unsafe { IsWindowVisible(hwnd) != 0 }
+    }
+}
+
+#[cfg(not(windows))]
+mod tray_win {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+    pub type Hwnd = isize;
+    pub const SW_HIDE: i32 = 0;
+    pub const SW_SHOW: i32 = 5;
+    pub const WM_CLOSE: u32 = 0x0010;
+    pub static FORCE_EXIT: AtomicBool = AtomicBool::new(false);
+    pub static TRAY_HWND: Mutex<Option<Hwnd>> = Mutex::new(None);
+    pub fn is_visible(_hwnd: Hwnd) -> bool { true }
+    pub unsafe fn ShowWindow(_hwnd: Hwnd, _n: i32) -> i32 { 0 }
+    pub unsafe fn SetForegroundWindow(_hwnd: Hwnd) -> i32 { 0 }
+    pub unsafe fn PostMessageW(_hwnd: Hwnd, _msg: u32, _w: usize, _l: isize) -> i32 { 0 }
+}
+
+fn store_main_hwnd(cc: &eframe::CreationContext<'_>) {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = cc.window_handle() {
+            if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                if let Ok(mut g) = tray_win::TRAY_HWND.lock() {
+                    *g = Some(h.hwnd.get());
+                }
+            }
+        }
+    }
+}
+
+fn handle_tray_cmd_now(cmd: TrayCmd) {
+    let hwnd = match tray_win::TRAY_HWND.lock() {
+        Ok(g) => *g,
+        Err(_) => return,
+    };
+    let Some(hwnd) = hwnd else { return };
+    match cmd {
+        TrayCmd::Show => unsafe {
+            tray_win::ShowWindow(hwnd, tray_win::SW_SHOW);
+            tray_win::SetForegroundWindow(hwnd);
+        },
+        TrayCmd::Hide => unsafe {
+            tray_win::ShowWindow(hwnd, tray_win::SW_HIDE);
+        },
+        TrayCmd::Toggle => unsafe {
+            if tray_win::is_visible(hwnd) {
+                tray_win::ShowWindow(hwnd, tray_win::SW_HIDE);
+            } else {
+                tray_win::ShowWindow(hwnd, tray_win::SW_SHOW);
+                tray_win::SetForegroundWindow(hwnd);
+            }
+        },
+        TrayCmd::PauseResume => {
+            let was = PAUSED.load(Ordering::Relaxed);
+            PAUSED.store(!was, Ordering::Relaxed);
+        }
+        TrayCmd::Exit => {
+            tray_win::FORCE_EXIT.store(true, Ordering::Relaxed);
+            unsafe {
+                tray_win::PostMessageW(hwnd, tray_win::WM_CLOSE, 0, 0);
+            }
+        }
+    }
+}
+
+// 在主线程创建托盘图标与菜单；托盘事件直接操作主窗口。
+// 必须与 winit/eframe 事件循环同线程，否则 Windows 消息无法分派，点击无响应。
+fn setup_tray() -> Option<tray_icon::TrayIcon> {
+    let (rgba, w, h) = tray_icon_rgba()?;
+    let icon = tray_icon::Icon::from_rgba(rgba, w, h).ok()?;
+    let menu = tray_icon::menu::Menu::new();
+    let show_i = tray_icon::menu::MenuItem::new("显示主窗口", true, None);
+    let hide_i = tray_icon::menu::MenuItem::new("隐藏窗口", true, None);
+    let pause_i = tray_icon::menu::MenuItem::new("暂停 / 恢复", true, None);
+    let exit_i = tray_icon::menu::MenuItem::new("退出", true, None);
+    let _ = menu.append(&show_i);
+    let _ = menu.append(&hide_i);
+    let _ = menu.append(&pause_i);
+    let _ = menu.append(&exit_i);
+
+    let tray = tray_icon::TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_tooltip("ComfyUI 模型下载器")
+        .with_icon(icon)
+        .build()
+        .ok()?;
+
+    let cmd_map: std::collections::HashMap<tray_icon::menu::MenuId, TrayCmd> = [
+        (show_i.id().clone(), TrayCmd::Show),
+        (hide_i.id().clone(), TrayCmd::Hide),
+        (pause_i.id().clone(), TrayCmd::PauseResume),
+        (exit_i.id().clone(), TrayCmd::Exit),
+    ]
+    .into_iter()
+    .collect();
+
+    // 菜单事件直接操作主窗口
+    tray_icon::menu::MenuEvent::set_event_handler(Some(move |event: tray_icon::menu::MenuEvent| {
+        if let Some(&cmd) = cmd_map.get(&event.id) {
+            handle_tray_cmd_now(cmd);
+        }
+    }));
+
+    // 左键单击/双击托盘图标：切换显示/隐藏
+    tray_icon::TrayIconEvent::set_event_handler(Some(move |event: tray_icon::TrayIconEvent| {
+        let is_left = matches!(
+            event,
+            tray_icon::TrayIconEvent::Click {
+                button: tray_icon::MouseButton::Left,
+                ..
+            } | tray_icon::TrayIconEvent::DoubleClick {
+                button: tray_icon::MouseButton::Left,
+                ..
+            }
+        );
+        if is_left {
+            handle_tray_cmd_now(TrayCmd::Toggle);
+        }
+    }));
+
+    Some(tray)
+}
+
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1120.0, 800.0]),
@@ -3297,6 +4333,9 @@ mod tests {
             hf_mirror: true,
             max_concurrent: 1,
             comfy_url: default_comfy_url(),
+            proxy_url: None,
+            tray_minimize: true,
+            notify_on_complete: true,
         }
     }
 
@@ -3315,6 +4354,11 @@ mod tests {
             source: String::new(),
             expected_sha256: None,
             verified: false,
+            started_at: None,
+            completed_at: None,
+            local_path: None,
+            desc: String::new(),
+            notified: false,
         }))
     }
 
@@ -3328,6 +4372,7 @@ mod tests {
             source: "hf".into(),
             size_kb: 12.5,
             sha256: Some("abcd".into()),
+            desc: "test desc".into(),
         }];
         save_tasks_to(&tmp, &list);
         let back = load_tasks_from(&tmp);
@@ -3419,7 +4464,7 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
         let cfg = test_cfg(&tmp);
-        let meta = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: None };
+        let meta = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: None, desc: String::new() };
         let dest = tmp.join("models/checkpoints/e2e_test.bin");
         let part = tmp.join("models/checkpoints/e2e_test.bin.part");
 
@@ -3559,6 +4604,7 @@ mod tests {
         let c: Config = serde_json::from_str(old).expect("旧配置应可解析");
         assert_eq!(c.civitai_token, "tok123");
         assert_eq!(c.comfy_url, "http://127.0.0.1:8188");
+        assert_eq!(c.proxy_url, None);
     }
 
     #[test]
@@ -3653,7 +4699,7 @@ mod tests {
         let part = tmp.join("models/checkpoints/sha_test.bin.part");
 
         // 先无校验下载，本地算出正确哈希
-        let plain = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: None };
+        let plain = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: None, desc: String::new() };
         let t = new_task();
         download_file(&cfg, &t, "sha_test.bin", "models/checkpoints", &plain).unwrap();
         assert!(!t.lock().unwrap().verified, "无期望哈希不应标记已校验");
@@ -3666,14 +4712,14 @@ mod tests {
 
         // 错误哈希：必须失败且删除文件
         fs::remove_file(&dest).unwrap();
-        let bad = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: Some("0".repeat(64)) };
+        let bad = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: Some("0".repeat(64)), desc: String::new() };
         let t = new_task();
         let e = download_file(&cfg, &t, "sha_test.bin", "models/checkpoints", &bad).unwrap_err();
         assert!(e.contains("SHA256"), "意外错误: {}", e);
         assert!(!part.exists() && !dest.exists(), "校验失败必须删除文件");
 
         // 正确哈希：全量下载通过并标记 verified
-        let goodm = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: Some(good.clone()) };
+        let goodm = DlMeta { download_url: url.into(), source: "hf".into(), expected_sha256: Some(good.clone()), desc: String::new() };
         let t = new_task();
         download_file(&cfg, &t, "sha_test.bin", "models/checkpoints", &goodm).unwrap();
         assert!(t.lock().unwrap().verified);
@@ -3691,5 +4737,13 @@ mod tests {
         assert!(s.as_deref().map(|x| x.len() == 64).unwrap_or(false), "paths-info 未返回哈希: {:?}", s);
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn normalize_date_orders_iso_strings() {
+        assert_eq!(normalize_date("2025-06-01T12:00:00Z"), "2025-06-01T12:00:00.000Z");
+        assert_eq!(normalize_date("2025-06-01T12:00:00.5Z"), "2025-06-01T12:00:00.500Z");
+        assert_eq!(normalize_date("2025-06-01T12:00:00.12345Z"), "2025-06-01T12:00:00.123Z");
+        assert!(normalize_date("2025-06-02T00:00:00.000Z") > normalize_date("2025-06-01T23:59:59.999Z"));
     }
 }
