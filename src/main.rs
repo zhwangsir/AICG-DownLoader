@@ -2811,14 +2811,42 @@ impl App {
                                     .inner_margin(egui::Margin::same(10.0))
                                     .show(ui, |ui| {
                                         ui.vertical(|ui| {
-                                            if !it.image.is_empty() {
-                                                ui.add(
-                                                    egui::Image::from_uri(it.image.clone())
-                                                        .max_height(200.0)
-                                                        .max_width(ui.available_width())
-                                                        .rounding(egui::Rounding::same(8.0)),
-                                                );
-                                            }
+                                            // 固定高度缩略图区域：有图时按原比例缩放居中，无图时显示占位
+                                            let thumb_height = 200.0;
+                                            let thumb_width = ui.available_width();
+                                            let thumb_layout = egui::Layout {
+                                                main_dir: egui::Direction::TopDown,
+                                                main_wrap: false,
+                                                main_align: egui::Align::Center,
+                                                main_justify: true,
+                                                cross_align: egui::Align::Center,
+                                                cross_justify: false,
+                                            };
+                                            ui.allocate_ui_with_layout(
+                                                egui::vec2(thumb_width, thumb_height),
+                                                thumb_layout,
+                                                |ui| {
+                                                    if !it.image.is_empty() {
+                                                        ui.add(
+                                                            egui::Image::from_uri(it.image.clone())
+                                                                .max_height(thumb_height)
+                                                                .max_width(thumb_width)
+                                                                .rounding(egui::Rounding::same(8.0)),
+                                                        );
+                                                    } else {
+                                                        egui::Frame::none()
+                                                            .fill(egui::Color32::from_rgb(38, 38, 50))
+                                                            .rounding(egui::Rounding::same(8.0))
+                                                            .inner_margin(egui::Margin::same(10.0))
+                                                            .show(ui, |ui| {
+                                                                ui.vertical_centered(|ui| {
+                                                                    ui.label(egui::RichText::new("🖼").size(28.0).color(C_GRAY));
+                                                                    ui.label(egui::RichText::new("无预览").size(11.0).color(C_GRAY));
+                                                                });
+                                                            });
+                                                    }
+                                                },
+                                            );
                                             ui.add(egui::Label::new(egui::RichText::new(&it.name).strong()).truncate());
                                             ui.horizontal(|ui| {
                                                 chip(ui, &it.kind, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
