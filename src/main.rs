@@ -2451,8 +2451,9 @@ impl eframe::App for App {
             self.tray_initialized = true;
         }
 
-        // 关闭窗口时若启用托盘最小化，则隐藏窗口而非退出（托盘菜单的退出强制真正关闭）
-        if ctx.input(|i| i.viewport().close_requested()) && !tray_win::FORCE_EXIT.load(Ordering::Relaxed) && self.cfg.tray_minimize {
+        // 关闭窗口时若启用托盘最小化，则隐藏窗口而非退出
+        // （托盘菜单的“退出”直接给主线程发 WM_QUIT，不经过这里的 close_requested）
+        if ctx.input(|i| i.viewport().close_requested()) && self.cfg.tray_minimize {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
@@ -4121,40 +4122,50 @@ enum TrayCmd {
 
 #[cfg(windows)]
 mod tray_win {
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
     pub type Hwnd = isize;
     pub const SW_HIDE: i32 = 0;
     pub const SW_SHOW: i32 = 5;
-    pub const WM_CLOSE: u32 = 0x0010;
+    pub const WM_QUIT: u32 = 0x0012;
     extern "system" {
         pub fn ShowWindow(hWnd: Hwnd, nCmdShow: i32) -> i32;
         pub fn IsWindowVisible(hWnd: Hwnd) -> i32;
         pub fn SetForegroundWindow(hWnd: Hwnd) -> i32;
-        pub fn PostMessageW(hWnd: Hwnd, Msg: u32, wParam: usize, lParam: isize) -> i32;
+        pub fn GetCurrentThreadId() -> u32;
+        pub fn PostThreadMessageW(idThread: u32, Msg: u32, wParam: usize, lParam: isize) -> i32;
     }
-    pub static FORCE_EXIT: AtomicBool = AtomicBool::new(false);
     pub static TRAY_HWND: Mutex<Option<Hwnd>> = Mutex::new(None);
+    pub static MAIN_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
     pub fn is_visible(hwnd: Hwnd) -> bool {
         unsafe { IsWindowVisible(hwnd) != 0 }
+    }
+
+    pub fn store_thread_id() {
+        MAIN_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
+    }
+
+    pub fn request_exit() {
+        let tid = MAIN_THREAD_ID.load(Ordering::SeqCst);
+        if tid != 0 {
+            unsafe { PostThreadMessageW(tid, WM_QUIT, 0, 0) };
+        }
     }
 }
 
 #[cfg(not(windows))]
 mod tray_win {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
     pub type Hwnd = isize;
     pub const SW_HIDE: i32 = 0;
     pub const SW_SHOW: i32 = 5;
-    pub const WM_CLOSE: u32 = 0x0010;
-    pub static FORCE_EXIT: AtomicBool = AtomicBool::new(false);
     pub static TRAY_HWND: Mutex<Option<Hwnd>> = Mutex::new(None);
     pub fn is_visible(_hwnd: Hwnd) -> bool { true }
     pub unsafe fn ShowWindow(_hwnd: Hwnd, _n: i32) -> i32 { 0 }
     pub unsafe fn SetForegroundWindow(_hwnd: Hwnd) -> i32 { 0 }
-    pub unsafe fn PostMessageW(_hwnd: Hwnd, _msg: u32, _w: usize, _l: isize) -> i32 { 0 }
+    pub fn store_thread_id() {}
+    pub fn request_exit() {}
 }
 
 fn store_main_hwnd(cc: &eframe::CreationContext<'_>) {
@@ -4169,6 +4180,7 @@ fn store_main_hwnd(cc: &eframe::CreationContext<'_>) {
             }
         }
     }
+    tray_win::store_thread_id();
 }
 
 fn handle_tray_cmd_now(cmd: TrayCmd) {
@@ -4198,10 +4210,7 @@ fn handle_tray_cmd_now(cmd: TrayCmd) {
             PAUSED.store(!was, Ordering::Relaxed);
         }
         TrayCmd::Exit => {
-            tray_win::FORCE_EXIT.store(true, Ordering::Relaxed);
-            unsafe {
-                tray_win::PostMessageW(hwnd, tray_win::WM_CLOSE, 0, 0);
-            }
+            tray_win::request_exit();
         }
     }
 }
