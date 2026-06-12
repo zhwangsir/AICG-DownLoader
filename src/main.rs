@@ -2795,7 +2795,7 @@ impl App {
             let card_width = (available - gap * (cols.saturating_sub(1)) as f32) / cols as f32;
 
             for chunk in results.chunks(cols) {
-                ui.horizontal(|ui| {
+                ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     for (idx, it) in chunk.iter().enumerate() {
                         if idx > 0 {
