@@ -103,12 +103,19 @@ fn status_chip(ui: &mut egui::Ui, status: &str) {
 }
 
 // ============ 配置 ============
+fn default_comfy_url() -> String {
+    "http://127.0.0.1:8188".into()
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
     comfy_root: String,
     civitai_token: String,
     hf_mirror: bool,
     max_concurrent: usize,
+    // serde(default)：老 config.json 没有此字段也能正常反序列化，不会回退默认丢失 token
+    #[serde(default = "default_comfy_url")]
+    comfy_url: String,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -117,6 +124,7 @@ impl Default for Config {
             civitai_token: String::new(),
             hf_mirror: true,
             max_concurrent: 2,
+            comfy_url: default_comfy_url(),
         }
     }
 }
@@ -194,6 +202,15 @@ fn guess_type(name: &str) -> &'static str {
 }
 fn hf_base(c: &Config) -> &'static str {
     if c.hf_mirror { "https://hf-mirror.com" } else { "https://huggingface.co" }
+}
+
+// 把 HF 下载链接按当前镜像开关切换 host：分析工作流时固化的 URL，下载时仍按最新设置走
+fn apply_mirror(url: &str, c: &Config) -> String {
+    if c.hf_mirror {
+        url.replace("https://huggingface.co/", "https://hf-mirror.com/")
+    } else {
+        url.replace("https://hf-mirror.com/", "https://huggingface.co/")
+    }
 }
 
 // 非 Windows 默认根目录是 "~/ComfyUI"，PathBuf 不展开 ~，必须手动替换为家目录
@@ -1349,6 +1366,93 @@ fn cached_file_hash(p: &Path) -> Result<String, String> {
     Ok(hash)
 }
 
+// ============ 运行中的 ComfyUI 实例联动 ============
+// ComfyUI 是本机服务，不应走系统代理（代理会把 127.0.0.1 也拦掉），用独立无代理 agent
+fn local_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(3))
+        .timeout_read(Duration::from_secs(8))
+        .build()
+}
+
+// 规整服务地址：用户常只填 host:port，没有 scheme ureq 会报费解的 InvalidUrl，这里补 http://
+fn comfy_base(cfg: &Config) -> String {
+    let u = cfg.comfy_url.trim().trim_end_matches('/');
+    if u.starts_with("http://") || u.starts_with("https://") {
+        u.to_string()
+    } else {
+        format!("http://{}", u)
+    }
+}
+
+// GET /system_stats → ComfyUI 版本（兼可作连接探测）
+fn comfy_system_stats(cfg: &Config) -> Result<String, String> {
+    let url = format!("{}/system_stats", comfy_base(cfg));
+    let body = local_agent().get(&url).call().map_err(|e| friendly_err(e.to_string()))?.into_string().map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let ver = v.get("system").and_then(|s| s.get("comfyui_version")).and_then(|x| x.as_str()).unwrap_or("unknown");
+    Ok(ver.to_string())
+}
+
+// /object_info 里加载器输入字段名 → 逻辑目录。带目录维度才能避免「不同类别同名文件」误判
+fn object_info_field_dir(field: &str) -> Option<&'static str> {
+    let f = field.to_lowercase();
+    if f.contains("clip_vision") {
+        Some("models/clip_vision")
+    } else if f.contains("ckpt") {
+        Some("models/checkpoints")
+    } else if f.contains("lora") {
+        Some("models/loras")
+    } else if f.contains("vae") {
+        Some("models/vae")
+    } else if f.contains("control_net") || f.contains("controlnet") {
+        Some("models/controlnet")
+    } else if f.contains("unet") || f.contains("diffusion") {
+        Some("models/unet")
+    } else if f.contains("style_model") {
+        Some("models/style_models")
+    } else if f.contains("upscale") {
+        Some("models/upscale_models")
+    } else if f.contains("clip") || f.contains("t5") || f.contains("text_encoder") {
+        Some("models/text_encoders")
+    } else {
+        None
+    }
+}
+
+// GET /object_info → 收集运行中的 ComfyUI 真正"看得见"的模型，按 (逻辑目录, 小写basename) 记录。
+// 结构化解析加载器节点的下拉枚举（input.required/optional 里 [[选项...],{}] 形式），带目录维度去重，
+// 比扫目录更权威（覆盖 symlink / 额外路径），又不会因跨类别同名文件误判
+fn comfy_known_models(cfg: &Config) -> Result<std::collections::HashSet<(String, String)>, String> {
+    let url = format!("{}/object_info", comfy_base(cfg));
+    let body = local_agent().get(&url).call().map_err(|e| friendly_err(e.to_string()))?.into_string().map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let mut set = std::collections::HashSet::new();
+    if let Some(nodes) = v.as_object() {
+        for node in nodes.values() {
+            let Some(input) = node.get("input") else { continue };
+            for sect in ["required", "optional"] {
+                let Some(fields) = input.get(sect).and_then(|x| x.as_object()) else { continue };
+                for (fname, fdef) in fields {
+                    let Some(dir) = object_info_field_dir(fname) else { continue };
+                    // fdef 形如 [ [选项字符串...], {meta} ]，选项在 [0]
+                    if let Some(opts) = fdef.as_array().and_then(|a| a.first()).and_then(|x| x.as_array()) {
+                        for o in opts {
+                            if let Some(s) = o.as_str() {
+                                if is_model_filename(s) {
+                                    let base = s.replace('\\', "/").rsplit('/').next().unwrap_or(s).to_lowercase();
+                                    set.insert((dir.to_string(), base));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(set)
+}
+
 // 识别单个文件：算哈希（带缓存）→ Civitai by-hash 反查
 fn identify_one(cfg: &Config, path: &Path) -> Ident {
     match cached_file_hash(path) {
@@ -1395,7 +1499,9 @@ fn civitai_by_hash(cfg: &Config, sha256: &str) -> Ident {
 struct WfModel {
     name: String,
     dir: String,
-    found_at: String, // 空字符串 = 本地缺失
+    found_at: String,        // 本地路径，空 = 本地缺失
+    in_comfy: bool,          // 运行中的 ComfyUI 实例能看到（即便本地扫描没扫到）
+    dl: Option<(String, String)>, // (下载url, 子目录) 来自预设已知文件表，可一键补齐
 }
 
 fn is_model_filename(s: &str) -> bool {
@@ -1565,14 +1671,44 @@ fn analyze_workflow(cfg: &Config, text: &str) -> Result<Vec<WfModel>, String> {
     }
     let root = expand_root(&cfg.comfy_root);
     let index = build_library_index(&root);
-    Ok(cand
+    let preset_idx = preset_file_index(cfg);
+    let mut models: Vec<WfModel> = cand
         .into_iter()
         .map(|(name, dir)| {
             let found_at = find_model_file(&root, &index, dir, &name).unwrap_or_default();
             let dir = if dir.is_empty() { type_dir(guess_type(&name)).to_string() } else { dir.to_string() };
-            WfModel { name, dir, found_at }
+            // 本地缺失时，从预设已知文件表查精确下载源（覆盖 Wan/Flux 等 HF-only 组件）
+            let base = name.replace('\\', "/").rsplit('/').next().unwrap_or(&name).to_lowercase();
+            let dl = if found_at.is_empty() { preset_idx.get(&base).cloned() } else { None };
+            WfModel { name, dir, found_at, in_comfy: false, dl }
         })
-        .collect())
+        .collect();
+    // 本地缺失的项，再用运行中的 ComfyUI 实例核对（覆盖 symlink / 额外路径）；实例没开就跳过
+    if models.iter().any(|m| m.found_at.is_empty()) {
+        if let Ok(live) = comfy_known_models(cfg) {
+            for m in &mut models {
+                if m.found_at.is_empty() {
+                    let base = m.name.replace('\\', "/").rsplit('/').next().unwrap_or(&m.name).to_lowercase();
+                    // 带目录维度比对，避免不同类别同名文件误判「已加载」而漏补
+                    if live.contains(&(m.dir.clone(), base)) {
+                        m.in_comfy = true;
+                    }
+                }
+            }
+        }
+    }
+    Ok(models)
+}
+
+// 预设套餐里所有文件的 文件名(小写) → (下载url, 子目录) 索引，用于工作流缺失模型一键补齐
+fn preset_file_index(cfg: &Config) -> std::collections::HashMap<String, (String, String)> {
+    let mut idx = std::collections::HashMap::new();
+    for (_k, _title, files) in presets(cfg) {
+        for (url, name, sub) in files {
+            idx.insert(name.to_lowercase(), (url, sub));
+        }
+    }
+    idx
 }
 
 // 缺失模型 → Civitai 搜索词：取文件名主干，下划线/连字符还原成空格
@@ -1621,6 +1757,7 @@ enum Msg {
     Library(Vec<LibDir>),
     Identify { path: PathBuf, ident: Ident },
     Workflow(Result<Vec<WfModel>, String>),
+    ComfyStatus(Result<String, String>),
 }
 
 // ============ egui 应用 ============
@@ -1669,6 +1806,7 @@ struct App {
     // 设置
     token_input: String,
     saved_msg: String,
+    comfy_status: String,
     cjk_font_ok: bool,
     // 下载
     downloads: Arc<Mutex<Vec<TaskRef>>>,
@@ -1752,6 +1890,7 @@ impl App {
             wf_note: String::new(),
             token_input: String::new(),
             saved_msg: String::new(),
+            comfy_status: String::new(),
             cjk_font_ok,
             downloads,
             // 哨兵初值：保证首帧必写一次盘，否则"恢复的任务秒终结→空快照==空初值"会让过期 tasks.json 永不清空
@@ -1802,6 +1941,9 @@ impl App {
     }
 
     fn run_wf_analyze(&mut self) {
+        if self.busy {
+            return; // 分析进行中，避免重复发起并发线程导致结果乱序覆盖
+        }
         self.wf_err.clear();
         self.wf_models.clear();
         let input = self.wf_input.trim_start_matches('\u{feff}').trim().trim_matches('"').to_string();
@@ -1940,7 +2082,12 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 处理后台消息
         while let Ok(m) = self.rx.try_recv() {
-            self.busy = false;
+            // busy 只代表搜索/解析/工作流分析这类带 spinner 的操作；Identify/ComfyStatus/Library
+            // 各有自己的进度指示，不能让它们的回包误清 busy（否则并发时 spinner 提前消失）
+            match m {
+                Msg::Search(..) | Msg::Resolve(_) | Msg::ResolveSet(_) | Msg::Workflow(_) => self.busy = false,
+                _ => {}
+            }
             match m {
                 Msg::Search(Ok((items, next)), append) => {
                     if append {
@@ -1974,6 +2121,8 @@ impl eframe::App for App {
                 }
                 Msg::Workflow(Ok(l)) => self.wf_models = l,
                 Msg::Workflow(Err(e)) => self.wf_err = e,
+                Msg::ComfyStatus(Ok(ver)) => self.comfy_status = format!("已连接 · ComfyUI {}", ver),
+                Msg::ComfyStatus(Err(e)) => self.comfy_status = format!("未连接: {}", e),
             }
         }
 
@@ -2429,16 +2578,42 @@ impl App {
             });
             return;
         }
-        let missing = self.wf_models.iter().filter(|m| m.found_at.is_empty()).count();
+        // 真缺失 = 本地没有 + ComfyUI 实例也没有；可一键补齐的单列出来
+        let truly_missing = self.wf_models.iter().filter(|m| m.found_at.is_empty() && !m.in_comfy).count();
+        // 工作流引用名可能带子目录前缀（xl/foo.safetensors），落盘用 basename，否则被 sanitize 把 / 替成 _
+        let basename = |n: &str| n.replace('\\', "/").rsplit('/').next().unwrap_or(n).to_string();
+        let fillable: Vec<(String, String, String)> = self
+            .wf_models
+            .iter()
+            .filter(|m| m.found_at.is_empty() && !m.in_comfy)
+            .filter_map(|m| m.dl.as_ref().map(|(u, s)| (basename(&m.name), u.clone(), s.clone())))
+            .collect();
         ui.horizontal(|ui| {
             ui.strong(format!("共引用 {} 个模型", self.wf_models.len()));
-            if missing > 0 {
-                chip(ui, &format!("缺失 {} 个", missing), egui::Color32::from_rgb(66, 34, 38), C_RED);
+            if truly_missing > 0 {
+                chip(ui, &format!("缺失 {} 个", truly_missing), egui::Color32::from_rgb(66, 34, 38), C_RED);
             } else {
                 chip(ui, "全部齐备", egui::Color32::from_rgb(26, 56, 40), C_GREEN);
             }
+            if !fillable.is_empty() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(accent_btn(&format!("一键补齐 {} 个", fillable.len()))).clicked() {
+                        for (name, url, sub) in &fillable {
+                            start_task(
+                                self.cfg.clone(),
+                                self.downloads.clone(),
+                                name.clone(),
+                                sub.clone(),
+                                DlMeta { download_url: apply_mirror(url, &self.cfg), source: "hf".into(), expected_sha256: None },
+                                0.0,
+                            );
+                        }
+                    }
+                });
+            }
         });
         let mut jump: Option<String> = None;
+        let mut fill_one: Option<(String, String, String)> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for m in &self.wf_models {
                 egui::Frame::none()
@@ -2447,25 +2622,44 @@ impl App {
                     .inner_margin(egui::Margin::symmetric(10.0, 7.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            if m.found_at.is_empty() {
+                            if !m.found_at.is_empty() {
+                                chip(ui, "已有", egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                                ui.label(&m.name);
+                                ui.weak(&m.found_at);
+                            } else if m.in_comfy {
+                                chip(ui, "ComfyUI 已加载", egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                                ui.label(&m.name);
+                                ui.weak("运行中的实例可见（在本工具未扫描的路径）");
+                            } else {
                                 chip(ui, "缺失", egui::Color32::from_rgb(66, 34, 38), C_RED);
                                 ui.label(&m.name);
                                 ui.weak(format!("应放入 {}", m.dir));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.small_button("去搜索").clicked() {
+                                    if let Some((url, sub)) = &m.dl {
+                                        if ui.add(accent_btn("下载")).clicked() {
+                                            fill_one = Some((basename(&m.name), url.clone(), sub.clone()));
+                                        }
+                                    } else if ui.small_button("去搜索").clicked() {
                                         jump = Some(search_term(&m.name));
                                     }
                                 });
-                            } else {
-                                chip(ui, "已有", egui::Color32::from_rgb(26, 56, 40), C_GREEN);
-                                ui.label(&m.name);
-                                ui.weak(&m.found_at);
                             }
                         });
                     });
                 ui.add_space(5.0);
             }
         });
+        if let Some((name, url, sub)) = fill_one {
+            let url = apply_mirror(&url, &self.cfg);
+            start_task(
+                self.cfg.clone(),
+                self.downloads.clone(),
+                name,
+                sub,
+                DlMeta { download_url: url, source: "hf".into(), expected_sha256: None },
+                0.0,
+            );
+        }
         if let Some(q) = jump {
             self.query = q;
             self.tab = Tab::Search;
@@ -2699,7 +2893,27 @@ impl App {
             ui.label("同时下载数");
             ui.add(egui::Slider::new(&mut self.cfg.max_concurrent, 1..=4));
             ui.end_row();
+            ui.label("ComfyUI 服务地址");
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_url).desired_width(300.0).hint_text("http://127.0.0.1:8188"));
+                // 连接中禁用按钮，避免并发探测导致状态乱序覆盖
+                if ui.add_enabled(self.comfy_status != "连接中…", egui::Button::new("测试连接")).clicked() {
+                    self.comfy_status = "连接中…".into();
+                    let cfg = self.cfg.clone();
+                    let tx = self.tx.clone();
+                    std::thread::spawn(move || {
+                        let r = comfy_system_stats(&cfg);
+                        let _ = tx.send(Msg::ComfyStatus(r));
+                    });
+                }
+                if !self.comfy_status.is_empty() {
+                    let c = if self.comfy_status.starts_with("已连接") { C_GREEN } else if self.comfy_status == "连接中…" { C_GRAY } else { C_RED };
+                    ui.colored_label(c, &self.comfy_status);
+                }
+            });
+            ui.end_row();
         });
+        ui.weak("连接运行中的 ComfyUI 后，工作流分析会用它核对模型（覆盖本工具未扫描的额外路径）。");
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui.add(accent_btn("保存设置")).clicked() {
@@ -3082,6 +3296,7 @@ mod tests {
             civitai_token: String::new(),
             hf_mirror: true,
             max_concurrent: 1,
+            comfy_url: default_comfy_url(),
         }
     }
 
@@ -3281,6 +3496,69 @@ mod tests {
         assert!(r.iter().any(|(k, p)| k == "models/loras" && p == &PathBuf::from("D:/Other/ComfyUI/").join("models/loras")));
         assert!(r.iter().any(|(k, p)| k == "models/checkpoints" && p == &PathBuf::from("E:/sd-webui").join("models/Stable-diffusion")));
         assert!(r.iter().any(|(k, p)| k == "models/vae" && p == &PathBuf::from("E:/sd-webui").join("models/VAE")));
+    }
+
+    // 用本地 mock HTTP 服务模拟 ComfyUI 的 /system_stats 与 /object_info，验证客户端解析（无需真跑 ComfyUI）
+    #[test]
+    fn comfy_client_against_mock() {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stats = r#"{"system":{"comfyui_version":"0.3.40","os":"nt","python_version":"3.12"}}"#;
+        // object_info：CheckpointLoaderSimple 的 ckpt_name 下拉含两个模型；混入非模型字符串应被忽略
+        let object_info = r#"{"CheckpointLoaderSimple":{"input":{"required":{"ckpt_name":[["flux1-dev-fp8.safetensors","sdxl_base.safetensors"],{}]}}},"KSampler":{"input":{"required":{"sampler_name":[["euler","dpmpp_2m"],{}]}}}}"#;
+        let handle = std::thread::spawn(move || {
+            // 接受两个请求：/system_stats 与 /object_info
+            for _ in 0..2 {
+                let (mut sock, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 2048];
+                let n = sock.read(&mut buf).unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let body = if req.contains("/object_info") { object_info } else { stats };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                sock.write_all(resp.as_bytes()).unwrap();
+            }
+        });
+        // 不带 scheme 也应能用（comfy_base 补 http://）
+        let cfg = Config { comfy_url: format!("127.0.0.1:{}", port), ..Config::default() };
+        assert_eq!(comfy_system_stats(&cfg).unwrap(), "0.3.40");
+        let models = comfy_known_models(&cfg).unwrap();
+        // 带目录维度：(逻辑目录, 小写basename)
+        assert!(models.contains(&("models/checkpoints".into(), "flux1-dev-fp8.safetensors".into())), "应提取出 checkpoint");
+        assert!(models.contains(&("models/checkpoints".into(), "sdxl_base.safetensors".into())));
+        assert!(!models.iter().any(|(_, b)| b == "euler"), "采样器名不应被收入");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn comfy_base_normalizes_scheme() {
+        let mk = |u: &str| comfy_base(&Config { comfy_url: u.into(), ..Config::default() });
+        assert_eq!(mk("127.0.0.1:8188"), "http://127.0.0.1:8188");
+        assert_eq!(mk("http://127.0.0.1:8188/"), "http://127.0.0.1:8188");
+        assert_eq!(mk("https://my.comfy.host"), "https://my.comfy.host");
+    }
+
+    #[test]
+    fn mirror_switch() {
+        let hf = Config { hf_mirror: true, ..Config::default() };
+        let off = Config { hf_mirror: false, ..Config::default() };
+        let u = "https://huggingface.co/repo/resolve/main/x.safetensors";
+        assert!(apply_mirror(u, &hf).starts_with("https://hf-mirror.com/"));
+        let m = "https://hf-mirror.com/repo/resolve/main/x.safetensors";
+        assert!(apply_mirror(m, &off).starts_with("https://huggingface.co/"));
+    }
+
+    #[test]
+    fn config_back_compat_without_comfy_url() {
+        // 老 config.json 没有 comfy_url 字段也应能反序列化（serde default），不丢 token
+        let old = r#"{"comfy_root":"D:\\ComfyUI","civitai_token":"tok123","hf_mirror":true,"max_concurrent":2}"#;
+        let c: Config = serde_json::from_str(old).expect("旧配置应可解析");
+        assert_eq!(c.civitai_token, "tok123");
+        assert_eq!(c.comfy_url, "http://127.0.0.1:8188");
     }
 
     #[test]
