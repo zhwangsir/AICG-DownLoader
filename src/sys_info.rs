@@ -204,6 +204,44 @@ pub fn vram_tier(vram_mb: u64) -> &'static str {
     }
 }
 
+/// 按显存档位给出具体模型推荐：返回 (类别, 推荐模型, 搜索关键词)。
+/// 搜索关键词用于在工具内一键跳转 Civitai 搜索。
+pub fn vram_recommendations(vram_mb: u64) -> Vec<(&'static str, &'static str, &'static str)> {
+    match vram_mb {
+        0 => Vec::new(),
+        1..=4096 => vec![
+            ("文生图 写实", "SD 1.5 / SDXL Turbo", "sdxl turbo"),
+            ("文生图 省显存", "GGUF Q4 量化模型", "gguf q4"),
+            ("视频", "LTX-Video（轻量）", "ltx video"),
+        ],
+        4097..=8192 => vec![
+            ("文生图 写实", "Flux.1 GGUF Q4/Q5", "flux gguf"),
+            ("文生图 动漫", "Illustrious / Pony (SDXL)", "illustrious"),
+            ("视频", "Wan 2.2 5B GGUF", "wan 2.2 5b gguf"),
+        ],
+        8193..=12288 => vec![
+            ("文生图 写实", "Flux.1 dev fp8", "flux dev fp8"),
+            ("文生图 动漫", "Illustrious / NoobAI (SDXL)", "illustrious"),
+            ("视频", "Wan 2.2 5B fp8", "wan 2.2 5b"),
+        ],
+        12289..=16384 => vec![
+            ("视频 图生视频", "Wan 2.2 I2V 14B（fp8 / GGUF Q5）", "wan 2.2 i2v"),
+            ("文生图 写实", "Flux.1 dev fp8", "flux dev"),
+            ("文生图 动漫", "Illustrious / NoobAI (SDXL)", "illustrious"),
+            ("加速", "Lightning / LCM 4-step LoRA", "lightning lora"),
+        ],
+        16385..=24576 => vec![
+            ("视频 图生视频", "Wan 2.2 I2V 14B fp16", "wan 2.2 i2v"),
+            ("文生图 写实", "Flux.1 dev（fp16）", "flux dev"),
+            ("文生图 动漫", "Illustrious / Pony XL", "illustrious"),
+        ],
+        _ => vec![
+            ("视频", "Wan 2.2 14B fp16（高分辨率）", "wan 2.2"),
+            ("文生图", "Flux.1 dev fp16 / 原生大图", "flux dev"),
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

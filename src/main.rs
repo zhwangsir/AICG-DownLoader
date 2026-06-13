@@ -3690,6 +3690,56 @@ impl App {
     fn ui_preset(&mut self, ui: &mut egui::Ui) {
         ui.weak("预设整套模型，一键全部加入下载队列，自动归类目录并校验 SHA256。");
         ui.add_space(4.0);
+
+        // ===== 按显存推荐 =====
+        let gpu = self.profile.as_ref().and_then(|p| p.gpu.clone());
+        let mut go_search: Option<String> = None;
+        egui::Frame::none()
+            .fill(C_CARD)
+            .rounding(egui::Rounding::same(10.0))
+            .inner_margin(egui::Margin::same(12.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong("🎯 按你的显卡推荐");
+                    if let Some(g) = &gpu {
+                        let gb = (g.vram_mb as f64 / 1024.0).round() as u64;
+                        chip(ui, &format!("{} · {} GB", g.name, gb), egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                    }
+                });
+                match &gpu {
+                    None if self.profile.is_none() => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.weak("正在检测显卡…");
+                        });
+                    }
+                    None => {
+                        ui.weak("未检测到 NVIDIA 显卡，无法按显存推荐；可直接用下方预设或搜索。");
+                    }
+                    Some(g) => {
+                        ui.weak(sys_info::vram_tier(g.vram_mb));
+                        ui.add_space(4.0);
+                        for (cat, model, query) in sys_info::vram_recommendations(g.vram_mb) {
+                            ui.horizontal(|ui| {
+                                chip(ui, cat, egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                                ui.label(model);
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.small_button("🔍 搜索").clicked() {
+                                        go_search = Some(query.to_string());
+                                    }
+                                });
+                            });
+                        }
+                    }
+                }
+            });
+        if let Some(q) = go_search {
+            self.query = q;
+            self.tab = Tab::Search;
+            self.do_search();
+        }
+        ui.add_space(8.0);
+
         let ps = presets(&self.cfg);
         for (_k, title, files) in ps {
             egui::Frame::none()
