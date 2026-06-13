@@ -67,18 +67,60 @@ fn setup_style(ctx: &egui::Context) {
     v.widgets.noninteractive.bg_stroke.color = egui::Color32::from_rgb(42, 42, 52); // 分隔线
     v.widgets.inactive.weak_bg_fill = egui::Color32::from_rgb(38, 38, 50); // 按钮底
     v.widgets.inactive.fg_stroke.color = egui::Color32::from_rgb(214, 214, 224);
-    v.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(48, 48, 64);
-    v.widgets.active.weak_bg_fill = egui::Color32::from_rgb(56, 56, 76);
+    v.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(50, 50, 66);
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(72, 96, 150));
+    v.widgets.active.weak_bg_fill = egui::Color32::from_rgb(58, 58, 80);
+    // 弹窗/下拉柔和投影，增强层次
+    let soft = egui::epaint::Shadow {
+        offset: egui::vec2(0.0, 6.0),
+        blur: 24.0,
+        spread: 0.0,
+        color: egui::Color32::from_black_alpha(120),
+    };
+    v.window_shadow = soft;
+    v.popup_shadow = egui::epaint::Shadow {
+        offset: egui::vec2(0.0, 4.0),
+        blur: 16.0,
+        spread: 0.0,
+        color: egui::Color32::from_black_alpha(110),
+    };
     style.visuals = v;
     ctx.set_style(style);
 }
 
-// 小圆角彩色标签（类型/状态徽章）
+// 卡片描边（极淡的白，给纯色卡片一道边缘高光，与背景分离）
+const C_CARD_STROKE: egui::Color32 = egui::Color32::from_rgb(48, 48, 60);
+
+// 统一的内容卡片：柔和投影 + 1px 描边 + 圆角 + 内边距。主面板/结果卡用，建立层次。
+fn card() -> egui::Frame {
+    egui::Frame::none()
+        .fill(C_CARD)
+        .stroke(egui::Stroke::new(1.0, C_CARD_STROKE))
+        .rounding(egui::Rounding::same(12.0))
+        .inner_margin(egui::Margin::same(12.0))
+        .shadow(egui::epaint::Shadow {
+            offset: egui::vec2(0.0, 3.0),
+            blur: 12.0,
+            spread: 0.0,
+            color: egui::Color32::from_black_alpha(70),
+        })
+}
+
+// 轻量卡片：仅描边 + 圆角，无投影。用于重复的列表行/指标小卡，避免阴影堆叠显脏。
+fn soft_card() -> egui::Frame {
+    egui::Frame::none()
+        .fill(C_CARD)
+        .stroke(egui::Stroke::new(1.0, C_CARD_STROKE))
+        .rounding(egui::Rounding::same(10.0))
+        .inner_margin(egui::Margin::same(10.0))
+}
+
+// 胶囊形彩色标签（类型/状态徽章）
 fn chip(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
     egui::Frame::none()
         .fill(bg)
-        .rounding(egui::Rounding::same(6.0))
-        .inner_margin(egui::Margin::symmetric(7.0, 2.0))
+        .rounding(egui::Rounding::same(999.0)) // 大圆角 → 渲染时按半高裁剪成胶囊
+        .inner_margin(egui::Margin::symmetric(9.0, 3.0))
         .show(ui, |ui| {
             ui.label(egui::RichText::new(text).size(11.5).color(fg));
         });
@@ -2748,6 +2790,7 @@ impl App {
             Ok("preset") => Tab::Preset,
             Ok("workflow") => Tab::Workflow,
             Ok("library") => Tab::Library,
+            Ok("downloads") => Tab::Downloads,
             Ok("comfy") => Tab::ComfyUI,
             Ok("settings") => Tab::Settings,
             _ => Tab::Search,
@@ -3229,14 +3272,21 @@ impl eframe::App for App {
                 );
             }
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Search, "🔍 搜索");
-                ui.selectable_value(&mut self.tab, Tab::Link, "🔗 链接");
-                ui.selectable_value(&mut self.tab, Tab::Preset, "📦 套餐");
-                ui.selectable_value(&mut self.tab, Tab::Workflow, "📋 工作流");
-                ui.selectable_value(&mut self.tab, Tab::Library, "📁 模型库");
-                ui.selectable_value(&mut self.tab, Tab::Downloads, "⬇ 下载");
-                ui.selectable_value(&mut self.tab, Tab::ComfyUI, "🚀 ComfyUI");
-                ui.selectable_value(&mut self.tab, Tab::Settings, "⚙ 设置");
+                // 标签做成胶囊：活动项 = 强调蓝 pill，非活动 = 纯文字（hover 有底色），不用 emoji 避免缺字形
+                let pill = egui::Rounding::same(999.0);
+                ui.visuals_mut().widgets.inactive.rounding = pill;
+                ui.visuals_mut().widgets.hovered.rounding = pill;
+                ui.visuals_mut().widgets.active.rounding = pill;
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.spacing_mut().button_padding = egui::vec2(13.0, 6.0);
+                ui.selectable_value(&mut self.tab, Tab::Search, "搜索");
+                ui.selectable_value(&mut self.tab, Tab::Link, "链接");
+                ui.selectable_value(&mut self.tab, Tab::Preset, "套餐");
+                ui.selectable_value(&mut self.tab, Tab::Workflow, "工作流");
+                ui.selectable_value(&mut self.tab, Tab::Library, "模型库");
+                ui.selectable_value(&mut self.tab, Tab::Downloads, "下载");
+                ui.selectable_value(&mut self.tab, Tab::ComfyUI, "ComfyUI");
+                ui.selectable_value(&mut self.tab, Tab::Settings, "设置");
             });
         });
 
@@ -3446,10 +3496,7 @@ impl App {
                             egui::vec2(card_width, 0.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
-                                let card_inner = egui::Frame::none()
-                                    .fill(C_CARD)
-                                    .rounding(egui::Rounding::same(10.0))
-                                    .inner_margin(egui::Margin::same(10.0))
+                                let card_inner = card()
                                     .show(ui, |ui| {
                                         ui.vertical(|ui| {
                                             // 固定高度缩略图区域：有图时按原比例缩放居中，无图/失败/关闭时显示占位
@@ -3615,9 +3662,7 @@ impl App {
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             if !d.description.is_empty() {
-                                egui::Frame::none()
-                                    .fill(C_CARD)
-                                    .rounding(egui::Rounding::same(10.0))
+                                soft_card()
                                     .inner_margin(egui::Margin::same(12.0))
                                     .show(ui, |ui| {
                                         egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
@@ -3694,10 +3739,7 @@ impl App {
         // ===== 按显存推荐 =====
         let gpu = self.profile.as_ref().and_then(|p| p.gpu.clone());
         let mut go_search: Option<String> = None;
-        egui::Frame::none()
-            .fill(C_CARD)
-            .rounding(egui::Rounding::same(10.0))
-            .inner_margin(egui::Margin::same(12.0))
+        card()
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.strong("🎯 按你的显卡推荐");
@@ -3742,10 +3784,7 @@ impl App {
 
         let ps = presets(&self.cfg);
         for (_k, title, files) in ps {
-            egui::Frame::none()
-                .fill(C_CARD)
-                .rounding(egui::Rounding::same(10.0))
-                .inner_margin(egui::Margin::same(12.0))
+            card()
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.strong(&title);
@@ -3854,9 +3893,7 @@ impl App {
         let mut fill_one: Option<(String, String, DlMeta)> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for m in &self.wf_models {
-                egui::Frame::none()
-                    .fill(C_CARD)
-                    .rounding(egui::Rounding::same(8.0))
+                soft_card()
                     .inner_margin(egui::Margin::symmetric(10.0, 7.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -3995,9 +4032,7 @@ impl App {
                     ui.weak(fmt_size(dir_size));
                 });
                 for f in shown {
-                    egui::Frame::none()
-                        .fill(C_CARD)
-                        .rounding(egui::Rounding::same(8.0))
+                    soft_card()
                         .inner_margin(egui::Margin::symmetric(10.0, 6.0))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
@@ -4167,9 +4202,7 @@ impl App {
     }
 
     fn ui_settings(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::none()
-            .fill(C_CARD)
-            .rounding(egui::Rounding::same(10.0))
+        card()
             .inner_margin(egui::Margin::same(14.0))
             .show(ui, |ui| {
         egui::Grid::new("cfg").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
@@ -4298,7 +4331,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
 
         // 系统画像
-        egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+        card().show(ui, |ui| {
             ui.strong("系统配置");
             if let Some(ref p) = self.profile {
                 ui.horizontal(|ui| {
@@ -4371,7 +4404,7 @@ impl App {
         ui.add_space(12.0);
 
         if !installed {
-            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+            card().show(ui, |ui| {
                 ui.strong("一键安装");
                 ui.weak("将自动执行: git clone → 创建 venv → 安装 PyTorch → 安装依赖 → 安装 ComfyUI-Manager");
                 ui.add_space(6.0);
@@ -4431,7 +4464,7 @@ impl App {
             if let Some(d) = &desktop {
             // ===== ComfyUI Desktop（electron）面板 =====
             let url = d.port.map(|p| format!("http://127.0.0.1:{}", p)).unwrap_or_else(|| self.cfg.comfy_url.clone());
-            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+            card().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.strong("ComfyUI Desktop");
                     if !d.version.is_empty() {
@@ -4478,7 +4511,7 @@ impl App {
                 ui.weak("Desktop 版由 electron 应用自行管理后端进程；本工具不直接启停其后端。");
             });
         } else {
-            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+            card().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.strong("运行控制");
                     if let Some(pid) = self.comfy_pid {
@@ -4570,7 +4603,7 @@ impl App {
             let mut act_update: Option<(String, PathBuf)> = None;
             let mut act_toggle: Option<(PathBuf, bool)> = None;
             let mut act_open: Option<PathBuf> = None;
-            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+            card().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.strong(format!("自定义节点 ({})", nodes.len()));
                     if ui.small_button("🔄 刷新").clicked() {
@@ -4921,39 +4954,39 @@ impl App {
 
         // 统计卡片行
         ui.horizontal(|ui| {
-            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+            soft_card().show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.weak("总任务");
                     ui.strong(total.to_string());
                 });
             });
-            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+            soft_card().show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.weak("进行中");
                     ui.strong(active.to_string());
                 });
             });
-            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+            soft_card().show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.weak("已完成");
                     ui.strong(done.to_string());
                 });
             });
-            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+            soft_card().show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.weak("失败");
                     ui.strong(failed.to_string());
                 });
             });
             if paused > 0 {
-                egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                soft_card().show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.weak("已暂停");
                         ui.strong(paused.to_string());
                     });
                 });
             }
-            egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+            soft_card().show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.weak("总速度");
                     ui.strong(format!("{}/s", fmt_size(total_speed as u64)));
@@ -4961,7 +4994,7 @@ impl App {
             });
             if total_speed > 0.0 {
                 if let Some(eta) = eta_secs(0, total_remaining, total_speed) {
-                    egui::Frame::none().fill(C_CARD).rounding(egui::Rounding::same(8.0)).inner_margin(10.0).show(ui, |ui| {
+                    soft_card().show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.weak("预计完成");
                             ui.strong(fmt_duration(eta));
@@ -5021,9 +5054,7 @@ impl App {
             } else {
                 for t in filtered {
                     let frac = if t.total > 0 { (t.downloaded as f32 / t.total as f32).min(1.0) } else { 0.0 };
-                    egui::Frame::none()
-                        .fill(C_CARD)
-                        .rounding(egui::Rounding::same(10.0))
+                    soft_card()
                         .inner_margin(egui::Margin::symmetric(12.0, 10.0))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
