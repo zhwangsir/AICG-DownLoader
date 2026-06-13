@@ -105,8 +105,71 @@ fn status_chip(ui: &mut egui::Ui, status: &str) {
 }
 
 // ============ 配置 ============
+/// 统一的网络预览图渲染：在 w×h 固定框内等比居中显示图片。
+/// - `show=false`：显示「预览已关闭」占位，不发起任何网络请求
+/// - `uri` 为空：显示「无预览」占位
+/// - 加载中：spinner 占位
+/// - 加载失败：可点击的「点击重试」占位（点击 `forget_image` 触发重新加载），
+///   而非 egui 默认那个红色 ⚠——在需要代理却连不上 image-b2.civitai.com 时尤其常见。
+fn preview_img(ui: &mut egui::Ui, uri: &str, w: f32, h: f32, rounding: f32, show: bool) {
+    let r = egui::Rounding::same(rounding);
+    let bg = egui::Color32::from_rgb(38, 38, 50);
+    let box_size = egui::vec2(w, h);
+    let icon_size = (w.min(h) * 0.22).clamp(16.0, 36.0);
+    // 居中图标+文字的占位框
+    let placeholder = |ui: &mut egui::Ui, icon: &str, text: &str, icon_color: egui::Color32| -> egui::Response {
+        let (rect, resp) = ui.allocate_exact_size(box_size, egui::Sense::click());
+        ui.painter().rect_filled(rect, r, bg);
+        let p = ui.painter();
+        if !icon.is_empty() {
+            p.text(rect.center() - egui::vec2(0.0, 11.0), egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(icon_size), icon_color);
+        }
+        p.text(rect.center() + egui::vec2(0.0, 14.0), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(11.0), C_GRAY);
+        resp
+    };
+    if uri.is_empty() {
+        placeholder(ui, "🖼", "无预览", C_GRAY);
+        return;
+    }
+    if !show {
+        placeholder(ui, "🚫", "预览已关闭", C_GRAY);
+        return;
+    }
+    let probe = egui::Image::from_uri(uri.to_string());
+    match probe.load_for_size(ui.ctx(), box_size) {
+        Ok(egui::load::TexturePoll::Ready { texture }) => {
+            let (rect, _) = ui.allocate_exact_size(box_size, egui::Sense::hover());
+            let ts = texture.size;
+            let draw = if ts.x > 0.0 && ts.y > 0.0 {
+                let scale = (rect.width() / ts.x).min(rect.height() / ts.y);
+                egui::Rect::from_center_size(rect.center(), egui::vec2(ts.x * scale, ts.y * scale))
+            } else {
+                rect
+            };
+            egui::Image::from_uri(uri.to_string()).rounding(r).paint_at(ui, draw);
+        }
+        Ok(egui::load::TexturePoll::Pending { .. }) => {
+            let (rect, _) = ui.allocate_exact_size(box_size, egui::Sense::hover());
+            ui.painter().rect_filled(rect, r, bg);
+            egui::Spinner::new().paint_at(ui, rect);
+        }
+        Err(_) => {
+            let resp = placeholder(ui, "⚠", "点击重试", C_YELLOW);
+            if resp.clicked() {
+                ui.ctx().forget_image(uri);
+            }
+            if resp.hovered() {
+                ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+            }
+        }
+    }
+}
+
 fn default_comfy_url() -> String {
     "http://127.0.0.1:8188".into()
+}
+fn default_civitai_host() -> String {
+    "civitai.red".into()
 }
 fn default_true() -> bool {
     true
@@ -133,6 +196,13 @@ struct Config {
     // ComfyUI 启动附加参数，如 --lowvram --listen
     #[serde(default)]
     comfy_args: String,
+    // Civitai API 域名（com / red / work），用于应对不同网络环境下域名被重置的情况
+    #[serde(default = "default_civitai_host")]
+    civitai_host: String,
+    // 是否加载网络预览图（搜索卡片/详情页/解析弹窗/模型库缩略图）。
+    // 部分网络环境下 image-b2.civitai.com 的 TLS 连不上，关掉可避免满屏加载失败。
+    #[serde(default = "default_true")]
+    show_previews: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -146,7 +216,21 @@ impl Default for Config {
             tray_minimize: true,
             notify_on_complete: true,
             comfy_args: String::new(),
+            civitai_host: default_civitai_host(),
+            show_previews: true,
         }
+    }
+}
+impl Config {
+    /// 返回 Civitai API 根地址（含 https:// 和 /api，不含末尾斜杠）
+    fn civitai_api_base(&self) -> String {
+        let host = self.civitai_host.trim();
+        let host = host.strip_prefix("https://").unwrap_or(host);
+        let host = host.strip_suffix('/').unwrap_or(host);
+        if host.is_empty() {
+            return "https://civitai.red/api".into();
+        }
+        format!("https://{}/api", host)
     }
 }
 fn config_path() -> PathBuf {
@@ -355,6 +439,27 @@ struct VerInfo {
     filename: String,
     size_kb: f64,
     sha256: String,
+}
+#[derive(Clone)]
+struct ModelDetail {
+    id: i64,
+    kind: String,
+    base: String,
+    downloads: i64,
+    description: String,
+    tags: Vec<String>,
+    versions: Vec<VerInfo>,
+    images: Vec<String>,
+}
+#[derive(Clone)]
+struct ModelDetailState {
+    item: SearchItem,
+    data: Option<ModelDetail>,
+    loading: bool,
+    err: String,
+    sel_version: i64,
+    // 画廊分页：当前展示的预览图数量，「加载更多」递增（避免一次性实例化几十张）
+    gallery_shown: usize,
 }
 #[derive(Clone)]
 struct Resolved {
@@ -583,7 +688,7 @@ fn primary_file(ver: &Value) -> Option<Value> {
 }
 
 fn civitai_search(cfg: &Config, query: &str, types: &str, base: &str) -> Result<(Vec<SearchItem>, Option<String>), String> {
-    let mut url = "https://civitai.com/api/v1/models?limit=24&nsfw=true&sort=Most%20Downloaded".to_string();
+    let mut url = format!("{}/v1/models?limit=24&nsfw=true&sort=Most%20Downloaded", cfg.civitai_api_base());
     if !query.is_empty() {
         url.push_str(&format!("&query={}", urlencode(query)));
     }
@@ -637,6 +742,99 @@ fn civitai_fetch_page(cfg: &Config, url: &str) -> Result<(Vec<SearchItem>, Optio
     Ok((out, next))
 }
 
+fn strip_html(html: &str) -> String {
+    let re = regex::Regex::new(r"<[^>]+>").unwrap();
+    let s = re.replace_all(html, " ");
+    // 简单解码常见 HTML 实体
+    let s = s.replace("&nbsp;", " ").replace("&quot;", "\"").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+    regex::Regex::new(r"\s+")
+        .unwrap()
+        .replace_all(&s, " ")
+        .trim()
+        .to_string()
+}
+
+// 获取模型详情页完整数据（描述、版本、图片）
+fn civitai_model_detail(cfg: &Config, item: &SearchItem) -> Result<ModelDetail, String> {
+    let api = format!("https://{}/api/v1/models/{}", cfg.civitai_host, item.id);
+    let mut req = agent(cfg).get(&api);
+    if !cfg.civitai_token.is_empty() {
+        req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
+    }
+    let body = req.call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let kind = v.get("type").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let downloads = v
+        .get("stats")
+        .and_then(|s| s.get("downloadCount"))
+        .and_then(|x| x.as_i64())
+        .unwrap_or(0);
+    let description = strip_html(v.get("description").and_then(|x| x.as_str()).unwrap_or(""));
+    let tags = v
+        .get("tags")
+        .and_then(|x| x.as_array())
+        .map(|a| a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    let vers_arr = v.get("modelVersions").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+    let versions: Vec<VerInfo> = vers_arr
+        .iter()
+        .map(|ver| {
+            let vf = primary_file(ver);
+            VerInfo {
+                id: ver.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
+                name: ver.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                base: ver.get("baseModel").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                filename: vf.as_ref().and_then(|f| f.get("name")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                size_kb: vf.as_ref().and_then(|f| f.get("sizeKB")).and_then(|x| x.as_f64()).unwrap_or(0.0),
+                sha256: vf
+                    .as_ref()
+                    .and_then(|f| f.get("hashes"))
+                    .and_then(|h| h.get("SHA256"))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_lowercase(),
+            }
+        })
+        .collect();
+    // 图片：优先收集当前版本，再收集其它版本，去重
+    let mut images = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push_imgs = |ver: &Value| {
+        if let Some(arr) = ver.get("images").and_then(|x| x.as_array()) {
+            for im in arr {
+                if let Some(url) = im.get("url").and_then(|x| x.as_str()) {
+                    if seen.insert(url.to_string()) {
+                        images.push(url.to_string());
+                    }
+                }
+            }
+        }
+    };
+    if let Some(pos) = vers_arr.iter().position(|ver| {
+        ver.get("id").and_then(|x| x.as_i64()) == Some(item.version_id)
+    }) {
+        push_imgs(&vers_arr[pos]);
+    }
+    for ver in &vers_arr {
+        push_imgs(ver);
+    }
+    let base = versions
+        .iter()
+        .find(|v| v.id == item.version_id)
+        .map(|v| v.base.clone())
+        .unwrap_or_else(|| item.base.clone());
+    Ok(ModelDetail {
+        id: item.id,
+        kind,
+        base,
+        downloads,
+        description,
+        tags,
+        versions,
+        images,
+    })
+}
+
 fn resolve_url(cfg: &Config, url: &str) -> Result<Resolved, String> {
     let url = url.trim();
     // Civitai
@@ -657,7 +855,7 @@ fn resolve_url(cfg: &Config, url: &str) -> Result<Resolved, String> {
 // 经 /api/v1/models/{id} 解析 Civitai 模型为可下载项；want_ver 指定版本（作品页资源带版本号）
 fn resolve_civitai_model(cfg: &Config, mid: &str, want_ver: Option<String>) -> Result<Resolved, String> {
     {
-        let api = format!("https://civitai.com/api/v1/models/{}", mid);
+        let api = format!("https://{}/api/v1/models/{}", cfg.civitai_host, mid);
         let mut req = agent(cfg).get(&api);
         if !cfg.civitai_token.is_empty() {
             req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
@@ -713,7 +911,7 @@ fn resolve_civitai_model(cfg: &Config, mid: &str, want_ver: Option<String>) -> R
             size_kb: file.get("sizeKB").and_then(|x| x.as_f64()).unwrap_or(0.0),
             subdir: type_dir(&kind).to_string(),
             image,
-            download_url: format!("https://civitai.com/api/download/models/{}", version_id),
+            download_url: format!("https://{}/api/download/models/{}", cfg.civitai_host, version_id),
             versions,
             version_id,
             model_id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
@@ -842,7 +1040,7 @@ fn collect_media_refs(v: &Value, out: &mut Vec<MediaRef>) {
 
 // 按版本号解析（帖子页只有裸 versionId）：/api/v1/model-versions/{id} → Resolved
 fn resolve_civitai_version(cfg: &Config, vid: &str) -> Result<Resolved, String> {
-    let api = format!("https://civitai.com/api/v1/model-versions/{}", vid);
+    let api = format!("https://{}/api/v1/model-versions/{}", cfg.civitai_host, vid);
     let mut req = agent(cfg).get(&api);
     if !cfg.civitai_token.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
@@ -1645,7 +1843,7 @@ fn identify_one(cfg: &Config, path: &Path) -> Ident {
 
 // Civitai by-hash 反查：本地模型 → 是什么模型/哪个版本
 fn civitai_by_hash(cfg: &Config, sha256: &str) -> Ident {
-    let url = format!("https://civitai.com/api/v1/model-versions/by-hash/{}", sha256);
+    let url = format!("https://{}/api/v1/model-versions/by-hash/{}", cfg.civitai_host, sha256);
     let mut req = agent(cfg).get(&url);
     if !cfg.civitai_token.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
@@ -1708,7 +1906,7 @@ fn ver_base(ver: &Value) -> &str {
 // 查询 Civitai 模型最新版本：在当前版本同基模/同变体的版本里，按 createdAt 找最新。
 // 若当前版本已不在列表中，则按当前基模筛选后取最新。
 fn civitai_model_latest_version(cfg: &Config, model_id: i64, current_vid: i64, current_base: &str) -> Result<(i64, String, String), String> {
-    let url = format!("https://civitai.com/api/v1/models/{}", model_id);
+    let url = format!("https://{}/api/v1/models/{}", cfg.civitai_host, model_id);
     let mut req = agent(cfg).get(&url);
     if !cfg.civitai_token.is_empty() {
         req = req.set("Authorization", &format!("Bearer {}", cfg.civitai_token));
@@ -1756,11 +1954,11 @@ fn civitai_model_latest_version(cfg: &Config, model_id: i64, current_vid: i64, c
         }
         if let Some(ver) = best {
             let vid = ver_id(ver);
-            return Ok((vid, ver_name(ver).to_string(), format!("https://civitai.com/api/download/models/{}", vid)));
+            return Ok((vid, ver_name(ver).to_string(), format!("https://{}/api/download/models/{}", cfg.civitai_host, vid)));
         }
         // 当前变体已是最新，把当前版本作为“最新”返回，让 UI 显示“已是最新”
         let vid = ver_id(cur);
-        return Ok((vid, ver_name(cur).to_string(), format!("https://civitai.com/api/download/models/{}", vid)));
+        return Ok((vid, ver_name(cur).to_string(), format!("https://{}/api/download/models/{}", cfg.civitai_host, vid)));
     }
 
     // 当前版本已不在 Civitai 列表中：优先按当前基模筛选，再按发布时间取最新
@@ -1782,7 +1980,7 @@ fn civitai_model_latest_version(cfg: &Config, model_id: i64, current_vid: i64, c
     }
     let ver = best.ok_or("该模型无有效版本")?;
     let vid = ver_id(ver);
-    Ok((vid, ver_name(ver).to_string(), format!("https://civitai.com/api/download/models/{}", vid)))
+    Ok((vid, ver_name(ver).to_string(), format!("https://{}/api/download/models/{}", cfg.civitai_host, vid)))
 }
 
 // ============ 工作流缺失模型分析 ============
@@ -2075,6 +2273,7 @@ fn presets(cfg: &Config) -> Vec<PresetEntry> {
 enum Msg {
     // bool = append（加载更多时追加而非替换）
     Search(Result<(Vec<SearchItem>, Option<String>), String>, bool),
+    ModelDetailFetch { item: SearchItem, result: Result<ModelDetail, String> },
     Resolve(Box<Result<Resolved, String>>),
     ResolveSet(Result<Vec<Resolved>, String>),
     Library(Vec<LibDir>),
@@ -2167,6 +2366,7 @@ struct App {
     base_filter: String,
     results: Vec<SearchItem>,
     next_page: Option<String>,
+    detail: Option<ModelDetailState>,
     // 链接
     link: String,
     resolve_err: String,
@@ -2220,9 +2420,21 @@ impl App {
         store_main_hwnd(cc);
         let cjk_font_ok = install_cjk_font(&cc.egui_ctx);
         setup_style(&cc.egui_ctx);
-        egui_extras::install_image_loaders(&cc.egui_ctx);
-        let (tx, rx) = std::sync::mpsc::channel();
         let cfg = load_config();
+        // 让默认/兜底的 HTTP 图片加载器（egui_extras 内部用 ehttp）也能走用户配置的代理，
+        // 否则图片 URL 会直接连接，在需要代理的网络下全部失败。
+        if let Some(ref proxy) = cfg.proxy_url {
+            let proxy = proxy.trim();
+            if !proxy.is_empty() {
+                std::env::set_var("HTTP_PROXY", proxy);
+                std::env::set_var("HTTPS_PROXY", proxy);
+            }
+        }
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        // 自定义预览图加载器：在默认加载器之后注册（egui 按后进先出顺序尝试），
+        // 由它优先接管 http(s) 预览图——走我们带代理的 ureq agent + 本地磁盘缓存。
+        cc.egui_ctx.add_bytes_loader(Arc::new(PreviewLoader::new(&cfg)));
+        let (tx, rx) = std::sync::mpsc::channel();
         let downloads: Arc<Mutex<Vec<TaskRef>>> = Arc::new(Mutex::new(Vec::new()));
         // 单实例文件锁：第二个实例不恢复也不写 tasks.json，否则两进程会并发写同一 .part 损坏文件
         let lock_path = tasks_path().with_file_name("app.lock");
@@ -2281,6 +2493,7 @@ impl App {
             base_filter: String::new(),
             results: Vec::new(),
             next_page: None,
+            detail: None,
             link: String::new(),
             resolve_err: String::new(),
             pending: None,
@@ -2551,6 +2764,27 @@ impl eframe::App for App {
                     self.next_page = next;
                 }
                 Msg::Search(Err(e), _) => self.resolve_err = friendly_err(e),
+                Msg::ModelDetailFetch { item, result } => {
+                    if let Some(state) = self.detail.as_mut() {
+                        if state.item.id == item.id {
+                            match result {
+                                Ok(d) => {
+                                    state.loading = false;
+                                    state.sel_version = if d.versions.iter().any(|v| v.id == state.sel_version) {
+                                        state.sel_version
+                                    } else {
+                                        d.versions.first().map(|v| v.id).unwrap_or(item.version_id)
+                                    };
+                                    state.data = Some(d);
+                                }
+                                Err(e) => {
+                                    state.loading = false;
+                                    state.err = friendly_err(e);
+                                }
+                            }
+                        }
+                    }
+                }
                 Msg::Resolve(r) => match *r {
                     Ok(r) => {
                         record_resolved_to_index(&r);
@@ -2825,6 +3059,8 @@ impl eframe::App for App {
         // 解析弹窗
         self.ui_pending(ctx);
         self.ui_pending_set(ctx);
+        // 模型详情弹窗
+        self.ui_model_detail(ctx);
 
         ctx.request_repaint_after(Duration::from_millis(500));
     }
@@ -2888,6 +3124,7 @@ impl App {
             }
             return;
         }
+        let show_previews = self.cfg.show_previews;
         let results = self.results.clone();
         egui::ScrollArea::vertical().show(ui, |ui| {
             // 自适应网格：根据可用宽度计算列数，卡片宽度自动填充
@@ -2909,48 +3146,16 @@ impl App {
                             egui::vec2(card_width, 0.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
-                                egui::Frame::none()
+                                let card_inner = egui::Frame::none()
                                     .fill(C_CARD)
                                     .rounding(egui::Rounding::same(10.0))
                                     .inner_margin(egui::Margin::same(10.0))
                                     .show(ui, |ui| {
                                         ui.vertical(|ui| {
-                                            // 固定高度缩略图区域：有图时按原比例缩放居中，无图时显示占位
+                                            // 固定高度缩略图区域：有图时按原比例缩放居中，无图/失败/关闭时显示占位
                                             let thumb_height = 200.0;
                                             let thumb_width = ui.available_width();
-                                            let thumb_layout = egui::Layout {
-                                                main_dir: egui::Direction::TopDown,
-                                                main_wrap: false,
-                                                main_align: egui::Align::Center,
-                                                main_justify: true,
-                                                cross_align: egui::Align::Center,
-                                                cross_justify: false,
-                                            };
-                                            ui.allocate_ui_with_layout(
-                                                egui::vec2(thumb_width, thumb_height),
-                                                thumb_layout,
-                                                |ui| {
-                                                    if !it.image.is_empty() {
-                                                        ui.add(
-                                                            egui::Image::from_uri(it.image.clone())
-                                                                .max_height(thumb_height)
-                                                                .max_width(thumb_width)
-                                                                .rounding(egui::Rounding::same(8.0)),
-                                                        );
-                                                    } else {
-                                                        egui::Frame::none()
-                                                            .fill(egui::Color32::from_rgb(38, 38, 50))
-                                                            .rounding(egui::Rounding::same(8.0))
-                                                            .inner_margin(egui::Margin::same(10.0))
-                                                            .show(ui, |ui| {
-                                                                ui.vertical_centered(|ui| {
-                                                                    ui.label(egui::RichText::new("🖼").size(28.0).color(C_GRAY));
-                                                                    ui.label(egui::RichText::new("无预览").size(11.0).color(C_GRAY));
-                                                                });
-                                                            });
-                                                    }
-                                                },
-                                            );
+                                            preview_img(ui, &it.image, thumb_width, thumb_height, 8.0, show_previews);
                                             ui.add(egui::Label::new(egui::RichText::new(&it.name).strong()).truncate());
                                             ui.horizontal(|ui| {
                                                 chip(ui, &it.kind, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
@@ -2962,11 +3167,23 @@ impl App {
                                                 }
                                             });
                                             ui.small(format!("⬇ {}", it.downloads));
+                                            let mut download_clicked = false;
                                             if ui.add_sized([ui.available_width(), 28.0], egui::Button::new("下载")).clicked() {
+                                                download_clicked = true;
                                                 self.do_resolve(format!("https://civitai.com/models/{}?modelVersionId={}", it.id, it.version_id));
                                             }
-                                        });
+                                            download_clicked
+                                        }).inner
                                     });
+                                let card_response = card_inner.response.interact(egui::Sense::click());
+                                let download_clicked = card_inner.inner;
+                                if card_response.clicked() && !download_clicked {
+                                    self.open_detail(it.clone());
+                                }
+                                if card_response.hovered() {
+                                    ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+                                    let _ = card_response.on_hover_text("点击查看详情");
+                                }
                             },
                         );
                     }
@@ -2985,6 +3202,174 @@ impl App {
                 ui.add_space(8.0);
             }
         });
+    }
+
+    fn open_detail(&mut self, item: SearchItem) {
+        let cfg = self.cfg.clone();
+        let tx = self.tx.clone();
+        let state = ModelDetailState {
+            item: item.clone(),
+            data: None,
+            loading: true,
+            err: String::new(),
+            sel_version: item.version_id,
+            gallery_shown: 6,
+        };
+        self.detail = Some(state);
+        std::thread::spawn(move || {
+            let result = civitai_model_detail(&cfg, &item);
+            let _ = tx.send(Msg::ModelDetailFetch { item, result });
+        });
+    }
+
+    fn ui_model_detail(&mut self, ctx: &egui::Context) {
+        let Some(state) = self.detail.as_ref() else { return; };
+        let item = state.item.clone();
+        let mut sel_version = state.sel_version;
+        let mut gallery_shown = state.gallery_shown;
+        let loading = state.loading;
+        let err = state.err.clone();
+        let data = state.data.clone();
+        let show_previews = self.cfg.show_previews;
+        let mut open = true;
+        let screen = ctx.screen_rect();
+        egui::Window::new("模型详情")
+            .open(&mut open)
+            .resizable(true)
+            .default_size([800.0, 620.0])
+            .min_size([620.0, 460.0])
+            .max_size([screen.width() - 40.0, screen.height() - 40.0])
+            .show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.heading(&item.name);
+                    if item.nsfw {
+                        chip(ui, "NSFW", egui::Color32::from_rgb(66, 34, 38), C_RED);
+                    }
+                });
+                ui.add_space(8.0);
+                if loading {
+                    ui.vertical_centered(|ui| {
+                        ui.spinner();
+                    });
+                }
+                if !err.is_empty() {
+                    ui.colored_label(C_RED, &err);
+                }
+                let Some(d) = data.as_ref() else { return; };
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    // 左栏固定 260px，避免 auto-size 把窗口撑到屏幕外
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(260.0, 0.0),
+                        egui::Layout::top_down(egui::Align::Center),
+                        |ui| {
+                            let main_img = d.images.first().map(|s| s.as_str()).unwrap_or("");
+                            preview_img(ui, main_img, 260.0, 260.0, 10.0, show_previews);
+                            ui.add_space(10.0);
+                            ui.horizontal_wrapped(|ui| {
+                                chip(ui, &d.kind, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                                if !d.base.is_empty() {
+                                    chip(ui, &d.base, egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                                }
+                                chip(ui, &format!("⬇ {}", d.downloads), egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                            });
+                            if !d.tags.is_empty() {
+                                ui.add_space(6.0);
+                                ui.label("标签：");
+                                ui.horizontal_wrapped(|ui| {
+                                    for t in &d.tags {
+                                        chip(ui, t, egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                                    }
+                                });
+                            }
+                            ui.add_space(12.0);
+                            ui.label("选择版本：");
+                            egui::ComboBox::from_id_salt("detail_ver")
+                                .selected_text(
+                                    d.versions
+                                        .iter()
+                                        .find(|v| v.id == sel_version)
+                                        .map(|v| v.name.as_str())
+                                        .unwrap_or("—"),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for v in &d.versions {
+                                        ui.selectable_value(&mut sel_version, v.id, &v.name);
+                                    }
+                                });
+                            if let Some(v) = d.versions.iter().find(|v| v.id == sel_version) {
+                                ui.small(format!("{} · {}", v.filename, fmt_size((v.size_kb * 1024.0) as u64)));
+                            }
+                            ui.add_space(8.0);
+                            if ui.add_sized([ui.available_width(), 32.0], accent_btn("下载该版本")).clicked() {
+                                let url = format!("https://civitai.com/models/{}?modelVersionId={}", d.id, sel_version);
+                                self.do_resolve(url);
+                            }
+                        },
+                    );
+                    ui.add_space(16.0);
+                    // 右栏：占满剩余宽度；描述固定高度，画廊占满剩余高度
+                    let right_width = ui.available_width().max(280.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(right_width, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            if !d.description.is_empty() {
+                                egui::Frame::none()
+                                    .fill(C_CARD)
+                                    .rounding(egui::Rounding::same(10.0))
+                                    .inner_margin(egui::Margin::same(12.0))
+                                    .show(ui, |ui| {
+                                        egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                            ui.add(egui::Label::new(&d.description).wrap());
+                                        });
+                                    });
+                                ui.add_space(10.0);
+                            }
+                            let total_imgs = d.images.len();
+                            let shown = gallery_shown.min(total_imgs);
+                            ui.strong(format!("预览图 ({}/{})", shown, total_imgs));
+                            ui.add_space(6.0);
+                            let gallery_height = (ui.available_height() - 20.0).max(200.0);
+                            egui::ScrollArea::vertical().max_height(gallery_height).show(ui, |ui| {
+                                let thumb_width = ui.available_width();
+                                let thumb_height = 220.0;
+                                // 分页：只渲染前 gallery_shown 张，避免一次性实例化几十张
+                                for url in d.images.iter().take(shown) {
+                                    // 再叠一层懒加载：只对进入视口的图片实例化加载，未进入视口只画占位块
+                                    let visible = ui.is_rect_visible(egui::Rect::from_min_size(
+                                        ui.next_widget_position(),
+                                        egui::vec2(thumb_width, thumb_height),
+                                    ));
+                                    if visible {
+                                        preview_img(ui, url, thumb_width, thumb_height, 8.0, show_previews);
+                                    } else {
+                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(thumb_width, thumb_height), egui::Sense::hover());
+                                        ui.painter().rect_filled(rect, egui::Rounding::same(8.0), egui::Color32::from_rgb(38, 38, 50));
+                                    }
+                                    ui.add_space(8.0);
+                                }
+                                if shown < total_imgs {
+                                    ui.vertical_centered(|ui| {
+                                        if ui.add_sized([180.0, 30.0], egui::Button::new(format!("加载更多 (剩 {})", total_imgs - shown))).clicked() {
+                                            gallery_shown = (shown + 6).min(total_imgs);
+                                        }
+                                    });
+                                    ui.add_space(8.0);
+                                }
+                            });
+                        },
+                    );
+                });
+            });
+        if open {
+            if let Some(state) = self.detail.as_mut() {
+                state.sel_version = sel_version;
+                state.gallery_shown = gallery_shown;
+            }
+        } else {
+            self.detail = None;
+        }
     }
 
     fn ui_link(&mut self, ui: &mut egui::Ui) {
@@ -3226,8 +3611,10 @@ impl App {
             return;
         }
         // 大库一次性解码几百张原图会撑爆显存（egui_extras 不按显示尺寸降采样），超阈值就不显示缩略图
-        let show_thumbs = total_count <= 200;
-        if !show_thumbs {
+        // 缩略图：受全局「显示图片预览」开关控制；另外大库一次性解码几百张原图会撑爆显存
+        // （egui_extras 不按显示尺寸降采样），超阈值也隐藏。
+        let show_thumbs = self.cfg.show_previews && total_count <= 200;
+        if self.cfg.show_previews && total_count > 200 {
             ui.weak("模型较多，已隐藏缩略图以节省内存");
         }
         let filter = self.lib_filter.to_lowercase();
@@ -3338,7 +3725,7 @@ impl App {
                                         }
                                         if let Some(Ok(info)) = self.lib_updates.get(model_id) {
                                             if info.latest_vid != *version_id && ui.small_button("下载新版").clicked() {
-                                                let url = format!("https://civitai.com/api/download/models/{}", info.latest_vid);
+                                                let url = format!("https://{}/api/download/models/{}", self.cfg.civitai_host, info.latest_vid);
                                                 let meta = DlMeta {
                                                     download_url: url,
                                                     source: "civitai".into(),
@@ -3454,8 +3841,20 @@ impl App {
             ui.label("Civitai 密钥(留空不改)");
             ui.add(egui::TextEdit::singleline(&mut self.token_input).password(true).desired_width(420.0).hint_text(if self.cfg.civitai_token.is_empty() { "未设置" } else { "已保存 ****" }));
             ui.end_row();
+            ui.label("Civitai 域名");
+            egui::ComboBox::from_id_salt("civitai_host")
+                .selected_text(&self.cfg.civitai_host)
+                .show_ui(ui, |ui| {
+                    for host in ["civitai.com", "civitai.red", "civitai.work"] {
+                        ui.selectable_value(&mut self.cfg.civitai_host, host.to_string(), host);
+                    }
+                });
+            ui.end_row();
             ui.label("HuggingFace 镜像");
             ui.checkbox(&mut self.cfg.hf_mirror, "使用 hf-mirror 国内镜像");
+            ui.end_row();
+            ui.label("图片预览");
+            ui.checkbox(&mut self.cfg.show_previews, "加载网络预览图（图床连不上时关闭可避免满屏加载失败）");
             ui.end_row();
             ui.label("同时下载数");
             ui.add(egui::Slider::new(&mut self.cfg.max_concurrent, 1..=4));
@@ -4246,6 +4645,7 @@ impl App {
         }
         let mut start = false;
         let mut cancel = false;
+        let show_previews = self.cfg.show_previews;
         if let Some(r) = self.pending.clone() {
             egui::Window::new(if r.model_name.is_empty() { r.filename.clone() } else { r.model_name.clone() })
                 .collapsible(false)
@@ -4253,7 +4653,7 @@ impl App {
                 .open(&mut open)
                 .show(ctx, |ui| {
                     if !r.image.is_empty() {
-                        ui.add(egui::Image::from_uri(r.image.clone()).max_height(220.0));
+                        preview_img(ui, &r.image, 260.0, 220.0, 8.0, show_previews);
                     }
                     let sel_ver = r.versions.iter().find(|v| v.id == self.sel_version);
                     ui.horizontal(|ui| {
@@ -4316,7 +4716,7 @@ impl App {
         if start {
             if let Some(r) = self.pending.take() {
                 let url = if r.source == "civitai" {
-                    format!("https://civitai.com/api/download/models/{}", self.sel_version)
+                    format!("https://{}/api/download/models/{}", self.cfg.civitai_host, self.sel_version)
                 } else {
                     r.download_url.clone()
                 };
@@ -4411,6 +4811,171 @@ fn eta_secs(downloaded: u64, total: u64, speed: f64) -> Option<u64> {
     }
     let remaining = (total - downloaded) as f64;
     Some((remaining / speed) as u64)
+}
+
+// ============ 预览图加载器（自定义 BytesLoader：显式代理 + 本地磁盘缓存） ============
+// egui_extras 内置的 HTTP 图片加载器走 ehttp，不一定吃我们在设置里配的代理；这里改用项目
+// 自己的 ureq agent（带显式代理 + JA3 绕过的本地端口隧道），把成功下载的预览图按 URL 哈希
+// 缓存到磁盘，跨会话复用、避免重复下载，失败由 preview_img 的占位/重试兜底。
+// 仅接管 http(s):// URI，其余（file:// 本地缩略图、bytes://）返回 NotSupported 交还默认加载器。
+enum ImgState {
+    Loading,
+    Loaded(Arc<[u8]>, Option<String>),
+    Failed,
+}
+
+struct PreviewLoader {
+    agent: ureq::Agent,
+    dir: PathBuf,
+    cache: Arc<Mutex<std::collections::HashMap<String, ImgState>>>,
+}
+
+const PREVIEW_LOADER_ID: &str = "comfy_preview_loader";
+// 磁盘缓存容量上限，超出时启动清理最旧的文件
+const PREVIEW_CACHE_MAX_BYTES: u64 = 300 * 1024 * 1024;
+
+impl PreviewLoader {
+    fn new(cfg: &Config) -> Self {
+        let dir = config_path().with_file_name("image-cache");
+        let _ = fs::create_dir_all(&dir);
+        prune_preview_cache(&dir, PREVIEW_CACHE_MAX_BYTES);
+        PreviewLoader {
+            agent: agent(cfg),
+            dir,
+            cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+    fn cache_file(&self, uri: &str) -> PathBuf {
+        let mut h = Sha256::new();
+        h.update(uri.as_bytes());
+        let digest = h.finalize();
+        self.dir.join(format!("{}.img", hex_str(&digest)))
+    }
+}
+
+// 启动时按 mtime 删除最旧的缓存文件，把磁盘占用压到上限内（避免长期使用后无限膨胀）
+fn prune_preview_cache(dir: &Path, max_bytes: u64) {
+    let Ok(rd) = fs::read_dir(dir) else { return; };
+    let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    let mut total: u64 = 0;
+    for e in rd.flatten() {
+        if let Ok(meta) = e.metadata() {
+            if meta.is_file() {
+                total += meta.len();
+                let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                files.push((e.path(), meta.len(), mtime));
+            }
+        }
+    }
+    if total <= max_bytes {
+        return;
+    }
+    files.sort_by_key(|(_, _, t)| *t); // 最旧的在前
+    for (p, sz, _) in files {
+        if total <= max_bytes {
+            break;
+        }
+        if fs::remove_file(&p).is_ok() {
+            total = total.saturating_sub(sz);
+        }
+    }
+}
+
+impl egui::load::BytesLoader for PreviewLoader {
+    fn id(&self) -> &str {
+        PREVIEW_LOADER_ID
+    }
+
+    fn load(&self, ctx: &egui::Context, uri: &str) -> egui::load::BytesLoadResult {
+        if !(uri.starts_with("http://") || uri.starts_with("https://")) {
+            return Err(egui::load::LoadError::NotSupported);
+        }
+        // 内存缓存
+        {
+            let map = self.cache.lock().unwrap();
+            match map.get(uri) {
+                Some(ImgState::Loading) => return Ok(egui::load::BytesPoll::Pending { size: None }),
+                Some(ImgState::Loaded(bytes, mime)) => {
+                    return Ok(egui::load::BytesPoll::Ready {
+                        size: None,
+                        bytes: egui::load::Bytes::Shared(bytes.clone()),
+                        mime: mime.clone(),
+                    });
+                }
+                Some(ImgState::Failed) => {
+                    return Err(egui::load::LoadError::Loading("预览图加载失败".into()));
+                }
+                None => {}
+            }
+        }
+        // 磁盘缓存（预览图很小，同步读入即可）
+        let file = self.cache_file(uri);
+        if let Ok(data) = fs::read(&file) {
+            if !data.is_empty() {
+                let bytes: Arc<[u8]> = Arc::from(data.into_boxed_slice());
+                self.cache.lock().unwrap().insert(uri.to_string(), ImgState::Loaded(bytes.clone(), None));
+                return Ok(egui::load::BytesPoll::Ready { size: None, bytes: egui::load::Bytes::Shared(bytes), mime: None });
+            }
+        }
+        // 起后台线程下载（UI 线程不阻塞），完成后写缓存并 request_repaint 唤醒
+        self.cache.lock().unwrap().insert(uri.to_string(), ImgState::Loading);
+        let net = self.agent.clone();
+        let cache = self.cache.clone();
+        let ctx = ctx.clone();
+        let uri_owned = uri.to_string();
+        std::thread::spawn(move || {
+            let fetched: Option<(Arc<[u8]>, Option<String>)> = (|| {
+                let resp = net.get(&uri_owned).call().ok()?;
+                let mime = resp.header("Content-Type").map(|s| s.to_string());
+                // 上限 64MB，防异常大响应吃内存
+                let mut reader = resp.into_reader().take(64 * 1024 * 1024);
+                let mut buf = Vec::new();
+                reader.read_to_end(&mut buf).ok()?;
+                if buf.is_empty() {
+                    return None;
+                }
+                Some((Arc::from(buf.into_boxed_slice()), mime))
+            })();
+            match fetched {
+                Some((bytes, mime)) => {
+                    let _ = fs::write(&file, &bytes[..]);
+                    cache.lock().unwrap().insert(uri_owned, ImgState::Loaded(bytes, mime));
+                }
+                None => {
+                    cache.lock().unwrap().insert(uri_owned, ImgState::Failed);
+                }
+            }
+            ctx.request_repaint();
+        });
+        Ok(egui::load::BytesPoll::Pending { size: None })
+    }
+
+    fn forget(&self, uri: &str) {
+        self.cache.lock().unwrap().remove(uri);
+        // 删磁盘缓存，确保「点击重试」真的重新下载而非读回旧的失败/损坏内容
+        let _ = fs::remove_file(self.cache_file(uri));
+    }
+
+    fn forget_all(&self) {
+        self.cache.lock().unwrap().clear();
+        if let Ok(rd) = fs::read_dir(&self.dir) {
+            for e in rd.flatten() {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+    }
+
+    fn byte_size(&self) -> usize {
+        self.cache
+            .lock()
+            .unwrap()
+            .values()
+            .map(|s| match s {
+                ImgState::Loaded(b, _) => b.len(),
+                _ => 0,
+            })
+            .sum()
+    }
 }
 
 // 字节头校验：损坏/零字节的字体喂给 egui 会让 epaint 在首帧 panic（启动必闪退）
