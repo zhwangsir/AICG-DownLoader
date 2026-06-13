@@ -212,6 +212,9 @@ struct Config {
     // 安装时 pip 走国内镜像（清华源）加速依赖下载
     #[serde(default)]
     pip_mirror: bool,
+    // 下载模型的目标模型根目录（.../models）；空 = 自动（Desktop 用其主目录，否则 comfy_root\models）
+    #[serde(default)]
+    download_root: String,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -229,6 +232,7 @@ impl Default for Config {
             show_previews: true,
             torch_index: default_torch_index(),
             pip_mirror: false,
+            download_root: String::new(),
         }
     }
 }
@@ -1250,9 +1254,19 @@ fn start_task(cfg: Config, downloads: Arc<Mutex<Vec<TaskRef>>>, filename: String
 }
 
 fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, meta: &DlMeta) -> Result<(), String> {
-    let root = expand_root(&cfg.comfy_root);
-    let sub: PathBuf = subdir.split('/').collect();
-    let dest_dir = root.join(sub);
+    // 下载目标：用户选了下载目录(或 Desktop 主目录)时落到 <模型根>/<类型>（去掉 subdir 的 models/ 前缀），
+    // 否则维持原行为 comfy_root/models/<类型>
+    let dest_dir = match effective_download_models_root(cfg) {
+        Some(models_root) => {
+            let ty = subdir.strip_prefix("models/").unwrap_or(subdir);
+            let sub: PathBuf = ty.split('/').collect();
+            models_root.join(sub)
+        }
+        None => {
+            let sub: PathBuf = subdir.split('/').collect();
+            expand_root(&cfg.comfy_root).join(sub)
+        }
+    };
     fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
     let dest = dest_dir.join(filename);
     let part = dest.with_extension(format!(
@@ -1614,6 +1628,131 @@ fn parse_extra_paths(yaml: &str) -> Vec<(String, PathBuf)> {
 }
 
 // 收集所有要扫描的 (逻辑目录名, 绝对路径)：comfy_root 下的标准目录 + extra_model_paths.yaml 里的额外路径
+// ============ ComfyUI Desktop（electron / standalone）适配 ============
+// Desktop 版不是 git 源码版：源码、内置 python、custom_nodes、模型目录都在别处，
+// 配置写在 %APPDATA%\Comfy Desktop\。这里读取这些配置定位真实路径，让管理/库功能对其生效。
+#[derive(Clone, Default)]
+struct DesktopInfo {
+    install_path: PathBuf,      // installations.json 的 installPath
+    source_dir: PathBuf,        // install_path\ComfyUI（main.py 所在）
+    python_exe: PathBuf,        // install_path\standalone-env\python.exe（内置便携 python）
+    custom_nodes_dir: PathBuf,  // source_dir\custom_nodes
+    model_dirs: Vec<PathBuf>,   // settings.json 的 modelsDirs（首个为主目录）
+    port: Option<u16>,
+    version: String,
+    launch_args: String,
+    app_exe: Option<PathBuf>,   // electron 应用本体（best-effort）
+}
+
+// Windows: %APPDATA%\Comfy Desktop；其它平台 Desktop 配置位置不同，暂只支持 Windows
+fn desktop_userdata() -> Option<PathBuf> {
+    let base = std::env::var_os("APPDATA")?;
+    let p = PathBuf::from(base).join("Comfy Desktop");
+    if p.is_dir() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+fn read_json_file(p: &Path) -> Option<Value> {
+    let body = fs::read_to_string(p).ok()?;
+    serde_json::from_str(body.trim_start_matches('\u{feff}')).ok()
+}
+
+fn find_desktop_exe(cfg: &Config) -> Option<PathBuf> {
+    let root = expand_root(&cfg.comfy_root);
+    let mut cands = vec![
+        root.join("Comfy Desktop").join("Comfy Desktop.exe"),
+        root.join("Comfy Desktop.exe"),
+    ];
+    if let Some(la) = std::env::var_os("LOCALAPPDATA") {
+        let la = PathBuf::from(la);
+        cands.push(la.join("Programs").join("@comfyorgcomfyui-electron").join("ComfyUI.exe"));
+        cands.push(la.join("Programs").join("Comfy Desktop").join("Comfy Desktop.exe"));
+    }
+    cands.into_iter().find(|p| p.is_file())
+}
+
+fn detect_desktop(cfg: &Config) -> Option<DesktopInfo> {
+    let ud = desktop_userdata()?;
+    let mut info = DesktopInfo::default();
+    // settings.json → modelsDirs（真实模型目录，含可能不在 comfy_root 下的主目录）
+    if let Some(v) = read_json_file(&ud.join("settings.json")) {
+        if let Some(arr) = v.get("modelsDirs").and_then(|x| x.as_array()) {
+            for d in arr {
+                if let Some(s) = d.as_str() {
+                    let p = PathBuf::from(s);
+                    if p.is_dir() {
+                        info.model_dirs.push(p);
+                    }
+                }
+            }
+        }
+    }
+    // installations.json → 第一个带 installPath 的本地安装（跳过 cloud）
+    if let Some(v) = read_json_file(&ud.join("installations.json")) {
+        if let Some(arr) = v.as_array() {
+            for it in arr {
+                if let Some(ip) = it.get("installPath").and_then(|x| x.as_str()) {
+                    info.install_path = PathBuf::from(ip);
+                    // 优先用 ComfyUI 应用版本(comfyVersion.baseTag)，否则退回 standalone 环境版本
+                    info.version = it
+                        .get("comfyVersion")
+                        .and_then(|c| c.get("baseTag"))
+                        .and_then(|x| x.as_str())
+                        .or_else(|| it.get("version").and_then(|x| x.as_str()))
+                        .unwrap_or("")
+                        .to_string();
+                    info.launch_args = it.get("launchArgs").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                    break;
+                }
+            }
+        }
+    }
+    if info.install_path.as_os_str().is_empty() {
+        return None;
+    }
+    info.source_dir = info.install_path.join("ComfyUI");
+    // 验证确实是 Desktop 源码布局，否则不当作 Desktop
+    if !info.source_dir.join("main.py").is_file() {
+        return None;
+    }
+    info.python_exe = info.install_path.join("standalone-env").join("python.exe");
+    info.custom_nodes_dir = info.source_dir.join("custom_nodes");
+    // port-locks\port-NNNN.json → 端口
+    if let Ok(rd) = fs::read_dir(ud.join("port-locks")) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if let Some(n) = name.strip_prefix("port-").and_then(|s| s.strip_suffix(".json")) {
+                if let Ok(p) = n.parse::<u16>() {
+                    info.port = Some(p);
+                    break;
+                }
+            }
+        }
+    }
+    info.app_exe = find_desktop_exe(cfg);
+    Some(info)
+}
+
+// custom_nodes 目录：Desktop 安装走其真实路径，否则 comfy_root\custom_nodes
+fn custom_nodes_dir(cfg: &Config) -> PathBuf {
+    if let Some(d) = detect_desktop(cfg) {
+        return d.custom_nodes_dir;
+    }
+    expand_root(&cfg.comfy_root).join("custom_nodes")
+}
+
+// 本工具下载模型的目标模型根目录（已是 .../models）：用户显式选 > Desktop 主目录 > None(回退 comfy_root\models)
+fn effective_download_models_root(cfg: &Config) -> Option<PathBuf> {
+    let dr = cfg.download_root.trim();
+    if !dr.is_empty() {
+        return Some(expand_root(dr));
+    }
+    detect_desktop(cfg).and_then(|d| d.model_dirs.into_iter().next())
+}
+
 fn scan_targets(cfg: &Config) -> Vec<(String, PathBuf)> {
     let root = expand_root(&cfg.comfy_root);
     let mut targets: Vec<(String, PathBuf)> = MODEL_DIRS
@@ -1627,6 +1766,16 @@ fn scan_targets(cfg: &Config) -> Vec<(String, PathBuf)> {
     if let Ok(text) = fs::read_to_string(&yaml_path) {
         for (key, path) in parse_extra_paths(&text) {
             targets.push((key, path));
+        }
+    }
+    // Desktop 的真实模型目录（可能在别的盘/路径，comfy_root 扫不到）：按类型子目录展开，
+    // key 与标准目录一致，scan_library 会按 key 合并、按规范化路径去重
+    if let Some(d) = detect_desktop(cfg) {
+        for md in &d.model_dirs {
+            for entry in MODEL_DIRS.iter() {
+                let ty = entry.strip_prefix("models/").unwrap_or(entry);
+                targets.push((entry.to_string(), md.join(ty)));
+            }
         }
     }
     targets
@@ -1873,7 +2022,7 @@ fn git_run(repo: &Path, args: &[&str]) -> Result<String, String> {
 
 // 扫描 custom_nodes 目录，列出每个节点及其 git 状态
 fn scan_custom_nodes(cfg: &Config) -> Vec<NodeInfo> {
-    let dir = expand_root(&cfg.comfy_root).join("custom_nodes");
+    let dir = custom_nodes_dir(cfg);
     let mut out = Vec::new();
     let Ok(rd) = fs::read_dir(&dir) else { return out; };
     for e in rd.flatten() {
@@ -2509,6 +2658,8 @@ struct App {
     // ComfyUI 管理
     profile: Option<sys_info::SystemProfile>,
     profile_err: String,
+    // 检测到的 ComfyUI Desktop 安装（None = 非 Desktop / 未装），启动时探测一次
+    desktop: Option<DesktopInfo>,
     comfy_log: Vec<String>,
     comfy_pid: Option<u32>,
     comfy_installing: bool,
@@ -2643,6 +2794,7 @@ impl App {
             dl_detail: None,
             profile: None,
             profile_err: String::new(),
+            desktop: detect_desktop(&cfg),
             comfy_log: Vec::new(),
             comfy_pid: None,
             comfy_installing: false,
@@ -4004,6 +4156,30 @@ impl App {
             ui.label("图片预览");
             ui.checkbox(&mut self.cfg.show_previews, "加载网络预览图（图床连不上时关闭可避免满屏加载失败）");
             ui.end_row();
+            ui.label("模型下载目录");
+            ui.vertical(|ui| {
+                let cur = if self.cfg.download_root.is_empty() {
+                    "自动（Desktop 主目录 / 否则 comfy_root\\models）".to_string()
+                } else {
+                    self.cfg.download_root.clone()
+                };
+                // 先把候选目录快照成 String，避免 combo 闭包里同时借 self.desktop 和 self.cfg
+                let dl_dirs: Vec<String> = self
+                    .desktop
+                    .as_ref()
+                    .map(|d| d.model_dirs.iter().map(|p| p.display().to_string()).collect())
+                    .unwrap_or_default();
+                egui::ComboBox::from_id_salt("dl_root").selected_text(cur).width(420.0).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.cfg.download_root, String::new(), "自动（推荐）");
+                    for d in &dl_dirs {
+                        ui.selectable_value(&mut self.cfg.download_root, d.clone(), d.as_str());
+                    }
+                });
+                if dl_dirs.is_empty() {
+                    ui.weak("未检测到 ComfyUI Desktop 模型目录；自动即 comfy_root\\models");
+                }
+            });
+            ui.end_row();
             ui.label("同时下载数");
             ui.add(egui::Slider::new(&mut self.cfg.max_concurrent, 1..=4));
             ui.end_row();
@@ -4112,6 +4288,7 @@ impl App {
                 });
             }
             if ui.button("刷新检测").clicked() {
+                self.desktop = detect_desktop(&self.cfg);
                 let tx = self.tx.clone();
                 std::thread::spawn(move || {
                     let _ = tx.send(Msg::ComfyProfile(Ok(sys_info::detect())));
@@ -4121,23 +4298,26 @@ impl App {
 
         ui.add_space(12.0);
 
-        // 安装目录与参数
-        ui.horizontal(|ui| {
-            ui.label("ComfyUI 目录:");
-            ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_root).desired_width(360.0));
-            if ui.button("浏览…").clicked() {
-                if let Some(p) = rfd::FileDialog::new().set_title("选择 ComfyUI 目录").pick_folder() {
-                    self.cfg.comfy_root = p.display().to_string();
+        let desktop = self.desktop.clone();
+        // 源码版才需要手填目录/参数；Desktop 版路径由其自身配置决定
+        if desktop.is_none() {
+            ui.horizontal(|ui| {
+                ui.label("ComfyUI 目录:");
+                ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_root).desired_width(360.0));
+                if ui.button("浏览…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().set_title("选择 ComfyUI 目录").pick_folder() {
+                        self.cfg.comfy_root = p.display().to_string();
+                    }
                 }
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("启动参数:");
-            ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_args).desired_width(400.0).hint_text("--lowvram --listen"));
-            ui.weak("例: --lowvram --normalvram --listen --port 8188");
-        });
+            });
+            ui.horizontal(|ui| {
+                ui.label("启动参数:");
+                ui.add(egui::TextEdit::singleline(&mut self.cfg.comfy_args).desired_width(400.0).hint_text("--lowvram --listen"));
+                ui.weak("例: --lowvram --normalvram --listen --port 8188");
+            });
+        }
 
-        let installed = Path::new(&self.cfg.comfy_root).join("main.py").is_file();
+        let installed = desktop.is_some() || Path::new(&self.cfg.comfy_root).join("main.py").is_file();
         ui.add_space(12.0);
 
         if !installed {
@@ -4195,6 +4375,57 @@ impl App {
                         });
                     }
                 }
+            });
+        } else {
+            // 已安装：Desktop 显示 Desktop 面板，源码版显示 python 运行控制 + 日志；两者都接 custom_nodes 管理
+            if let Some(d) = &desktop {
+            // ===== ComfyUI Desktop（electron）面板 =====
+            let url = d.port.map(|p| format!("http://127.0.0.1:{}", p)).unwrap_or_else(|| self.cfg.comfy_url.clone());
+            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong("ComfyUI Desktop");
+                    if !d.version.is_empty() {
+                        chip(ui, &d.version, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                    }
+                    if let Some(p) = d.port {
+                        chip(ui, &format!("端口 {}", p), egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                    }
+                });
+                ui.weak(format!("安装目录: {}", d.install_path.display()));
+                if !d.launch_args.is_empty() {
+                    ui.weak(format!("启动参数: {}", d.launch_args));
+                }
+                if !d.model_dirs.is_empty() {
+                    ui.weak("模型目录:");
+                    for md in &d.model_dirs {
+                        ui.weak(format!("    • {}", md.display()));
+                    }
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if let Some(exe) = d.app_exe.clone() {
+                        if ui.add(accent_btn("启动 ComfyUI Desktop")).clicked() {
+                            if let Err(e) = std::process::Command::new(&exe).spawn() {
+                                self.comfy_log.push(format!("[启动 Desktop 失败: {}]", e));
+                            }
+                        }
+                    }
+                    if ui.button("在浏览器打开").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
+                    }
+                    if let Some(md) = d.model_dirs.first() {
+                        if ui.button("📁 模型目录").clicked() {
+                            open_in_file_manager(md);
+                        }
+                    }
+                    if ui.button("📁 安装目录").clicked() {
+                        open_in_file_manager(&d.install_path);
+                    }
+                    if ui.button("📁 custom_nodes").clicked() {
+                        open_in_file_manager(&d.custom_nodes_dir);
+                    }
+                });
+                ui.weak("Desktop 版由 electron 应用自行管理后端进程；本工具不直接启停其后端。");
             });
         } else {
             egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
@@ -4269,9 +4500,15 @@ impl App {
                     }
                 });
             });
+            }
+            self.ui_custom_nodes(ui);
+        }
+        });
+    }
 
-            // ===== 自定义节点管理 =====
-            ui.add_space(12.0);
+    // ===== 自定义节点管理（custom_nodes：git 状态 / 更新 / 启停 / Manager 联动）=====
+    fn ui_custom_nodes(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(12.0);
             if !self.nodes_scanned {
                 self.nodes_scanned = true;
                 self.do_scan_nodes();
@@ -4365,8 +4602,6 @@ impl App {
             if let Some(path) = act_open {
                 open_in_file_manager(&path);
             }
-        }
-        });
     }
 
     fn do_comfy_install(&mut self) {
