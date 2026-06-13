@@ -171,6 +171,9 @@ fn default_comfy_url() -> String {
 fn default_civitai_host() -> String {
     "civitai.red".into()
 }
+fn default_torch_index() -> String {
+    "cu130".into()
+}
 fn default_true() -> bool {
     true
 }
@@ -203,6 +206,12 @@ struct Config {
     // 部分网络环境下 image-b2.civitai.com 的 TLS 连不上，关掉可避免满屏加载失败。
     #[serde(default = "default_true")]
     show_previews: bool,
+    // 安装 ComfyUI 时的 PyTorch 源后缀（cu130/cu128/cu124/cu121/cpu），随显卡 CUDA 选择
+    #[serde(default = "default_torch_index")]
+    torch_index: String,
+    // 安装时 pip 走国内镜像（清华源）加速依赖下载
+    #[serde(default)]
+    pip_mirror: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -218,6 +227,8 @@ impl Default for Config {
             comfy_args: String::new(),
             civitai_host: default_civitai_host(),
             show_previews: true,
+            torch_index: default_torch_index(),
+            pip_mirror: false,
         }
     }
 }
@@ -1833,6 +1844,95 @@ fn comfy_known_models(cfg: &Config) -> Result<std::collections::HashSet<(String,
     Ok(set)
 }
 
+// ============ 自定义节点（custom_nodes）管理 ============
+#[derive(Clone)]
+struct NodeInfo {
+    name: String,    // 目录名（去掉 .disabled 后缀）
+    path: PathBuf,   // 实际目录路径
+    is_git: bool,
+    rev: String,     // "分支 @ 短sha"，非 git 仓库为空
+    disabled: bool,  // 目录以 .disabled 结尾（Manager 的禁用约定）
+}
+
+// 跑 git 子命令并返回 (成功→stdout/否则stderr)；失败带上 stderr 便于排查
+fn git_run(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| format!("无法执行 git：{}", e))?;
+    let so = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let se = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if out.status.success() {
+        Ok(if so.is_empty() { se } else { so })
+    } else {
+        Err(if se.is_empty() { so } else { se })
+    }
+}
+
+// 扫描 custom_nodes 目录，列出每个节点及其 git 状态
+fn scan_custom_nodes(cfg: &Config) -> Vec<NodeInfo> {
+    let dir = expand_root(&cfg.comfy_root).join("custom_nodes");
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(&dir) else { return out; };
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let raw = e.file_name().to_string_lossy().to_string();
+        if raw == "__pycache__" || raw == ".disabled" {
+            continue;
+        }
+        let disabled = raw.ends_with(".disabled");
+        let name = raw.trim_end_matches(".disabled").to_string();
+        let is_git = p.join(".git").exists();
+        let rev = if is_git {
+            let branch = git_run(&p, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+            let sha = git_run(&p, &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
+            if branch.is_empty() {
+                sha
+            } else {
+                format!("{} @ {}", branch, sha)
+            }
+        } else {
+            String::new()
+        };
+        out.push(NodeInfo { name, path: p, is_git, rev, disabled });
+    }
+    out.sort_by_key(|n| n.name.to_lowercase());
+    out
+}
+
+// 查询运行中 ComfyUI 的 ComfyUI-Manager 版本（只读探测，接口随版本变化，按 Value 宽松解析）
+fn comfy_manager_version(cfg: &Config) -> Result<String, String> {
+    let base = comfy_base(cfg);
+    // 不同 Manager 版本路径不一，依次尝试
+    for path in ["/api/manager/version", "/manager/version"] {
+        let url = format!("{}{}", base, path);
+        if let Ok(resp) = local_agent().get(&url).call() {
+            if let Ok(body) = resp.into_string() {
+                let body = body.trim();
+                if body.is_empty() {
+                    continue;
+                }
+                // 可能是纯文本版本号，也可能是 JSON
+                if let Ok(v) = serde_json::from_str::<Value>(body) {
+                    let ver = v
+                        .get("version")
+                        .and_then(|x| x.as_str())
+                        .or_else(|| v.as_str())
+                        .unwrap_or(body);
+                    return Ok(ver.to_string());
+                }
+                return Ok(body.trim_matches('"').to_string());
+            }
+        }
+    }
+    Err("未获取到 Manager 版本（请确认 ComfyUI 正在运行且已装 ComfyUI-Manager）".into())
+}
+
 // 识别单个文件：算哈希（带缓存）→ Civitai by-hash 反查
 fn identify_one(cfg: &Config, path: &Path) -> Ident {
     match cached_file_hash(path) {
@@ -2291,6 +2391,10 @@ enum Msg {
     ComfyInstallDone(Result<(), String>),
     // 系统画像检测结果
     ComfyProfile(Result<sys_info::SystemProfile, String>),
+    // 自定义节点扫描结果 / 节点更新完成 / Manager 版本探测
+    CustomNodes(Vec<NodeInfo>),
+    NodeUpdateDone { name: String, result: Result<String, String> },
+    ManagerVersion(Result<String, String>),
 }
 
 // 运行外部命令并把 stdout/stderr 按行发送到消息队列（install=true 用 ComfyInstallOutput，否则 ComfyOutput）
@@ -2409,6 +2513,19 @@ struct App {
     comfy_pid: Option<u32>,
     comfy_installing: bool,
     comfy_install_log: String,
+    // 非正常退出标记（显示红色横幅 + 重启按钮），启动时清除
+    comfy_crashed: bool,
+    // 运行日志过滤
+    comfy_log_filter: String,
+    comfy_log_errors_only: bool,
+    // 自定义节点管理
+    custom_nodes: Vec<NodeInfo>,
+    nodes_scanned: bool,
+    nodes_busy: std::collections::HashSet<String>,
+    node_results: std::collections::HashMap<String, Result<String, String>>,
+    nodes_filter: String,
+    // ComfyUI-Manager 版本探测结果（API 联动）
+    manager_status: String,
     // 托盘图标必须存活，否则会立即从任务栏消失
     #[allow(dead_code)]
     tray: Option<tray_icon::TrayIcon>,
@@ -2474,12 +2591,13 @@ impl App {
                 let _ = tx.send(Msg::ComfyProfile(Ok(sys_info::detect())));
             });
         }
-        // 调试/截图辅助：COMFY_START_TAB=link|preset|workflow|library|settings 指定启动页
+        // 调试/截图辅助：COMFY_START_TAB=link|preset|workflow|library|comfy|settings 指定启动页
         let tab = match std::env::var("COMFY_START_TAB").as_deref() {
             Ok("link") => Tab::Link,
             Ok("preset") => Tab::Preset,
             Ok("workflow") => Tab::Workflow,
             Ok("library") => Tab::Library,
+            Ok("comfy") => Tab::ComfyUI,
             Ok("settings") => Tab::Settings,
             _ => Tab::Search,
         };
@@ -2529,6 +2647,15 @@ impl App {
             comfy_pid: None,
             comfy_installing: false,
             comfy_install_log: String::new(),
+            comfy_crashed: false,
+            comfy_log_filter: String::new(),
+            comfy_log_errors_only: false,
+            custom_nodes: Vec::new(),
+            nodes_scanned: false,
+            nodes_busy: std::collections::HashSet::new(),
+            node_results: std::collections::HashMap::new(),
+            nodes_filter: String::new(),
+            manager_status: String::new(),
             tray: None,
             tray_initialized: false,
             cfg,
@@ -2830,9 +2957,14 @@ impl eframe::App for App {
                 }
                 Msg::ComfyExited(code) => {
                     self.comfy_pid = None;
+                    // 非零/未知退出码视为崩溃，给醒目提示；正常停止(0)不报警
+                    self.comfy_crashed = !matches!(code, Some(0));
                     self.comfy_log.push(format!("[ComfyUI 已退出，退出码: {:?}]", code));
                 }
-                Msg::ComfyStarted(pid) => self.comfy_pid = Some(pid),
+                Msg::ComfyStarted(pid) => {
+                    self.comfy_pid = Some(pid);
+                    self.comfy_crashed = false;
+                }
                 Msg::ComfyInstallOutput(line) => {
                     self.comfy_install_log.push_str(&line);
                     self.comfy_install_log.push('\n');
@@ -2846,6 +2978,22 @@ impl eframe::App for App {
                         Ok(()) => self.comfy_install_log.push_str("\n[安装完成]"),
                         Err(e) => self.comfy_install_log.push_str(&format!("\n[安装失败: {}]", e)),
                     }
+                }
+                Msg::CustomNodes(nodes) => {
+                    self.custom_nodes = nodes;
+                    self.nodes_scanned = true;
+                }
+                Msg::NodeUpdateDone { name, result } => {
+                    self.nodes_busy.remove(&name);
+                    self.node_results.insert(name, result);
+                    // 更新后 rev 可能变了，重新扫一次
+                    self.do_scan_nodes();
+                }
+                Msg::ManagerVersion(r) => {
+                    self.manager_status = match r {
+                        Ok(v) => format!("ComfyUI-Manager {}", v),
+                        Err(e) => e,
+                    };
                 }
             }
         }
@@ -3920,6 +4068,8 @@ impl App {
     fn ui_comfy(&mut self, ui: &mut egui::Ui) {
         ui.heading("ComfyUI 管理");
         ui.add_space(8.0);
+        // 内容较高（画像 + 安装/运行 + 日志 + 节点），整体包一层滚动，小窗口也能够到底部
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
 
         // 系统画像
         egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
@@ -3993,52 +4143,230 @@ impl App {
         if !installed {
             egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
                 ui.strong("一键安装");
-                ui.weak("将自动执行: git clone → 创建 venv → 安装 PyTorch(cu130) → 安装依赖 → 安装 ComfyUI-Manager");
+                ui.weak("将自动执行: git clone → 创建 venv → 安装 PyTorch → 安装依赖 → 安装 ComfyUI-Manager");
+                ui.add_space(6.0);
+                // 前置检查：缺 Python/Git 直接挡住，避免装到一半崩在费解的报错里
+                let prof = self.profile.as_ref();
+                let py = prof.and_then(|p| p.python_version.clone());
+                let git = prof.and_then(|p| p.git_version.clone());
+                let detected_cuda = prof.and_then(|p| p.cuda_version.clone());
+                let mut missing: Vec<&str> = Vec::new();
+                if prof.is_some() {
+                    if py.is_none() { missing.push("Python"); }
+                    if git.is_none() { missing.push("Git"); }
+                }
+                ui.horizontal(|ui| {
+                    ui.label("PyTorch 源:");
+                    egui::ComboBox::from_id_salt("torch_index")
+                        .selected_text(&self.cfg.torch_index)
+                        .show_ui(ui, |ui| {
+                            for s in ["cu130", "cu128", "cu124", "cu121", "cpu"] {
+                                ui.selectable_value(&mut self.cfg.torch_index, s.to_string(), s);
+                            }
+                        });
+                    if let Some(c) = &detected_cuda {
+                        ui.weak(format!("(检测到 CUDA {})", c));
+                    }
+                });
+                ui.checkbox(&mut self.cfg.pip_mirror, "pip 走国内镜像（清华源）加速依赖下载");
+                ui.add_space(6.0);
                 if self.comfy_installing {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.weak("安装中…");
                     });
-                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(220.0).stick_to_bottom(true).show(ui, |ui| {
                         ui.monospace(&self.comfy_install_log);
                     });
-                } else if ui.add(accent_btn("开始安装 ComfyUI")).clicked() {
-                    self.do_comfy_install();
+                } else {
+                    if prof.is_none() {
+                        ui.weak("正在检测环境…");
+                    } else if !missing.is_empty() {
+                        ui.colored_label(C_RED, format!("缺少 {}，请先安装后再试（或刷新检测）", missing.join(" / ")));
+                    }
+                    let can_install = prof.is_some() && missing.is_empty();
+                    let label = if self.comfy_install_log.is_empty() { "开始安装 ComfyUI" } else { "重试安装（跳过已完成步骤）" };
+                    if ui.add_enabled(can_install, accent_btn(label)).clicked() {
+                        self.do_comfy_install();
+                    }
+                    if !self.comfy_install_log.is_empty() {
+                        egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                            ui.monospace(&self.comfy_install_log);
+                        });
+                    }
                 }
             });
         } else {
             egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
-                ui.strong("运行控制");
+                ui.horizontal(|ui| {
+                    ui.strong("运行控制");
+                    if let Some(pid) = self.comfy_pid {
+                        chip(ui, &format!("运行中 · PID {}", pid), egui::Color32::from_rgb(26, 56, 40), C_GREEN);
+                    } else {
+                        chip(ui, "已停止", egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                    }
+                });
+                if self.comfy_crashed {
+                    ui.add_space(4.0);
+                    ui.colored_label(C_RED, "⚠ ComfyUI 异常退出，请查看日志末尾的报错（端口占用 / 依赖缺失等）");
+                }
+                ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     if self.comfy_pid.is_some() {
                         if ui.add(egui::Button::new("停止 ComfyUI").fill(C_RED)).clicked() {
                             self.do_comfy_stop();
                         }
                     } else {
-                        if ui.add(accent_btn("启动 ComfyUI")).clicked() {
+                        let start_label = if self.comfy_crashed { "重新启动" } else { "启动 ComfyUI" };
+                        if ui.add(accent_btn(start_label)).clicked() {
                             self.do_comfy_start();
                         }
                     }
                     if ui.button("在浏览器打开").clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(&self.cfg.comfy_url));
                     }
+                    if ui.button("📁 models 目录").clicked() {
+                        open_in_file_manager(&Path::new(&self.cfg.comfy_root).join("models"));
+                    }
+                    if ui.button("📁 ComfyUI 目录").clicked() {
+                        open_in_file_manager(Path::new(&self.cfg.comfy_root));
+                    }
                 });
             });
 
             ui.add_space(8.0);
-            ui.strong("运行日志");
+            ui.horizontal(|ui| {
+                ui.strong("运行日志");
+                ui.add(egui::TextEdit::singleline(&mut self.comfy_log_filter).desired_width(200.0).hint_text("过滤…"));
+                ui.checkbox(&mut self.comfy_log_errors_only, "只看错误");
+                if ui.small_button("清空").clicked() {
+                    self.comfy_log.clear();
+                }
+            });
+            let filter = self.comfy_log_filter.to_lowercase();
+            let errors_only = self.comfy_log_errors_only;
+            let is_err = |l: &str| {
+                let low = l.to_lowercase();
+                l.contains("[stderr]") || low.contains("error") || low.contains("traceback") || low.contains("exception") || low.contains("failed")
+            };
             egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26)).rounding(8.0).inner_margin(8.0).show(ui, |ui| {
                 egui::ScrollArea::vertical().max_height(300.0).stick_to_bottom(true).show(ui, |ui| {
-                    if self.comfy_log.is_empty() {
-                        ui.weak("日志为空");
+                    let shown: Vec<&String> = self
+                        .comfy_log
+                        .iter()
+                        .filter(|l| (filter.is_empty() || l.to_lowercase().contains(&filter)) && (!errors_only || is_err(l)))
+                        .collect();
+                    if shown.is_empty() {
+                        ui.weak(if self.comfy_log.is_empty() { "日志为空" } else { "无匹配日志" });
                     } else {
-                        for line in &self.comfy_log {
-                            ui.monospace(line);
+                        for line in shown {
+                            if is_err(line) {
+                                ui.monospace(egui::RichText::new(line).color(C_RED));
+                            } else {
+                                ui.monospace(line);
+                            }
                         }
                     }
                 });
             });
+
+            // ===== 自定义节点管理 =====
+            ui.add_space(12.0);
+            if !self.nodes_scanned {
+                self.nodes_scanned = true;
+                self.do_scan_nodes();
+            }
+            let nodes = self.custom_nodes.clone();
+            let busy = self.nodes_busy.clone();
+            let results = self.node_results.clone();
+            let nfilter = self.nodes_filter.to_lowercase();
+            let mut act_update: Option<(String, PathBuf)> = None;
+            let mut act_toggle: Option<(PathBuf, bool)> = None;
+            let mut act_open: Option<PathBuf> = None;
+            egui::Frame::none().fill(C_CARD).rounding(8.0).inner_margin(12.0).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong(format!("自定义节点 ({})", nodes.len()));
+                    if ui.small_button("🔄 刷新").clicked() {
+                        self.do_scan_nodes();
+                    }
+                    ui.add(egui::TextEdit::singleline(&mut self.nodes_filter).desired_width(160.0).hint_text("过滤节点…"));
+                });
+                // Manager API 联动（只读探测版本 + 安装/更新走网页，避免后台跑脚本改环境的风险）
+                ui.horizontal(|ui| {
+                    if ui.small_button("检查 Manager").clicked() {
+                        self.do_check_manager();
+                    }
+                    if !self.manager_status.is_empty() {
+                        ui.weak(&self.manager_status);
+                    }
+                    if ui.small_button("在 Manager 网页处理(装/更新)").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&self.cfg.comfy_url));
+                    }
+                });
+                ui.add_space(4.0);
+                let shown: Vec<&NodeInfo> = nodes
+                    .iter()
+                    .filter(|n| nfilter.is_empty() || n.name.to_lowercase().contains(&nfilter))
+                    .collect();
+                if shown.is_empty() {
+                    ui.weak(if nodes.is_empty() { "未发现自定义节点（custom_nodes 为空或未扫描）" } else { "无匹配节点" });
+                }
+                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                    for n in shown {
+                        egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 32)).rounding(6.0).inner_margin(egui::Margin::symmetric(10.0, 6.0)).show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(&n.name);
+                                        if n.disabled {
+                                            chip(ui, "已禁用", egui::Color32::from_rgb(66, 54, 26), egui::Color32::from_rgb(230, 190, 100));
+                                        }
+                                        if !n.is_git {
+                                            chip(ui, "非 git", egui::Color32::from_rgb(42, 42, 52), C_GRAY);
+                                        }
+                                    });
+                                    if !n.rev.is_empty() {
+                                        ui.weak(egui::RichText::new(&n.rev).size(11.0));
+                                    }
+                                    match results.get(&n.name) {
+                                        Some(Ok(msg)) => ui.colored_label(C_GREEN, egui::RichText::new(msg).size(11.0)),
+                                        Some(Err(e)) => ui.colored_label(C_RED, egui::RichText::new(e).size(11.0)),
+                                        None => ui.label(""),
+                                    };
+                                });
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.small_button("打开").clicked() {
+                                        act_open = Some(n.path.clone());
+                                    }
+                                    let toggle_label = if n.disabled { "启用" } else { "禁用" };
+                                    if ui.small_button(toggle_label).clicked() {
+                                        act_toggle = Some((n.path.clone(), n.disabled));
+                                    }
+                                    if n.is_git && !n.disabled {
+                                        if busy.contains(&n.name) {
+                                            ui.add(egui::Spinner::new().size(14.0));
+                                        } else if ui.small_button("更新").clicked() {
+                                            act_update = Some((n.name.clone(), n.path.clone()));
+                                        }
+                                    }
+                                });
+                            });
+                        });
+                    }
+                });
+            });
+            if let Some((name, path)) = act_update {
+                self.do_update_node(name, path);
+            }
+            if let Some((path, disabled)) = act_toggle {
+                self.do_toggle_node(path, disabled);
+            }
+            if let Some(path) = act_open {
+                open_in_file_manager(&path);
+            }
         }
+        });
     }
 
     fn do_comfy_install(&mut self) {
@@ -4048,6 +4376,8 @@ impl App {
         self.comfy_installing = true;
         self.comfy_install_log.clear();
         let dir = self.cfg.comfy_root.clone();
+        let torch_index = self.cfg.torch_index.clone();
+        let pip_mirror = self.cfg.pip_mirror;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let send = |s: &str| {
@@ -4056,48 +4386,63 @@ impl App {
             let done = |r: Result<(), String>| {
                 let _ = tx.send(Msg::ComfyInstallDone(r));
             };
+            // 清华源（仅用于普通 pip 包；torch 的 CUDA 轮子必须走 pytorch.org 专用 index）
+            const TUNA: &str = "https://pypi.tuna.tsinghua.edu.cn/simple";
 
             if !Path::new(&dir).join("main.py").exists() {
                 send("[1/5] 克隆 ComfyUI ...");
                 let mut cmd = std::process::Command::new("git");
                 cmd.args(["clone", "https://github.com/comfyanonymous/ComfyUI.git", &dir]);
                 if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
-                    done(Err(e));
+                    done(Err(format!("git clone 失败：{}（请确认已安装 Git 且网络可访问 github）", e)));
                     return;
                 }
             } else {
                 send("ComfyUI 目录已存在，跳过克隆");
             }
 
-            send("[2/5] 创建虚拟环境 ...");
-            let mut cmd = std::process::Command::new("python");
-            cmd.args(["-m", "venv", &format!("{}/venv", dir)]);
-            if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
-                done(Err(e));
-                return;
+            // venv 已存在则跳过重建（失败重试时不浪费时间，也避免锁定报错）
+            let venv_dir = format!("{}/venv", dir);
+            let python = format!("{}\\venv\\Scripts\\python.exe", dir);
+            if Path::new(&python).exists() {
+                send("[2/5] 虚拟环境已存在，跳过创建");
+            } else {
+                send("[2/5] 创建虚拟环境 ...");
+                let mut cmd = std::process::Command::new("python");
+                cmd.args(["-m", "venv", &venv_dir]);
+                if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
+                    done(Err(format!("创建 venv 失败：{}（请确认 python 在 PATH 且为 3.x）", e)));
+                    return;
+                }
             }
 
-            let python = format!("{}\\venv\\Scripts\\python.exe", dir);
-            send("[3/5] 升级 pip 并安装 PyTorch cu130 ...");
+            send(&format!("[3/5] 升级 pip 并安装 PyTorch ({}) ...", torch_index));
             let mut cmd = std::process::Command::new(&python);
             cmd.args(["-m", "pip", "install", "--upgrade", "pip"]);
+            if pip_mirror {
+                cmd.args(["-i", TUNA]);
+            }
             if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
                 done(Err(e));
                 return;
             }
+            let torch_url = format!("https://download.pytorch.org/whl/{}", torch_index);
             let mut cmd = std::process::Command::new(&python);
             cmd.args([
                 "-m", "pip", "install", "torch", "torchvision", "torchaudio",
-                "--index-url", "https://download.pytorch.org/whl/cu130",
+                "--index-url", &torch_url,
             ]);
             if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
-                done(Err(e));
+                done(Err(format!("PyTorch 安装失败：{}（可在设置换 PyTorch 源后重试安装）", e)));
                 return;
             }
 
             send("[4/5] 安装 ComfyUI 依赖 ...");
             let mut cmd = std::process::Command::new(&python);
             cmd.args(["-m", "pip", "install", "-r", &format!("{}/requirements.txt", dir)]);
+            if pip_mirror {
+                cmd.args(["-i", TUNA]);
+            }
             cmd.current_dir(&dir);
             if let Err(e) = run_cmd_stream(&mut cmd, &tx, true) {
                 done(Err(e));
@@ -4135,6 +4480,17 @@ impl App {
         if self.comfy_pid.is_some() {
             return;
         }
+        // 快速探测：地址已响应说明 ComfyUI（可能外部启动的）已在运行，不重复启动以免端口冲突。
+        // 超时设短，避免明显卡顿。
+        let probe = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(800))
+            .timeout_read(Duration::from_secs(2))
+            .build();
+        if probe.get(&format!("{}/system_stats", comfy_base(&self.cfg))).call().is_ok() {
+            self.comfy_log.push("[检测到 ComfyUI 似乎已在运行，未重复启动；如需访问请点「在浏览器打开」]".into());
+            return;
+        }
+        self.comfy_crashed = false;
         let dir = self.cfg.comfy_root.clone();
         let args = self.cfg.comfy_args.clone();
         let tx = self.tx.clone();
@@ -4188,7 +4544,53 @@ impl App {
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .output();
             self.comfy_pid = None;
+            self.comfy_crashed = false;
         }
+    }
+
+    fn do_scan_nodes(&mut self) {
+        let cfg = self.cfg.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::CustomNodes(scan_custom_nodes(&cfg)));
+        });
+    }
+
+    // git pull 更新单个节点（--ff-only 避免本地有改动时产生合并冲突）
+    fn do_update_node(&mut self, name: String, path: PathBuf) {
+        if self.nodes_busy.contains(&name) {
+            return;
+        }
+        self.nodes_busy.insert(name.clone());
+        self.node_results.remove(&name);
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = git_run(&path, &["pull", "--ff-only"]);
+            let _ = tx.send(Msg::NodeUpdateDone { name, result });
+        });
+    }
+
+    // 启用/禁用节点：按 Manager 约定加/去 .disabled 后缀（本地、可逆）
+    fn do_toggle_node(&mut self, path: PathBuf, disabled: bool) {
+        let Some(fname) = path.file_name().map(|s| s.to_string_lossy().to_string()) else { return; };
+        let new = if disabled {
+            path.with_file_name(fname.trim_end_matches(".disabled"))
+        } else {
+            path.with_file_name(format!("{}.disabled", fname))
+        };
+        if let Err(e) = fs::rename(&path, &new) {
+            self.manager_status = format!("切换失败：{}", e);
+        }
+        self.do_scan_nodes();
+    }
+
+    fn do_check_manager(&mut self) {
+        self.manager_status = "查询中…".into();
+        let cfg = self.cfg.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::ManagerVersion(comfy_manager_version(&cfg)));
+        });
     }
 
     // ============ 下载队列完整管理页 ============
@@ -5328,16 +5730,11 @@ mod tests {
     }
 
     fn test_cfg(root: &Path) -> Config {
+        // 用 Default 兜底，仅覆盖测试关心的字段；新增配置字段时不必再改这里
         Config {
             comfy_root: root.to_string_lossy().into_owned(),
-            civitai_token: String::new(),
-            hf_mirror: true,
             max_concurrent: 1,
-            comfy_url: default_comfy_url(),
-            proxy_url: None,
-            tray_minimize: true,
-            notify_on_complete: true,
-            comfy_args: String::new(),
+            ..Default::default()
         }
     }
 
