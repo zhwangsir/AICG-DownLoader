@@ -126,6 +126,22 @@ fn chip(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) {
         });
 }
 
+// 可点击复制的胶囊（用于触发词）：外观同 chip，但整块可点击，返回 Response 交上层处理。
+fn click_chip(ui: &mut egui::Ui, text: &str, bg: egui::Color32, fg: egui::Color32) -> egui::Response {
+    let inner = egui::Frame::none()
+        .fill(bg)
+        .rounding(egui::Rounding::same(999.0))
+        .inner_margin(egui::Margin::symmetric(9.0, 3.0))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text).size(11.5).color(fg));
+        });
+    let resp = inner.response.interact(egui::Sense::click());
+    if resp.hovered() {
+        ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
+    }
+    resp.on_hover_text("点击复制")
+}
+
 // 主操作按钮：强调色填充。每页一个，建立「蓝色 = 本页主操作」的视觉规则
 fn accent_btn(text: &str) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(text.to_owned()).color(egui::Color32::WHITE)).fill(C_ACCENT)
@@ -205,6 +221,39 @@ fn preview_img(ui: &mut egui::Ui, uri: &str, w: f32, h: f32, rounding: f32, show
             }
         }
     }
+}
+
+/// Justified Rows 画廊分行算法（Flickr/Google 相册式）。
+/// 输入各图宽高比 `aspects`（宽/高）、列宽 `avail_w`、间距 `gap`、目标行高 `target_h`。
+/// 返回每行 `(起始下标, 张数, 行高)`：每个铺满的行(非末行)宽度精确等于 `avail_w`，
+/// 末行未铺满则保持 `target_h` 不拉伸。纯函数，便于单测，与 GUI 无关。
+fn justify_rows(aspects: &[f32], avail_w: f32, gap: f32, target_h: f32) -> Vec<(usize, usize, f32)> {
+    let mut rows = Vec::new();
+    let mut i = 0;
+    while i < aspects.len() {
+        // 贪心攒一行：累加宽高比，直到「按目标行高排布的总宽」≥ 列宽
+        let mut end = i;
+        let mut sum_aspect = 0.0;
+        loop {
+            sum_aspect += aspects[end].max(0.01);
+            end += 1;
+            let row_w = target_h * sum_aspect + gap * (end - i - 1) as f32;
+            if end >= aspects.len() || row_w >= avail_w {
+                break;
+            }
+        }
+        let n = (end - i) as f32;
+        // 反推行高让本行精确等于列宽；末行未铺满则保持目标高度
+        let filled = target_h * sum_aspect + gap * (n - 1.0) >= avail_w;
+        let row_h = if filled {
+            ((avail_w - gap * (n - 1.0)) / sum_aspect).clamp(110.0, 300.0)
+        } else {
+            target_h
+        };
+        rows.push((i, end - i, row_h));
+        i = end;
+    }
+    rows
 }
 
 fn default_comfy_url() -> String {
@@ -496,6 +545,26 @@ struct VerInfo {
     filename: String,
     size_kb: f64,
     sha256: String,
+    trained_words: Vec<String>, // LoRA/嵌入触发词（Civitai trainedWords，多为 LoRA 才有）
+    published_at: String,       // 发布日期 YYYY-MM-DD（publishedAt 缺则退 createdAt）
+}
+// 画廊里的一张预览图：除 URL 外带上 Civitai 返回的原始宽高，
+// 用于在图片像素下载完成前就按真实宽高比做自适应布局（Justified Rows）。
+#[derive(Clone)]
+struct GalleryImg {
+    url: String,
+    w: f32,
+    h: f32,
+}
+impl GalleryImg {
+    // 宽高比（宽/高）；缺尺寸或异常时回退 1:1，避免除零或布局塌陷。
+    fn aspect(&self) -> f32 {
+        if self.w > 0.0 && self.h > 0.0 {
+            (self.w / self.h).clamp(0.2, 5.0)
+        } else {
+            1.0
+        }
+    }
 }
 #[derive(Clone)]
 struct ModelDetail {
@@ -506,7 +575,7 @@ struct ModelDetail {
     description: String,
     tags: Vec<String>,
     versions: Vec<VerInfo>,
-    images: Vec<String>,
+    images: Vec<GalleryImg>,
 }
 #[derive(Clone)]
 struct ModelDetailState {
@@ -744,6 +813,41 @@ fn primary_file(ver: &Value) -> Option<Value> {
         .cloned()
 }
 
+// 从 Civitai modelVersions[] 的单个版本对象解析出 VerInfo（详情页与链接解析共用）。
+fn parse_version(ver: &Value) -> VerInfo {
+    let vf = primary_file(ver);
+    VerInfo {
+        id: ver.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
+        name: ver.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        base: ver.get("baseModel").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        filename: vf.as_ref().and_then(|f| f.get("name")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        size_kb: vf.as_ref().and_then(|f| f.get("sizeKB")).and_then(|x| x.as_f64()).unwrap_or(0.0),
+        sha256: vf
+            .as_ref()
+            .and_then(|f| f.get("hashes"))
+            .and_then(|h| h.get("SHA256"))
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_lowercase(),
+        trained_words: ver
+            .get("trainedWords")
+            .and_then(|x| x.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|w| w.as_str().map(|s| s.trim().to_string()))
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        published_at: ver
+            .get("publishedAt")
+            .and_then(|x| x.as_str())
+            .or_else(|| ver.get("createdAt").and_then(|x| x.as_str()))
+            .map(|s| s.chars().take(10).collect())
+            .unwrap_or_default(),
+    }
+}
+
 fn civitai_search(cfg: &Config, query: &str, types: &str, base: &str) -> Result<(Vec<SearchItem>, Option<String>), String> {
     let mut url = format!("{}/v1/models?limit=24&nsfw=true&sort=Most%20Downloaded", cfg.civitai_api_base());
     if !query.is_empty() {
@@ -833,26 +937,7 @@ fn civitai_model_detail(cfg: &Config, item: &SearchItem) -> Result<ModelDetail, 
         .map(|a| a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
     let vers_arr = v.get("modelVersions").and_then(|x| x.as_array()).cloned().unwrap_or_default();
-    let versions: Vec<VerInfo> = vers_arr
-        .iter()
-        .map(|ver| {
-            let vf = primary_file(ver);
-            VerInfo {
-                id: ver.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
-                name: ver.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                base: ver.get("baseModel").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                filename: vf.as_ref().and_then(|f| f.get("name")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                size_kb: vf.as_ref().and_then(|f| f.get("sizeKB")).and_then(|x| x.as_f64()).unwrap_or(0.0),
-                sha256: vf
-                    .as_ref()
-                    .and_then(|f| f.get("hashes"))
-                    .and_then(|h| h.get("SHA256"))
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_lowercase(),
-            }
-        })
-        .collect();
+    let versions: Vec<VerInfo> = vers_arr.iter().map(parse_version).collect();
     // 图片：优先收集当前版本，再收集其它版本，去重
     let mut images = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -861,7 +946,10 @@ fn civitai_model_detail(cfg: &Config, item: &SearchItem) -> Result<ModelDetail, 
             for im in arr {
                 if let Some(url) = im.get("url").and_then(|x| x.as_str()) {
                     if seen.insert(url.to_string()) {
-                        images.push(url.to_string());
+                        // 宽高 Civitai 大多返回；缺失则给 0，aspect() 自动回退 1:1。
+                        let w = im.get("width").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
+                        let h = im.get("height").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
+                        images.push(GalleryImg { url: url.to_string(), w, h });
                     }
                 }
             }
@@ -939,26 +1027,7 @@ fn resolve_civitai_model(cfg: &Config, mid: &str, want_ver: Option<String>) -> R
             .and_then(|x| x.as_array())
             .and_then(|a| first_image_url(a))
             .unwrap_or_default();
-        let versions = vers_arr
-            .iter()
-            .map(|ver| {
-                let vf = primary_file(ver);
-                VerInfo {
-                    id: ver.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
-                    name: ver.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    base: ver.get("baseModel").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    filename: vf.as_ref().and_then(|f| f.get("name")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                    size_kb: vf.as_ref().and_then(|f| f.get("sizeKB")).and_then(|x| x.as_f64()).unwrap_or(0.0),
-                    sha256: vf
-                        .as_ref()
-                        .and_then(|f| f.get("hashes"))
-                        .and_then(|h| h.get("SHA256"))
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("")
-                        .to_lowercase(),
-                }
-            })
-            .collect();
+        let versions = vers_arr.iter().map(parse_version).collect();
         Ok(Resolved {
             source: "civitai".into(),
             model_name,
@@ -3610,8 +3679,14 @@ impl App {
                         egui::vec2(260.0, 0.0),
                         egui::Layout::top_down(egui::Align::Center),
                         |ui| {
-                            let main_img = d.images.first().map(|s| s.as_str()).unwrap_or("");
-                            preview_img(ui, main_img, 260.0, 260.0, 10.0, show_previews);
+                            // 主图按自身宽高比显示：宽固定 260，高由真实比例推得，
+                            // 钳制 [180,360] 防极端竖图把左栏撑过头。无图时退回方框占位。
+                            if let Some(hero) = d.images.first() {
+                                let hero_h = (260.0 / hero.aspect()).clamp(180.0, 360.0);
+                                preview_img(ui, &hero.url, 260.0, hero_h, 10.0, show_previews);
+                            } else {
+                                preview_img(ui, "", 260.0, 260.0, 10.0, show_previews);
+                            }
                             ui.add_space(10.0);
                             ui.horizontal_wrapped(|ui| {
                                 chip(ui, &d.kind, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
@@ -3646,6 +3721,34 @@ impl App {
                                 });
                             if let Some(v) = d.versions.iter().find(|v| v.id == sel_version) {
                                 ui.small(format!("{} · {}", v.filename, fmt_size((v.size_kb * 1024.0) as u64)));
+                                if !v.published_at.is_empty() {
+                                    ui.small(format!("发布于 {}", v.published_at));
+                                }
+                                // 触发词（多为 LoRA 才有）：每个胶囊点击复制单个，「复制全部」逗号拼接。
+                                if !v.trained_words.is_empty() {
+                                    ui.add_space(8.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("触发词");
+                                        if ui.small_button("复制全部").clicked() {
+                                            ui.ctx().output_mut(|o| o.copied_text = v.trained_words.join(", "));
+                                        }
+                                    });
+                                    ui.add_space(2.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        for w in &v.trained_words {
+                                            if click_chip(
+                                                ui,
+                                                w,
+                                                egui::Color32::from_rgb(40, 44, 60),
+                                                egui::Color32::from_rgb(180, 200, 240),
+                                            )
+                                            .clicked()
+                                            {
+                                                ui.ctx().output_mut(|o| o.copied_text = w.clone());
+                                            }
+                                        }
+                                    });
+                                }
                             }
                             ui.add_space(8.0);
                             if ui.add_sized([ui.available_width(), 32.0], accent_btn("下载该版本")).clicked() {
@@ -3677,22 +3780,31 @@ impl App {
                             ui.add_space(6.0);
                             let gallery_height = (ui.available_height() - 20.0).max(200.0);
                             egui::ScrollArea::vertical().max_height(gallery_height).show(ui, |ui| {
-                                let thumb_width = ui.available_width();
-                                let thumb_height = 220.0;
-                                // 分页：只渲染前 gallery_shown 张，避免一次性实例化几十张
-                                for url in d.images.iter().take(shown) {
-                                    // 再叠一层懒加载：只对进入视口的图片实例化加载，未进入视口只画占位块
+                                // Justified Rows（Flickr/Google 相册式）：每行按各图真实宽高比
+                                // 铺满列宽、零留白；矮宽图一行挤几张，高竖图一行就一张。
+                                let avail_w = ui.available_width();
+                                let gap = 8.0;
+                                let imgs: Vec<&GalleryImg> = d.images.iter().take(shown).collect();
+                                let aspects: Vec<f32> = imgs.iter().map(|g| g.aspect()).collect();
+                                for (start, count, row_h) in justify_rows(&aspects, avail_w, gap, 190.0) {
+                                    // 行级懒加载：整行不在视口内只占位，不实例化图片（避免大量网络加载）
+                                    let row_top = ui.next_widget_position();
                                     let visible = ui.is_rect_visible(egui::Rect::from_min_size(
-                                        ui.next_widget_position(),
-                                        egui::vec2(thumb_width, thumb_height),
+                                        row_top,
+                                        egui::vec2(avail_w, row_h),
                                     ));
                                     if visible {
-                                        preview_img(ui, url, thumb_width, thumb_height, 8.0, show_previews);
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = gap;
+                                            for img in &imgs[start..start + count] {
+                                                let w = (img.aspect() * row_h).min(avail_w);
+                                                preview_img(ui, &img.url, w, row_h, 8.0, show_previews);
+                                            }
+                                        });
                                     } else {
-                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(thumb_width, thumb_height), egui::Sense::hover());
-                                        ui.painter().rect_filled(rect, egui::Rounding::same(8.0), egui::Color32::from_rgb(38, 38, 50));
+                                        ui.allocate_exact_size(egui::vec2(avail_w, row_h), egui::Sense::hover());
                                     }
-                                    ui.add_space(8.0);
+                                    ui.add_space(gap);
                                 }
                                 if shown < total_imgs {
                                     ui.vertical_centered(|ui| {
@@ -5998,6 +6110,69 @@ fn main() -> eframe::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn justify_rows_fills_width_and_covers_all() {
+        let aspects = vec![1.5, 0.7, 1.0, 1.8, 0.6, 1.2];
+        let avail_w = 460.0;
+        let gap = 8.0;
+        let target_h = 190.0;
+        let rows = justify_rows(&aspects, avail_w, gap, target_h);
+
+        // 覆盖所有图、不重不漏，下标连续
+        let total: usize = rows.iter().map(|(_, n, _)| *n).sum();
+        assert_eq!(total, aspects.len());
+        let mut cursor = 0;
+        for &(start, n, _) in &rows {
+            assert_eq!(start, cursor);
+            cursor += n;
+        }
+
+        // 每个非末行精确铺满列宽（误差 < 1px）
+        for (idx, &(start, n, h)) in rows.iter().enumerate() {
+            let row_w: f32 =
+                aspects[start..start + n].iter().map(|a| a * h).sum::<f32>() + gap * (n as f32 - 1.0);
+            if idx != rows.len() - 1 {
+                assert!((row_w - avail_w).abs() < 1.0, "行{idx} 宽 {row_w} ≠ {avail_w}");
+            }
+            assert!(h > 0.0);
+        }
+
+        // 边界：空输入不 panic；超宽单图自成一行
+        assert!(justify_rows(&[], avail_w, gap, target_h).is_empty());
+        assert_eq!(justify_rows(&[5.0], avail_w, gap, target_h).len(), 1);
+        // 零/异常宽高比不 panic（aspect() 已兜底，这里再确认纯函数自身健壮）
+        assert_eq!(justify_rows(&[0.0, 0.0], avail_w, gap, target_h).iter().map(|(_, n, _)| n).sum::<usize>(), 2);
+    }
+
+    #[test]
+    fn parse_version_extracts_trigger_words_and_date() {
+        let ver: serde_json::Value = serde_json::from_str(
+            r#"{
+                "id": 123, "name": "v1.1 - IL", "baseModel": "Illustrious",
+                "publishedAt": "2024-09-08T12:34:56.000Z",
+                "createdAt": "2024-09-01T00:00:00.000Z",
+                "trainedWords": ["  mugi  ", "hitohira", "", "  "],
+                "files": [{"primary": true, "name": "foo.safetensors", "sizeKB": 332800.0,
+                           "hashes": {"SHA256": "ABCDEF"}}]
+            }"#,
+        )
+        .unwrap();
+        let v = parse_version(&ver);
+        assert_eq!(v.id, 123);
+        assert_eq!(v.base, "Illustrious");
+        assert_eq!(v.filename, "foo.safetensors");
+        assert_eq!(v.sha256, "abcdef"); // 统一小写
+        assert_eq!(v.trained_words, vec!["mugi", "hitohira"]); // 去首尾空白、丢空串
+        assert_eq!(v.published_at, "2024-09-08"); // 取日期前 10 位
+
+        // publishedAt 缺失 → 退回 createdAt；无 trainedWords → 空
+        let ver2: serde_json::Value =
+            serde_json::from_str(r#"{"id":1,"createdAt":"2023-01-02T00:00:00Z","files":[]}"#).unwrap();
+        let v2 = parse_version(&ver2);
+        assert_eq!(v2.published_at, "2023-01-02");
+        assert!(v2.trained_words.is_empty());
+    }
 
     #[test]
     fn sanitize_strips_illegal_chars() {
