@@ -93,12 +93,35 @@ jobs:
           Copy-Item "target/release/$env:BIN_NAME.exe" "$stage/"
           Copy-Item "README.md"            "$stage/"
           Copy-Item "config.json.example"  "$stage/"
+          Copy-Item "LICENSE"              "$stage/"
           $zip = "dist/comfy-downloader-$tag-windows-x86_64.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
           # 对 zip 算 SHA256，落到 .sha256 旁文件（仅含该归档的校验）
           $hash = (CertUtil -hashfile $zip SHA256 | Select-Object -Index 1).Trim()
           "$hash  $(Split-Path $zip -Leaf)" | Out-File -Encoding ascii "$zip.sha256"
           Remove-Item -Recurse -Force $stage
+
+      # 用 Inno Setup 6 编译出带向导的 Setup.exe（每用户安装到 LocalAppData）。
+      # choco 在 windows-latest Runner 上预装；innosetup 包自带 iscc 与中文 isl。
+      - name: Install Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
+          # iscc 随 innosetup 装入 Program Files；用其全路径调用更稳。
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
+          & "$iscc" "/DAppVersion=$version" "packaging\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          # OutputDir=dist、OutputBaseFilename=comfy-downloader-<version>-windows-setup
+          $setup = "dist/comfy-downloader-$version-windows-setup.exe"
+          $hash = (CertUtil -hashfile $setup SHA256 | Select-Object -Index 1).Trim()
+          "$hash  $(Split-Path $setup -Leaf)" | Out-File -Encoding ascii "$setup.sha256"
 
       # -------------------------------- Linux 打包 --------------------------------
       # 保底：tar.gz（二进制 + README + .desktop）。
@@ -114,11 +137,25 @@ jobs:
           mkdir -p "$STAGE"
           cp "target/release/${BIN_NAME}" "$STAGE/"
           cp README.md "$STAGE/"
+          cp LICENSE "$STAGE/"
           cp packaging/linux/comfy-downloader.desktop "$STAGE/"
           TARBALL="comfy-downloader-${TAG}-linux-x86_64.tar.gz"
           tar -C dist -czf "dist/${TARBALL}" "$(basename "$STAGE")"
           ( cd dist && sha256sum "${TARBALL}" > "${TARBALL}.sha256" )
           rm -rf "$STAGE"
+
+      # 用 dpkg-deb 出 .deb（二进制 -> /usr/bin，.desktop -> /usr/share/applications）。
+      # dpkg-deb 在 ubuntu Runner 上预装；脚本从 packaging/linux/debian/control 渲染版本。
+      - name: Package .deb (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+          DEB="comfy-downloader-${TAG}-linux-amd64.deb"
+          bash packaging/linux/build-deb.sh "${VERSION}" "dist/${DEB}"
+          ( cd dist && sha256sum "${DEB}" > "${DEB}.sha256" )
 
       - name: Package AppImage (Linux, optional)
         if: runner.os == 'Linux'
@@ -216,6 +253,8 @@ jobs:
             dist/*.tar.gz
             dist/*.AppImage
             dist/*.dmg
+            dist/*.exe
+            dist/*.deb
             dist/*.sha256
           if-no-files-found: warn
           retention-days: 7
@@ -251,4 +290,6 @@ jobs:
             dist/*.tar.gz
             dist/*.AppImage
             dist/*.dmg
+            dist/*.exe
+            dist/*.deb
             dist/*.sha256

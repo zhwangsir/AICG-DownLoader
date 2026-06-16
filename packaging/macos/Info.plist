@@ -41,5 +41,9 @@
     <!-- 字体运行时从系统加载、图标程序化生成，无需内嵌资源；故不声明 CFBundleIconFile -->
     <key>NSHighResolutionCapable</key>
     <true/>
+
+    <!-- 版权声明（显示在「关于」面板） -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 WangZhenYu (Winery)</string>
 </dict>
 </plist>

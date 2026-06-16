@@ -1,7 +1,12 @@
 # AICG-DownLoader · ComfyUI 模型下载器
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Releases](https://img.shields.io/badge/Download-Releases-brightgreen.svg)](https://github.com/zhwangsir/AICG-DownLoader/releases)
+
 纯 Rust 原生 GUI（egui），单文件可执行程序，支持 Windows / macOS / Linux。
 为本地 ComfyUI 用户设计：不碰命令行，把 Civitai / HuggingFace 上的模型下载到 ComfyUI 正确的子目录里。
+
+> 下载安装包请到 [GitHub Releases](https://github.com/zhwangsir/AICG-DownLoader/releases) 页。
 
 ## 功能
 
@@ -22,6 +27,16 @@
   - 同名任务去重、单实例保护（防止两个窗口写坏同一文件）
 - **国内网络友好**：hf-mirror 镜像开关；自动读取系统代理环境变量（`HTTPS_PROXY`/`HTTP_PROXY`，适配 Clash 等）
 - **中文界面**：启动时自动加载系统 CJK 字体（Windows/macOS/Linux 主流路径 + 递归扫描兜底）
+
+## 安装
+
+到 [GitHub Releases](https://github.com/zhwangsir/AICG-DownLoader/releases) 下载对应平台的安装包：
+
+- **Windows**：下载 `comfy-downloader-<版本>-windows-setup.exe`，双击运行向导即可（默认安装到当前用户目录，无需管理员权限），自动建开始菜单/桌面快捷方式。也可下载 `…-windows-x86_64.zip` 解压后直接运行 `comfy-downloader.exe`（便携模式）。
+- **Linux**：下载 `…-linux-amd64.deb` 后执行 `sudo dpkg -i comfy-downloader-*.deb`（缺依赖时再 `sudo apt-get -f install`），随后从应用菜单或终端 `comfy-downloader` 启动。或下载 `…-linux-x86_64.AppImage`，`chmod +x *.AppImage` 后直接运行。
+- **macOS**：下载 `…-macos-arm64.dmg`（或 `.zip`），把 `ComfyUI Downloader.app` 拖入「应用程序」。首次打开若被 Gatekeeper 拦（未签名），右键点 App 选「打开」确认一次即可；仍被拦时可在终端执行 `xattr -dr com.apple.quarantine "/Applications/ComfyUI Downloader.app"` 解除隔离属性。
+
+每个安装包旁都附带同名 `.sha256` 校验文件，可下载后核对完整性。
 
 ## 编译
 
@@ -63,5 +78,13 @@ cargo test --release -- --ignored   # 真实网络 e2e（下载/断点续传/SHA
 
 ## 已知限制
 
-- Linux/macOS 的实机验证与打包（AppImage / .app）待完成；理论上 `cargo build --release` 即可用
+- Linux/macOS 的实机验证仍在完善中；打包（.deb / AppImage / .app / dmg）已由发布工作流自动产出，理论上 `cargo build --release` 即可用
 - HF tree API 单页 1000 项，超大目录的文件可能查不到哈希（此时跳过校验，不影响下载）
+
+## 作者 / License
+
+- 作者：**Winery (WangZhenYu)**
+- 项目主页：<https://github.com/zhwangsir/AICG-DownLoader>
+- 许可证：**MIT License**（详见 [LICENSE](LICENSE)），Copyright © 2026 WangZhenYu (Winery)
+
+本项目以 MIT 协议开源，可自由使用、修改与再分发。请在二次分发时保留应用内「关于」页的署名与本仓库的版权声明（MIT 要求保留版权与许可声明）。
