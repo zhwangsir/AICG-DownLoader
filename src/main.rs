@@ -537,6 +537,38 @@ struct SearchItem {
     image: String,
     downloads: i64,
 }
+
+// 搜索源：Civitai（图片卡片）/ HuggingFace（仓库→文件）
+#[derive(PartialEq, Clone, Copy)]
+enum SearchSource {
+    Civitai,
+    HuggingFace,
+}
+
+// HuggingFace 搜索结果里的一个模型仓库
+#[derive(Clone)]
+struct HfRepo {
+    id: String,           // "org/name"
+    downloads: i64,
+    likes: i64,
+    pipeline_tag: String, // 如 text-to-image / text-to-video，可能为空
+}
+
+// HF 仓库里的一个可下载模型文件
+#[derive(Clone)]
+struct HfFile {
+    path: String, // 仓库内相对路径，可能含子目录，如 "split_files/vae/foo.safetensors"
+    size: u64,    // 字节（LFS 大文件取 lfs.size）
+}
+
+// 当前打开的「HF 仓库文件」弹窗状态
+#[derive(Clone)]
+struct HfFilesState {
+    repo: String,
+    files: Vec<HfFile>,
+    loading: bool,
+    err: String,
+}
 #[derive(Clone)]
 struct VerInfo {
     id: i64,
@@ -901,6 +933,90 @@ fn civitai_fetch_page(cfg: &Config, url: &str) -> Result<(Vec<SearchItem>, Optio
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
     Ok((out, next))
+}
+
+// ============ HuggingFace 搜索 ============
+
+// 解析 HF /api/models 的返回（数组）。纯函数，便于单测。
+fn parse_hf_search(v: &Value) -> Vec<HfRepo> {
+    v.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    let id = m
+                        .get("id")
+                        .or_else(|| m.get("modelId"))
+                        .and_then(|x| x.as_str())?
+                        .to_string();
+                    if id.is_empty() {
+                        return None;
+                    }
+                    Some(HfRepo {
+                        id,
+                        downloads: m.get("downloads").and_then(|x| x.as_i64()).unwrap_or(0),
+                        likes: m.get("likes").and_then(|x| x.as_i64()).unwrap_or(0),
+                        pipeline_tag: m.get("pipeline_tag").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// 搜索 HF 模型仓库（公开搜索无需 token）。按下载量降序，取前 30。
+fn hf_search(cfg: &Config, query: &str) -> Result<Vec<HfRepo>, String> {
+    let url = format!(
+        "{}/api/models?search={}&limit=30&sort=downloads&direction=-1",
+        hf_base(cfg),
+        urlencode(query)
+    );
+    let body = agent(cfg).get(&url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    Ok(parse_hf_search(&v))
+}
+
+// 模型权重文件扩展名（用于从仓库文件树里筛出可下载项）
+const HF_MODEL_EXTS: [&str; 8] = [".safetensors", ".gguf", ".ckpt", ".pt", ".pth", ".bin", ".onnx", ".sft"];
+
+// 解析 HF tree API 返回，筛出模型权重文件并按大小降序。纯函数，便于单测。
+fn parse_hf_files(v: &Value) -> Vec<HfFile> {
+    let mut files: Vec<HfFile> = v
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter(|e| e.get("type").and_then(|x| x.as_str()) == Some("file"))
+                .filter_map(|e| {
+                    let path = e.get("path").and_then(|x| x.as_str())?.to_string();
+                    let low = path.to_lowercase();
+                    if !HF_MODEL_EXTS.iter().any(|x| low.ends_with(x)) {
+                        return None;
+                    }
+                    // 大模型都是 LFS，真实大小在 lfs.size；非 LFS 小文件退回 size
+                    let size = e
+                        .get("lfs")
+                        .and_then(|l| l.get("size"))
+                        .and_then(|x| x.as_u64())
+                        .or_else(|| e.get("size").and_then(|x| x.as_u64()))
+                        .unwrap_or(0);
+                    Some(HfFile { path, size })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort_by_key(|f| std::cmp::Reverse(f.size));
+    files
+}
+
+// 列出 HF 仓库 main 分支下的模型文件（递归）。tree API 单页 1000 项，超大仓库可能截断。
+fn hf_repo_files(cfg: &Config, repo: &str) -> Result<Vec<HfFile>, String> {
+    let url = format!("{}/api/models/{}/tree/main?recursive=true", hf_base(cfg), repo);
+    let body = agent(cfg).get(&url).call().map_err(|e| e.to_string())?.into_string().map_err(|e| e.to_string())?;
+    let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let files = parse_hf_files(&v);
+    if files.is_empty() {
+        return Err("该仓库未找到可下载的模型文件（.safetensors/.gguf 等）".into());
+    }
+    Ok(files)
 }
 
 fn strip_html(html: &str) -> String {
@@ -2633,6 +2749,9 @@ fn presets(cfg: &Config) -> Vec<PresetEntry> {
 enum Msg {
     // bool = append（加载更多时追加而非替换）
     Search(Result<(Vec<SearchItem>, Option<String>), String>, bool),
+    // HuggingFace 仓库搜索结果 / 某仓库的文件列表
+    HfSearch(Result<Vec<HfRepo>, String>),
+    HfRepoFiles { repo: String, result: Result<Vec<HfFile>, String> },
     ModelDetailFetch { item: SearchItem, result: Result<ModelDetail, String> },
     Resolve(Box<Result<Resolved, String>>),
     ResolveSet(Result<Vec<Resolved>, String>),
@@ -2725,12 +2844,16 @@ struct App {
     rx: Receiver<Msg>,
     busy: bool,
     // 搜索
+    search_source: SearchSource,
     query: String,
     type_filter: String,
     base_filter: String,
     results: Vec<SearchItem>,
     next_page: Option<String>,
     detail: Option<ModelDetailState>,
+    // HuggingFace 搜索
+    hf_results: Vec<HfRepo>,
+    hf_files: Option<HfFilesState>, // 打开的「仓库文件」弹窗，None = 不显示
     // 链接
     link: String,
     resolve_err: String,
@@ -2869,12 +2992,15 @@ impl App {
             tx,
             rx,
             busy: false,
+            search_source: SearchSource::Civitai,
             query: String::new(),
             type_filter: String::new(),
             base_filter: String::new(),
             results: Vec::new(),
             next_page: None,
             detail: None,
+            hf_results: Vec::new(),
+            hf_files: None,
             link: String::new(),
             resolve_err: String::new(),
             pending: None,
@@ -3000,14 +3126,40 @@ impl App {
     fn do_search(&mut self) {
         let cfg = self.cfg.clone();
         let q = self.query.clone();
-        let tf = self.type_filter.clone();
-        let bf = self.base_filter.clone();
         let tx = self.tx.clone();
         self.busy = true;
         self.resolve_err.clear();
         self.next_page = None;
+        match self.search_source {
+            SearchSource::Civitai => {
+                let tf = self.type_filter.clone();
+                let bf = self.base_filter.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::Search(civitai_search(&cfg, &q, &tf, &bf), false));
+                });
+            }
+            SearchSource::HuggingFace => {
+                self.hf_results.clear();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::HfSearch(hf_search(&cfg, &q)));
+                });
+            }
+        }
+    }
+
+    // 打开某 HF 仓库的文件弹窗并后台拉取文件列表
+    fn open_hf_files(&mut self, repo: String) {
+        self.hf_files = Some(HfFilesState {
+            repo: repo.clone(),
+            files: Vec::new(),
+            loading: true,
+            err: String::new(),
+        });
+        let cfg = self.cfg.clone();
+        let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(Msg::Search(civitai_search(&cfg, &q, &tf, &bf), false));
+            let result = hf_repo_files(&cfg, &repo);
+            let _ = tx.send(Msg::HfRepoFiles { repo, result });
         });
     }
 
@@ -3142,7 +3294,9 @@ impl eframe::App for App {
             // busy 只代表搜索/解析/工作流分析这类带 spinner 的操作；Identify/ComfyStatus/Library
             // 各有自己的进度指示，不能让它们的回包误清 busy（否则并发时 spinner 提前消失）
             match m {
-                Msg::Search(..) | Msg::Resolve(_) | Msg::ResolveSet(_) | Msg::Workflow(_) => self.busy = false,
+                Msg::Search(..) | Msg::HfSearch(_) | Msg::Resolve(_) | Msg::ResolveSet(_) | Msg::Workflow(_) => {
+                    self.busy = false
+                }
                 _ => {}
             }
             match m {
@@ -3155,6 +3309,20 @@ impl eframe::App for App {
                     self.next_page = next;
                 }
                 Msg::Search(Err(e), _) => self.resolve_err = friendly_err(e),
+                Msg::HfSearch(Ok(repos)) => self.hf_results = repos,
+                Msg::HfSearch(Err(e)) => self.resolve_err = friendly_err(e),
+                Msg::HfRepoFiles { repo, result } => {
+                    // 仅当弹窗仍是同一仓库时才回填（用户可能已关闭或切换）
+                    if let Some(state) = self.hf_files.as_mut() {
+                        if state.repo == repo {
+                            state.loading = false;
+                            match result {
+                                Ok(files) => state.files = files,
+                                Err(e) => state.err = friendly_err(e),
+                            }
+                        }
+                    }
+                }
                 Msg::ModelDetailFetch { item, result } => {
                     if let Some(state) = self.detail.as_mut() {
                         if state.item.id == item.id {
@@ -3480,6 +3648,8 @@ impl eframe::App for App {
         self.ui_pending_set(ctx);
         // 模型详情弹窗
         self.ui_model_detail(ctx);
+        // HuggingFace 仓库文件弹窗
+        self.ui_hf_files(ctx);
 
         ctx.request_repaint_after(Duration::from_millis(500));
     }
@@ -3491,6 +3661,16 @@ impl eframe::App for App {
 
 impl App {
     fn ui_search(&mut self, ui: &mut egui::Ui) {
+        // 搜索源切换：Civitai（图片卡片）/ HuggingFace（仓库→文件）
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.search_source, SearchSource::Civitai, "Civitai");
+            ui.selectable_value(&mut self.search_source, SearchSource::HuggingFace, "HuggingFace");
+        });
+        ui.add_space(4.0);
+        if self.search_source == SearchSource::HuggingFace {
+            self.ui_search_hf(ui);
+            return;
+        }
         ui.weak("搜索 Civitai 模型，点卡片的下载会自动归类目录。");
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -3618,6 +3798,126 @@ impl App {
                 ui.add_space(8.0);
             }
         });
+    }
+
+    // HuggingFace 搜索视图：搜仓库 → 仓库卡片 → 「查看文件」开文件弹窗
+    fn ui_search_hf(&mut self, ui: &mut egui::Ui) {
+        ui.weak("搜索 HuggingFace 模型仓库，点开看文件列表，按需下载到对应目录。");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .desired_width(420.0)
+                    .hint_text("仓库关键词，如 flux gguf / wan2.2 / t5xxl"),
+            );
+            if ui.add(accent_btn("搜索")).clicked()
+                || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+            {
+                self.do_search();
+            }
+        });
+        if !self.resolve_err.is_empty() {
+            ui.colored_label(C_RED, &self.resolve_err);
+        }
+        ui.add_space(4.0);
+        if self.hf_results.is_empty() {
+            ui.add_space(56.0);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("🔍").size(34.0));
+                ui.add_space(4.0);
+                ui.weak(if self.busy {
+                    "搜索中…"
+                } else {
+                    "输入关键词搜索 HuggingFace 模型仓库（如 flux、wan2.2、t5xxl gguf）"
+                });
+            });
+            return;
+        }
+        let repos = self.hf_results.clone();
+        let mut open_repo: Option<String> = None;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for r in &repos {
+                soft_card().inner_margin(egui::Margin::same(10.0)).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width((ui.available_width() - 96.0).max(120.0));
+                            ui.add(egui::Label::new(egui::RichText::new(&r.id).strong()).truncate());
+                            ui.horizontal(|ui| {
+                                if !r.pipeline_tag.is_empty() {
+                                    chip(ui, &r.pipeline_tag, egui::Color32::from_rgb(30, 48, 82), egui::Color32::from_rgb(140, 180, 248));
+                                }
+                                ui.small(format!("⬇ {}    ♥ {}", r.downloads, r.likes));
+                            });
+                        });
+                        if ui.add_sized([84.0, 30.0], egui::Button::new("查看文件")).clicked() {
+                            open_repo = Some(r.id.clone());
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+            }
+        });
+        if let Some(repo) = open_repo {
+            self.open_hf_files(repo);
+        }
+    }
+
+    // 「HF 仓库文件」弹窗：列出筛过的模型文件，逐个下载（复用 do_resolve → 确认 → 入队）
+    fn ui_hf_files(&mut self, ctx: &egui::Context) {
+        let Some(state) = self.hf_files.as_ref() else {
+            return;
+        };
+        let repo = state.repo.clone();
+        let loading = state.loading;
+        let err = state.err.clone();
+        let files = state.files.clone();
+        let base = hf_base(&self.cfg).to_string();
+        let mut open = true;
+        let mut dl_url: Option<String> = None;
+        let screen = ctx.screen_rect();
+        egui::Window::new("HuggingFace 仓库文件")
+            .open(&mut open)
+            .resizable(true)
+            .collapsible(false)
+            .default_size([660.0, 540.0])
+            .max_size([screen.width() - 40.0, screen.height() - 40.0])
+            .show(ctx, |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(&repo).strong()).truncate());
+                ui.weak("点「下载」按文件名/路径自动归类到 ComfyUI 对应目录。");
+                ui.add_space(6.0);
+                if loading {
+                    ui.vertical_centered(|ui| {
+                        ui.spinner();
+                    });
+                }
+                if !err.is_empty() {
+                    ui.colored_label(C_RED, &err);
+                }
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for f in &files {
+                        soft_card().inner_margin(egui::Margin::same(8.0)).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_width((ui.available_width() - 96.0).max(140.0));
+                                    ui.add(egui::Label::new(egui::RichText::new(&f.path).strong()).truncate());
+                                    let short_dir = type_dir(guess_type(&f.path)).trim_start_matches("models/");
+                                    ui.small(format!("{} · → {}", fmt_size(f.size), short_dir));
+                                });
+                                if ui.add_sized([80.0, 30.0], egui::Button::new("下载")).clicked() {
+                                    dl_url = Some(format!("{}/{}/resolve/main/{}", base, repo, f.path));
+                                }
+                            });
+                        });
+                        ui.add_space(6.0);
+                    }
+                });
+            });
+        if let Some(u) = dl_url {
+            self.do_resolve(u);
+        }
+        if !open {
+            self.hf_files = None;
+        }
     }
 
     fn open_detail(&mut self, item: SearchItem) {
@@ -6175,6 +6475,47 @@ mod tests {
     }
 
     #[test]
+    fn parse_hf_search_extracts_repos() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"[
+                {"id":"black-forest-labs/FLUX.1-dev","downloads":123456,"likes":789,"pipeline_tag":"text-to-image"},
+                {"modelId":"city96/FLUX.1-dev-gguf","downloads":50000,"likes":120},
+                {"downloads":1,"likes":1}
+            ]"#,
+        )
+        .unwrap();
+        let repos = parse_hf_search(&v);
+        assert_eq!(repos.len(), 2); // 第三个无 id/modelId，丢弃
+        assert_eq!(repos[0].id, "black-forest-labs/FLUX.1-dev");
+        assert_eq!(repos[0].pipeline_tag, "text-to-image");
+        assert_eq!(repos[1].id, "city96/FLUX.1-dev-gguf"); // modelId 兜底
+        assert_eq!(repos[1].pipeline_tag, ""); // 缺失给空
+        assert!(parse_hf_search(&serde_json::json!({"error":"x"})).is_empty()); // 非数组不 panic
+    }
+
+    #[test]
+    fn parse_hf_files_filters_and_sorts() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"[
+                {"type":"file","path":"README.md","size":1024},
+                {"type":"file","path":"flux1-dev.safetensors","lfs":{"size":23800000000}},
+                {"type":"directory","path":"vae"},
+                {"type":"file","path":"vae/diffusion_pytorch_model.safetensors","lfs":{"size":335000000}},
+                {"type":"file","path":"model.gguf","size":11900000000}
+            ]"#,
+        )
+        .unwrap();
+        let files = parse_hf_files(&v);
+        assert_eq!(files.len(), 3); // README(非模型扩展名) 与 目录 被滤掉
+        // 按大小降序：safetensors 23.8G > gguf 11.9G > vae 335M
+        assert_eq!(files[0].path, "flux1-dev.safetensors");
+        assert_eq!(files[0].size, 23_800_000_000);
+        assert_eq!(files[1].path, "model.gguf"); // 用 size（非 LFS）
+        assert_eq!(files[2].path, "vae/diffusion_pytorch_model.safetensors");
+        assert!(parse_hf_files(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
     fn sanitize_strips_illegal_chars() {
         assert_eq!(
             sanitize_filename("a/b\\c:d*e?f\"g<h>i|j.safetensors"),
@@ -6342,6 +6683,27 @@ mod tests {
     fn search_term_from_filename() {
         assert_eq!(search_term("wan/Wan2.2_I2V-lora_v1.safetensors"), "Wan2.2 I2V lora v1");
         assert_eq!(search_term("flux1-dev-fp8.safetensors"), "flux1 dev fp8");
+    }
+
+    /// 真实网络：HF 仓库搜索 + 文件列表（验证线上 JSON 形状与 parse_* 一致）。
+    /// 手动运行: cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn hf_search_and_files_e2e() {
+        let tmp = std::env::temp_dir().join("comfy_dl_hf_e2e");
+        let mut cfg = test_cfg(&tmp);
+        cfg.hf_mirror = false; // 用官方 API（agent() 走系统代理）
+
+        let repos = hf_search(&cfg, "flux1-dev gguf").expect("HF 搜索应成功");
+        assert!(!repos.is_empty(), "搜索应有结果");
+        println!("HF 搜到 {} 个仓库，首个: {}", repos.len(), repos[0].id);
+
+        // 一个长期稳定、含 gguf 的仓库
+        let files = hf_repo_files(&cfg, "city96/FLUX.1-dev-gguf").expect("列文件应成功");
+        assert!(!files.is_empty(), "应筛出模型文件");
+        assert!(files.iter().any(|f| f.path.to_lowercase().ends_with(".gguf")), "应含 .gguf 文件");
+        assert!(files[0].size > 0, "LFS 大小应解析出来");
+        println!("city96/FLUX.1-dev-gguf 命中 {} 个模型文件，最大: {} ({} 字节)", files.len(), files[0].path, files[0].size);
     }
 
     /// 真实网络的端到端测试：全量下载 → 已存在跳过 → 半截 .part 续传 → .part 已完整(416 自愈)。
