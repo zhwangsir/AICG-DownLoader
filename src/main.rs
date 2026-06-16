@@ -1391,15 +1391,23 @@ fn start_task(cfg: Config, downloads: Arc<Mutex<Vec<TaskRef>>>, filename: String
     }
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let cancel = Arc::new(AtomicBool::new(false));
+    // 磁盘空间兜底拦截：覆盖全部入队点（含套餐/恢复/库内重下/工作流补齐等非交互路径）。
+    // size_kb=0 走 Unknown 放行；空间不足则把任务直接置「失败」，不 spawn 下载线程。
+    let space_err = match disk_precheck(available_space_bytes(&resolve_dest_dir(&cfg, &subdir)), (size_kb * 1024.0) as u64) {
+        DiskCheck::Insufficient { avail, need } => {
+            Some(format!("磁盘空间不足：目标盘仅剩 {}，需要 {}", fmt_size(avail), fmt_size(need)))
+        }
+        _ => None,
+    };
     let task = Arc::new(Mutex::new(Task {
         id,
         filename: filename.clone(),
         subdir: subdir.clone(),
-        status: "排队中".into(),
+        status: if space_err.is_some() { "失败".into() } else { "排队中".into() },
         downloaded: 0,
         total: (size_kb * 1024.0) as u64,
         speed: 0.0,
-        error: String::new(),
+        error: space_err.clone().unwrap_or_default(),
         cancel: cancel.clone(),
         download_url: meta.download_url.clone(),
         source: meta.source.clone(),
@@ -1412,6 +1420,9 @@ fn start_task(cfg: Config, downloads: Arc<Mutex<Vec<TaskRef>>>, filename: String
         notified: false,
     }));
     downloads.lock().unwrap().push(task.clone());
+    if space_err.is_some() {
+        return; // 空间不足：已作为「失败」任务展示，不启动下载线程
+    }
     std::thread::spawn(move || {
         loop {
             if cancel.load(Ordering::Relaxed) {
@@ -1480,10 +1491,17 @@ fn start_task(cfg: Config, downloads: Arc<Mutex<Vec<TaskRef>>>, filename: String
     });
 }
 
-fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, meta: &DlMeta) -> Result<(), String> {
-    // 下载目标：用户选了下载目录(或 Desktop 主目录)时落到 <模型根>/<类型>（去掉 subdir 的 models/ 前缀），
-    // 否则维持原行为 comfy_root/models/<类型>
-    let dest_dir = match effective_download_models_root(cfg) {
+// ============ 磁盘空间预检 ============
+// 下载大模型(Flux/Wan 动辄一二十G)前检查目标盘可用空间：确认窗里警告/阻止，
+// 并在 start_task 入口兜底拦截（覆盖套餐/恢复/补齐等非交互入队点）。
+
+const DISK_MARGIN_MIN_BYTES: u64 = 300 * 1024 * 1024; // 安全余量下限 300MB
+const DISK_MARGIN_RATIO: f64 = 0.05; // 安全余量比例 5%
+
+// 解析某 subdir 的真实落盘目录。与 download_file 共用同一条解析路径，
+// 保证"预检的盘 == 实际下载的盘"，不会出现检查了 A 盘却下到 B 盘。
+fn resolve_dest_dir(cfg: &Config, subdir: &str) -> PathBuf {
+    match effective_download_models_root(cfg) {
         Some(models_root) => {
             let ty = subdir.strip_prefix("models/").unwrap_or(subdir);
             let sub: PathBuf = ty.split('/').collect();
@@ -1493,7 +1511,104 @@ fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, met
             let sub: PathBuf = subdir.split('/').collect();
             expand_root(&cfg.comfy_root).join(sub)
         }
+    }
+}
+
+// 向上回溯到第一个已存在的祖先目录：目标类型子目录可能尚未创建，
+// 直接对不存在路径查可用空间会失败。
+fn nearest_existing_ancestor(path: &Path) -> PathBuf {
+    let mut p = path;
+    loop {
+        if p.exists() {
+            return p.to_path_buf();
+        }
+        match p.parent() {
+            Some(parent) => p = parent,
+            None => return path.to_path_buf(),
+        }
+    }
+}
+
+// 目标目录所在盘对当前用户可用的字节数。取不到（网络盘/不存在盘符/暂未实现的平台）返回 None。
+#[cfg(windows)]
+fn available_space_bytes(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lp_directory_name: *const u16,
+            lp_free_bytes_available_to_caller: *mut u64,
+            lp_total_number_of_bytes: *mut u64,
+            lp_total_number_of_free_bytes: *mut u64,
+        ) -> i32;
+    }
+    let dir = nearest_existing_ancestor(path);
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free_to_caller: u64 = 0;
+    // SAFETY: wide 是 NUL 结尾的合法 UTF-16 路径；后两个 out 指针传 null 表示不需要该值。
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_to_caller, std::ptr::null_mut(), std::ptr::null_mut())
     };
+    (ok != 0).then_some(free_to_caller)
+}
+
+#[cfg(not(windows))]
+fn available_space_bytes(_path: &Path) -> Option<u64> {
+    // Linux/macOS 的 statvfs 留到跨平台打包验证阶段补（届时可引 libc）；
+    // 现暂返回 None → disk_precheck 判 Unknown → 优雅放行，不影响功能。
+    None
+}
+
+// 磁盘空间判定结果
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum DiskCheck {
+    Unknown,                                 // 取不到可用空间 → 不打扰、放行
+    Ok,                                      // 余量充足
+    Tight { avail: u64, need: u64 },         // 能放下但余量紧张 → 黄色警告、可继续
+    Insufficient { avail: u64, need: u64 },  // 放不下 → 红色阻止
+}
+
+// 纯判定：avail=可用字节(None=未知)，file_bytes=待下载文件大小。
+fn disk_precheck(avail: Option<u64>, file_bytes: u64) -> DiskCheck {
+    let Some(avail) = avail else {
+        return DiskCheck::Unknown;
+    };
+    if file_bytes == 0 {
+        return DiskCheck::Ok; // 无大小信息（大量入队点 size_kb=0）→ 不打扰
+    }
+    if avail < file_bytes {
+        return DiskCheck::Insufficient { avail, need: file_bytes };
+    }
+    let margin = ((file_bytes as f64 * DISK_MARGIN_RATIO) as u64).max(DISK_MARGIN_MIN_BYTES);
+    let need = file_bytes.saturating_add(margin);
+    if avail >= need {
+        DiskCheck::Ok
+    } else {
+        DiskCheck::Tight { avail, need }
+    }
+}
+
+impl DiskCheck {
+    // (是否阻止下载, 提示文案)；Ok/Unknown 返回 None（不显示任何行）。
+    fn warning(&self) -> Option<(bool, String)> {
+        match *self {
+            DiskCheck::Unknown | DiskCheck::Ok => None,
+            DiskCheck::Tight { avail, need } => Some((
+                false,
+                format!("目标盘仅剩 {}，本次下载约需 {}（含安全余量），空间偏紧", fmt_size(avail), fmt_size(need)),
+            )),
+            DiskCheck::Insufficient { avail, need } => Some((
+                true,
+                format!("目标盘仅剩 {}，不足以下载 {}，已阻止入队", fmt_size(avail), fmt_size(need)),
+            )),
+        }
+    }
+}
+
+fn download_file(cfg: &Config, task: &TaskRef, filename: &str, subdir: &str, meta: &DlMeta) -> Result<(), String> {
+    // 下载目标：用户选了下载目录(或 Desktop 主目录)时落到 <模型根>/<类型>（去掉 subdir 的 models/ 前缀），
+    // 否则维持原行为 comfy_root/models/<类型>。解析逻辑抽到 resolve_dest_dir，与磁盘预检共用。
+    let dest_dir = resolve_dest_dir(cfg, subdir);
     fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
     let dest = dest_dir.join(filename);
     let part = dest.with_extension(format!(
@@ -5730,9 +5845,24 @@ impl App {
                         ui.separator();
                     }
                 });
+                // 磁盘空间预检：勾选项按大小累加，对目标盘聚合判断（多数落同一盘，取首个选中项的盘为代表）
+                let sel_total: u64 = self
+                    .pending_set
+                    .iter()
+                    .filter(|(_, on)| *on)
+                    .map(|(r, _)| (r.size_kb * 1024.0) as u64)
+                    .sum();
+                let set_check = match self.pending_set.iter().find(|(_, on)| *on) {
+                    Some((r, _)) => disk_precheck(available_space_bytes(&resolve_dest_dir(&self.cfg, &r.subdir)), sel_total),
+                    None => DiskCheck::Unknown,
+                };
+                let set_block = matches!(set_check, DiskCheck::Insufficient { .. });
+                if let Some((block, msg)) = set_check.warning() {
+                    ui.colored_label(if block { C_RED } else { C_YELLOW }, msg);
+                }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(n_sel > 0, accent_btn(&format!("下载选中 ({})", n_sel))).clicked() {
+                    if ui.add_enabled(n_sel > 0 && !set_block, accent_btn(&format!("下载选中 ({})", n_sel))).clicked() {
                         act = Some(true);
                     }
                     if ui.button("取消").clicked() {
@@ -5832,9 +5962,20 @@ impl App {
                                 }
                             });
                     });
+                    // 磁盘空间预检：紧张黄字警告(可继续)，不足红字并禁用「开始下载」
+                    let need_bytes = {
+                        let size_kb = sel_ver.map(|v| v.size_kb).filter(|s| *s > 0.0).unwrap_or(r.size_kb);
+                        (size_kb * 1024.0) as u64
+                    };
+                    let dest = resolve_dest_dir(&self.cfg, &self.edit_subdir);
+                    let check = disk_precheck(available_space_bytes(&dest), need_bytes);
+                    let space_block = matches!(check, DiskCheck::Insufficient { .. });
+                    if let Some((block, msg)) = check.warning() {
+                        ui.colored_label(if block { C_RED } else { C_YELLOW }, msg);
+                    }
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if ui.add(accent_btn("开始下载")).clicked() {
+                        if ui.add_enabled(!space_block, accent_btn("开始下载")).clicked() {
                             start = true;
                         }
                         if ui.button("取消").clicked() {
@@ -6513,6 +6654,68 @@ mod tests {
         assert_eq!(files[1].path, "model.gguf"); // 用 size（非 LFS）
         assert_eq!(files[2].path, "vae/diffusion_pytorch_model.safetensors");
         assert!(parse_hf_files(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn disk_precheck_rules() {
+        let gb = 1024u64 * 1024 * 1024;
+        assert_eq!(disk_precheck(None, 5 * gb), DiskCheck::Unknown); // 未知 → 放行
+        assert_eq!(disk_precheck(Some(gb), 0), DiskCheck::Ok); // 无大小 → 不打扰
+        assert_eq!(disk_precheck(Some(100 * gb), 10 * gb), DiskCheck::Ok); // 充足
+        assert!(matches!(disk_precheck(Some(gb), 5 * gb), DiskCheck::Insufficient { .. })); // 放不下
+        // 能放下文件但余量不足 → Tight（10G 文件，余量 5%=0.5G，need=10.5G，avail=10.2G）
+        assert!(matches!(disk_precheck(Some(10 * gb + 200 * 1024 * 1024), 10 * gb), DiskCheck::Tight { .. }));
+        // 边界：avail==file_bytes → 余量=0 < margin → Tight
+        assert!(matches!(disk_precheck(Some(5 * gb), 5 * gb), DiskCheck::Tight { .. }));
+        // 边界：avail 比文件少 1 字节 → Insufficient
+        assert!(matches!(disk_precheck(Some(5 * gb - 1), 5 * gb), DiskCheck::Insufficient { .. }));
+    }
+
+    #[test]
+    fn disk_margin_floor_and_ratio() {
+        let mb = 1024u64 * 1024;
+        let gb = 1024 * mb;
+        // 小文件(50MB)：余量取 300MB 下限 → need≈350MB
+        assert!(matches!(disk_precheck(Some(320 * mb), 50 * mb), DiskCheck::Tight { .. })); // 320<350
+        assert_eq!(disk_precheck(Some(400 * mb), 50 * mb), DiskCheck::Ok); // 400>350
+        // 大文件(20GB)：余量 5%=1GB → need=21GB
+        assert_eq!(disk_precheck(Some(21 * gb + 600 * mb), 20 * gb), DiskCheck::Ok); // 21.6G>21G
+        assert!(matches!(disk_precheck(Some(20 * gb + 512 * mb), 20 * gb), DiskCheck::Tight { .. })); // 20.5G<21G 但>20G
+    }
+
+    #[test]
+    fn nearest_existing_ancestor_walks_up() {
+        let tmp = std::env::temp_dir();
+        assert!(tmp.exists());
+        assert_eq!(nearest_existing_ancestor(&tmp), tmp); // 已存在 → 原样
+        let deep = tmp.join("comfy_dl__nope__zzz/a/b/c"); // 不存在 → 回溯到 tmp
+        assert_eq!(nearest_existing_ancestor(&deep), tmp);
+    }
+
+    #[test]
+    fn resolve_dest_dir_uses_download_root() {
+        // 设了 download_root → <root>/<去 models/ 前缀的类型>（短路 detect_desktop，确定性）
+        let mut cfg = test_cfg(Path::new("Z:/__fake_comfy__"));
+        cfg.download_root = "E:/aimodels".into();
+        assert_eq!(resolve_dest_dir(&cfg, "models/loras"), expand_root("E:/aimodels").join("loras"));
+        assert_eq!(resolve_dest_dir(&cfg, "models/text_encoders"), expand_root("E:/aimodels").join("text_encoders"));
+    }
+
+    /// 真实平台 API：临时目录所在盘可用空间。手动运行: cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn available_space_e2e() {
+        let tmp = std::env::temp_dir();
+        let avail = available_space_bytes(&tmp);
+        #[cfg(windows)]
+        {
+            assert!(avail.is_some(), "Windows 应能取到可用空间");
+            assert!(avail.unwrap() > 0);
+            println!("temp 盘可用 {}", fmt_size(avail.unwrap()));
+        }
+        #[cfg(not(windows))]
+        let _ = avail; // 非 Windows 暂返回 None
+        let _ = available_space_bytes(Path::new("Z:/__no_such_drive__/x")); // 不存在盘符不 panic
     }
 
     #[test]
