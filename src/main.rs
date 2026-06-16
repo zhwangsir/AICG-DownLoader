@@ -16,6 +16,17 @@ use eframe::egui;
 
 mod sys_info;
 
+// ============ 品牌 / 署名 ============
+// 作者 Winery（真名 WangZhenYu）。这些常量是全应用署名的唯一来源，
+// 用于窗口标题、「关于」页与（经 Cargo/winresource）二进制元数据。
+// 授权 MIT：可用可改，但必须保留版权与许可声明（详见仓库 LICENSE）。
+const APP_NAME: &str = "ComfyUI 模型下载器";
+const APP_AUTHOR: &str = "Winery (WangZhenYu)";
+const APP_COPYRIGHT: &str = "© 2026 WangZhenYu";
+const APP_HOMEPAGE: &str = "https://github.com/zhwangsir/AICG-DownLoader";
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const WINDOW_TITLE: &str = "ComfyUI 模型下载器 — by Winery";
+
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 // 全局暂停：置位后排队任务不取并发槽、下载中任务在下一个分块边界退出为「已暂停」
@@ -4882,6 +4893,30 @@ impl App {
         });
         ui.weak(egui::RichText::new(format!("配置文件: {}", config_path().display())).size(11.5));
             });
+        // ============ 关于 / 署名 ============
+        ui.add_space(10.0);
+        card()
+            .inner_margin(egui::Margin::same(14.0))
+            .show(ui, |ui| {
+                ui.heading("关于");
+                ui.add_space(4.0);
+                egui::Grid::new("about").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                    ui.label("应用");
+                    ui.label(format!("{}  ·  v{}", APP_NAME, APP_VERSION));
+                    ui.end_row();
+                    ui.label("作者");
+                    ui.label(egui::RichText::new(APP_AUTHOR).strong().color(C_ACCENT));
+                    ui.end_row();
+                    ui.label("项目主页");
+                    ui.hyperlink(APP_HOMEPAGE);
+                    ui.end_row();
+                    ui.label("授权");
+                    ui.label(format!("MIT License · {}", APP_COPYRIGHT));
+                    ui.end_row();
+                });
+                ui.add_space(4.0);
+                ui.weak("本工具由 Winery (WangZhenYu) 开发。MIT 授权：可自由使用与修改，但请保留本署名与版权声明。");
+            });
     }
 
     // ============ ComfyUI 管理页 ============
@@ -6573,11 +6608,13 @@ fn setup_tray() -> Option<tray_icon::TrayIcon> {
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1120.0, 800.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1120.0, 800.0])
+            .with_title(WINDOW_TITLE),
         ..Default::default()
     };
     eframe::run_native(
-        "ComfyUI 模型下载器",
+        WINDOW_TITLE, // 窗口标题带署名 "— by Winery"
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
