@@ -1391,13 +1391,21 @@ fn start_task(cfg: Config, downloads: Arc<Mutex<Vec<TaskRef>>>, filename: String
     }
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let cancel = Arc::new(AtomicBool::new(false));
-    // 磁盘空间兜底拦截：覆盖全部入队点（含套餐/恢复/库内重下/工作流补齐等非交互路径）。
-    // size_kb=0 走 Unknown 放行；空间不足则把任务直接置「失败」，不 spawn 下载线程。
-    let space_err = match disk_precheck(available_space_bytes(&resolve_dest_dir(&cfg, &subdir)), (size_kb * 1024.0) as u64) {
-        DiskCheck::Insufficient { avail, need } => {
-            Some(format!("磁盘空间不足：目标盘仅剩 {}，需要 {}", fmt_size(avail), fmt_size(need)))
+    // 磁盘空间兜底拦截。关键：必须扣除已有 .part 续传进度，只按「剩余待下载字节」判定，
+    // 否则盘越满、续传进度越高反而越会把可续传任务误杀（破坏断点续传不变量）。
+    // 正式文件已存在 → 剩余 0（download_file 会判「已存在」秒结束）；size_kb=0 → Unknown 放行。
+    let space_err = {
+        let dir = resolve_dest_dir(&cfg, &subdir);
+        let dest = dir.join(&filename);
+        let part = dest.with_extension(format!("{}.part", dest.extension().and_then(|s| s.to_str()).unwrap_or("")));
+        let part_bytes = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        let remaining = remaining_to_download(dest.exists(), (size_kb * 1024.0) as u64, part_bytes);
+        match disk_precheck(available_space_bytes(&dir), remaining) {
+            DiskCheck::Insufficient { avail, need } => {
+                Some(format!("磁盘空间不足：目标盘仅剩 {}，仍需 {}", fmt_size(avail), fmt_size(need)))
+            }
+            _ => None,
         }
-        _ => None,
     };
     let task = Arc::new(Mutex::new(Task {
         id,
@@ -1588,6 +1596,16 @@ fn disk_precheck(avail: Option<u64>, file_bytes: u64) -> DiskCheck {
     }
 }
 
+// 实际还需下载的字节：正式文件已存在→0（秒判已存在）；否则整文件减去已有 .part 续传进度。
+// 磁盘预检必须用这个剩余量，否则盘越满、续传越深越会把可续传任务误判为空间不足。
+fn remaining_to_download(dest_exists: bool, full_bytes: u64, part_bytes: u64) -> u64 {
+    if dest_exists {
+        0
+    } else {
+        full_bytes.saturating_sub(part_bytes)
+    }
+}
+
 impl DiskCheck {
     // (是否阻止下载, 提示文案)；Ok/Unknown 返回 None（不显示任何行）。
     fn warning(&self) -> Option<(bool, String)> {
@@ -1599,7 +1617,7 @@ impl DiskCheck {
             )),
             DiskCheck::Insufficient { avail, need } => Some((
                 true,
-                format!("目标盘仅剩 {}，不足以下载 {}，已阻止入队", fmt_size(avail), fmt_size(need)),
+                format!("目标盘仅剩 {}，连文件本体 {} 都放不下，已阻止入队", fmt_size(avail), fmt_size(need)),
             )),
         }
     }
@@ -2979,6 +2997,9 @@ struct App {
     edit_name: String,
     edit_subdir: String,
     sel_version: i64,
+    // 确认窗磁盘预检缓存：(键=目标子目录|需求字节, 结果)；键不变就不重算，
+    // 避免弹窗每帧穿透 resolve_dest_dir→detect_desktop 的磁盘 I/O。
+    disk_check_cache: Option<(String, DiskCheck)>,
     // 模型库
     library: Vec<LibDir>,
     lib_scanned: bool,
@@ -3123,6 +3144,7 @@ impl App {
             edit_name: String::new(),
             edit_subdir: String::new(),
             sel_version: 0,
+            disk_check_cache: None,
             library: Vec::new(),
             lib_scanned: false,
             lib_filter: String::new(),
@@ -3367,7 +3389,19 @@ impl App {
         self.edit_name = r.filename.clone();
         self.edit_subdir = r.subdir.clone();
         self.sel_version = r.version_id;
+        self.disk_check_cache = None; // 新弹窗：丢弃旧缓存，让磁盘预检重新算一次（避免显示过期空间）
         self.pending = Some(r);
+    }
+
+    // 确认窗磁盘预检（带缓存）：key=subdir|need_bytes 不变就复用上次结果，
+    // 避免弹窗每帧穿透 resolve_dest_dir→detect_desktop 的磁盘 I/O。
+    fn cached_disk_check(&mut self, subdir: &str, need_bytes: u64) -> DiskCheck {
+        let key = format!("{subdir}|{need_bytes}");
+        if self.disk_check_cache.as_ref().map(|(k, _)| k.as_str()) != Some(key.as_str()) {
+            let check = disk_precheck(available_space_bytes(&resolve_dest_dir(&self.cfg, subdir)), need_bytes);
+            self.disk_check_cache = Some((key, check));
+        }
+        self.disk_check_cache.as_ref().map(|(_, c)| *c).unwrap_or(DiskCheck::Unknown)
     }
 
     // 检查指定 model_id 在 Civitai 上的最新版本
@@ -5852,8 +5886,9 @@ impl App {
                     .filter(|(_, on)| *on)
                     .map(|(r, _)| (r.size_kb * 1024.0) as u64)
                     .sum();
-                let set_check = match self.pending_set.iter().find(|(_, on)| *on) {
-                    Some((r, _)) => disk_precheck(available_space_bytes(&resolve_dest_dir(&self.cfg, &r.subdir)), sel_total),
+                let first_subdir = self.pending_set.iter().find(|(_, on)| *on).map(|(r, _)| r.subdir.clone());
+                let set_check = match first_subdir {
+                    Some(sub) => self.cached_disk_check(&sub, sel_total),
                     None => DiskCheck::Unknown,
                 };
                 let set_block = matches!(set_check, DiskCheck::Insufficient { .. });
@@ -5967,8 +6002,8 @@ impl App {
                         let size_kb = sel_ver.map(|v| v.size_kb).filter(|s| *s > 0.0).unwrap_or(r.size_kb);
                         (size_kb * 1024.0) as u64
                     };
-                    let dest = resolve_dest_dir(&self.cfg, &self.edit_subdir);
-                    let check = disk_precheck(available_space_bytes(&dest), need_bytes);
+                    let subdir = self.edit_subdir.clone();
+                    let check = self.cached_disk_check(&subdir, need_bytes);
                     let space_block = matches!(check, DiskCheck::Insufficient { .. });
                     if let Some((block, msg)) = check.warning() {
                         ui.colored_label(if block { C_RED } else { C_YELLOW }, msg);
@@ -6681,6 +6716,19 @@ mod tests {
         // 大文件(20GB)：余量 5%=1GB → need=21GB
         assert_eq!(disk_precheck(Some(21 * gb + 600 * mb), 20 * gb), DiskCheck::Ok); // 21.6G>21G
         assert!(matches!(disk_precheck(Some(20 * gb + 512 * mb), 20 * gb), DiskCheck::Tight { .. })); // 20.5G<21G 但>20G
+    }
+
+    #[test]
+    fn remaining_subtracts_part_progress() {
+        let gb = 1024u64 * 1024 * 1024;
+        // 续传核心：19G 的 .part / 20G 整文件 → 只还需 1G（修复前会用整 20G 误杀续传）
+        assert_eq!(remaining_to_download(false, 20 * gb, 19 * gb), gb);
+        // 全新下载（无 .part）→ 整文件
+        assert_eq!(remaining_to_download(false, 20 * gb, 0), 20 * gb);
+        // 正式文件已存在 → 0（download_file 会判已存在，不占新空间）
+        assert_eq!(remaining_to_download(true, 20 * gb, 0), 0);
+        // .part 比记录的整文件还大（异常）→ 饱和到 0，不下溢
+        assert_eq!(remaining_to_download(false, 20 * gb, 21 * gb), 0);
     }
 
     #[test]
