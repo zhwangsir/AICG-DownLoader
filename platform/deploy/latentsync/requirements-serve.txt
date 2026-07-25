@@ -1,0 +1,8 @@
+# LatentSync FastAPI 服务包装层依赖 (与 LatentSync 自身 requirements.txt 分离)
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+aiofiles>=23.2
+httpx>=0.27
+# cog: LatentSync 官方 predict.py 依赖 (Replicate Cog 框架, 用于 Predictor 基类)
+cog>=0.20

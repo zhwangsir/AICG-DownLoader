@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aicg.deepfilternet</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/dgmt-studio01/deploys/deepfilternet/serve_api.py</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DF_HOST</key>
+        <string>0.0.0.0</string>
+        <key>DF_PORT</key>
+        <string>8301</string>
+        <key>DF_BIN</key>
+        <string>/Users/dgmt-studio01/deploys/deepfilternet/deep-filter</string>
+        <key>DF_WORK_DIR</key>
+        <string>/tmp/deepfilternet-io</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/dgmt-studio01/deploys/deepfilternet/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/dgmt-studio01/deploys/deepfilternet/launchd.err.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/dgmt-studio01/deploys/deepfilternet</string>
+</dict>
+</plist>

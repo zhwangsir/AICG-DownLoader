@@ -1,0 +1,604 @@
+/*
+ * Film Atelier — 暗房/剪辑台隐喻设计体系
+ * ------------------------------------------------------------------
+ * 设计原则：
+ *   1. UI 退后，内容是焦点（暗房灯只照亮显影液面）
+ *   2. 暗房分六层 token：darkroom-base / darkroom-elevated / film-bed /
+ *      developer / silver-text / frame
+ *   3. 多配色主题通过 [data-theme] 切换；语义别名（--bg-primary 等）保持不变
+ *      → 所有组件零改动即可获得新视觉
+ *   4. 克制呼吸感：动效全部缓动 cubic-bezier(0.4, 0, 0.2, 1)，禁止单帧跳变
+ * ------------------------------------------------------------------
+ */
+
+/* ============== 默认主题：暗房琥珀 Darkroom Amber ============== */
+:root,
+[data-theme="darkroom-amber"] {
+  /* 暗房隐喻源 token（6 层） */
+  --darkroom-base: #0f0e0c;       /* 最底层暗房基底 */
+  --darkroom-elevated: #1a1816;   /* 浮起层（topbar/sidebar/modal） */
+  --film-bed: #14110e;            /* 画布/显影液面，比 elevated 略深以突出内容 */
+  --developer: #d4a574;            /* 显影液主色（琥珀安全灯） */
+  --developer-dim: #8a6b4a;        /* 暗化显影色 */
+  --silver-text: #e0e0e0;         /* 主文本（银盐颗粒感） */
+  --silver-text-dim: #888888;     /* 副文本 */
+  --frame: #2a2723;               /* 边框（片框/胶片齿孔隐喻） */
+  --developer-glow: rgba(212, 165, 116, 0.08);  /* 安全灯径向光晕 */
+
+  /* 语义别名（保留以兼容现有组件，零改动） */
+  --bg-primary: var(--darkroom-base);
+  --bg-secondary: var(--darkroom-elevated);
+  --bg-tertiary: var(--film-bed);
+  --accent: var(--developer);
+  --accent-dim: var(--developer-dim);
+  --text-primary: var(--silver-text);
+  --text-secondary: var(--silver-text-dim);
+  --border: var(--frame);
+
+  /* 节点配色保持原样，仅基于新基底 */
+  --node-script: #4a6fa5;
+  --node-character: #a54a6f;
+  --node-storyboard: #4aa57a;
+  --node-video: #a57a4a;
+  --node-voice: #6b4aa5;
+  --node-subtitle: #4aa5a5;
+  --node-edit: #a54a4a;
+  --node-quality: #a5a54a;
+  --node-visual-quality: #7a4aa5;
+}
+
+/* ============== 银盐冷调 Silver Halide ============== */
+[data-theme="silver-halide"] {
+  --darkroom-base: #0c0d0f;
+  --darkroom-elevated: #16181b;
+  --film-bed: #0f1112;
+  --developer: #b8c5d4;           /* 冷银显影色 */
+  --developer-dim: #6b7888;
+  --silver-text: #d8dde2;
+  --silver-text-dim: #7a818a;
+  --frame: #24272b;
+  --developer-glow: rgba(184, 197, 212, 0.06);
+}
+
+/* ============== 蓝晒 Cyanotype ============== */
+[data-theme="cyanotype"] {
+  --darkroom-base: #0a0e14;
+  --darkroom-elevated: #131a24;
+  --film-bed: #0c1118;
+  --developer: #5da9c4;           /* 普鲁士蓝晒色 */
+  --developer-dim: #356d85;
+  --silver-text: #d8e3ea;
+  --silver-text-dim: #6b8a9c;
+  --frame: #1f2a36;
+  --developer-glow: rgba(93, 169, 196, 0.07);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, "PingFang SC", "SF Pro", sans-serif;
+  background: var(--darkroom-base);
+  color: var(--silver-text);
+  overflow: hidden;
+  /* 暗房安全灯径向光晕：内容区中央被微弱照亮，四角沉入黑暗 */
+  background-image: radial-gradient(
+    ellipse 80% 60% at 50% 55%,
+    var(--developer-glow),
+    transparent 70%
+  );
+  background-attachment: fixed;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+}
+
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: relative;
+}
+
+/* ============== 顶栏（剪辑台条） ==============
+ * 半透明 + 微弱模糊（暗房灯透过胶片感，非花哨毛玻璃），
+ * border 极薄，让 UI 退后
+ */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 48px;
+  background: color-mix(in srgb, var(--darkroom-elevated) 78%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--frame);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+}
+
+.topbar-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--developer);
+  letter-spacing: 1.5px;
+  /* 极弱的文字呼吸感：胶片划过放映机的稳定感 */
+  opacity: 0.92;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.topbar-btn {
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--frame);
+  color: var(--silver-text);
+  border-radius: 3px;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: border-color 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.topbar-btn:hover:not(:disabled) {
+  border-color: var(--developer);
+  color: var(--developer);
+}
+
+.topbar-btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.topbar-btn-primary {
+  background: var(--developer-dim);
+  border-color: var(--developer);
+  color: var(--darkroom-base);
+  font-weight: 500;
+}
+
+.topbar-btn-primary:hover:not(:disabled) {
+  background: var(--developer);
+  color: var(--darkroom-base);
+}
+
+/* ============== 画布容器（显影液面） ==============
+ * 内容是焦点：让 canvas 区域成为"被照亮的液面"
+ * ::before 提供极弱的中心聚焦光
+ */
+.canvas-container {
+  flex: 1;
+  position: relative;
+  background: var(--film-bed);
+}
+
+.canvas-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 55% 45% at 50% 50%,
+    var(--developer-glow),
+    transparent 75%
+  );
+  z-index: 0;
+}
+
+.canvas-container > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============== 侧栏（节点面板，浮起的暗房工具盘） ============== */
+.sidebar {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  width: 220px;
+  background: color-mix(in srgb, var(--darkroom-elevated) 82%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--frame);
+  border-radius: 4px;
+  padding: 12px;
+  z-index: 10;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+.sidebar-title {
+  font-size: 10px;
+  color: var(--silver-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.node-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--film-bed);
+  border: 1px solid var(--frame);
+  border-radius: 3px;
+  cursor: grab;
+  font-size: 12px;
+  transition: border-color 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.node-palette-item:hover {
+  border-color: var(--developer);
+  background: color-mix(in srgb, var(--film-bed) 80%, var(--developer-glow));
+}
+
+.node-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  /* 银盐颗粒微光 */
+  box-shadow: 0 0 4px currentColor;
+  opacity: 0.9;
+}
+
+/* ============== 状态栏（暗房仪表盘） ============== */
+.status-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 26px;
+  background: color-mix(in srgb, var(--darkroom-elevated) 88%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border-top: 1px solid var(--frame);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 11px;
+  color: var(--silver-text-dim);
+  gap: 20px;
+  z-index: 10;
+  letter-spacing: 0.3px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #4a4;
+  /* 微弱呼吸光，表示在线 */
+  animation: darkroom-breathe 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.status-dot.offline {
+  background: #a44;
+  animation: none;
+}
+
+@keyframes darkroom-breathe {
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 2px currentColor; }
+  50%       { opacity: 0.95; box-shadow: 0 0 6px currentColor; }
+}
+
+/* ============== React Flow 节点 ============== */
+.react-flow__node {
+  font-size: 12px;
+}
+
+.react-flow__node-custom {
+  background: color-mix(in srgb, var(--darkroom-elevated) 90%, transparent);
+  border: 1px solid var(--frame);
+  border-radius: 4px;
+  padding: 10px 14px;
+  min-width: 160px;
+  color: var(--silver-text);
+  /* 节点作为"胶片帧"，浮起但克制 */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.react-flow__node-custom:hover {
+  border-color: var(--developer);
+}
+
+.react-flow__node-custom .node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.react-flow__node-custom .node-body {
+  font-size: 11px;
+  color: var(--silver-text-dim);
+}
+
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: var(--developer-dim);
+  border: 1px solid var(--frame);
+}
+
+.react-flow__edge-path {
+  stroke: var(--developer-dim);
+  stroke-width: 1.5;
+}
+
+.react-flow__controls {
+  background: var(--darkroom-elevated);
+  border: 1px solid var(--frame);
+  border-radius: 3px;
+}
+
+.react-flow__controls button {
+  background: var(--darkroom-elevated);
+  color: var(--silver-text);
+  border-bottom: 1px solid var(--frame);
+}
+
+.react-flow__controls button:hover {
+  background: var(--film-bed);
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+/* ============== Modal（显影放大台） ============== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  /* 暗房全黑遮罩，比之前的 0.7 更深以聚焦 */
+  background: rgba(0, 0, 0, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: modal-fade-in 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal {
+  background: var(--darkroom-elevated);
+  border: 1px solid var(--frame);
+  border-radius: 6px;
+  padding: 22px;
+  width: 520px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  animation: modal-slide-up 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes modal-slide-up {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.modal-title {
+  font-size: 15px;
+  color: var(--developer);
+  margin-bottom: 16px;
+  letter-spacing: 0.5px;
+}
+
+.modal-field {
+  margin-bottom: 12px;
+}
+
+.modal-label {
+  display: block;
+  font-size: 11px;
+  color: var(--silver-text-dim);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 7px 11px;
+  background: var(--darkroom-base);
+  border: 1px solid var(--frame);
+  border-radius: 3px;
+  color: var(--silver-text);
+  font-size: 13px;
+  transition: border-color 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: var(--developer);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* ============== Loading 旋转盘（胶片盘转动） ============== */
+.loading {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--frame);
+  border-top-color: var(--developer);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ============== 可访问性：尊重用户的运动偏好 ============== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * ==============================================================
+ * P3.3 粒子场 + 主题切换器样式
+ * ==============================================================
+ */
+
+/* ============== 粒子场（银盐颗粒层）==============
+ * - fixed 全屏，位于 body 之上、app-layout 之下（z-index: 0）
+ * - pointer-events: none → 不拦截任何点击，且不会覆盖文本交互
+ * - vignetting：inset box-shadow 给四角加暗角，强化景深
+ * - app-layout 创建 stacking context（z-index: 1）让粒子整体位于其下，
+ *   topbar/sidebar/status-bar 通过 backdrop-filter 让粒子模糊透出，
+ *   canvas-container 设透明让粒子清晰显现 → "显影液面被粒子照亮"
+ */
+.particle-field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  /* vignetting 暗角，禁止无景深 */
+  box-shadow: inset 0 0 240px 60px rgba(0, 0, 0, 0.55);
+}
+
+/* app-layout 创建层叠上下文，把粒子层置于其下 */
+.app-layout {
+  z-index: 1;
+}
+
+/* canvas-container 透明：让粒子从其下层透出。
+ * ReactFlow 默认背景透明，无需额外覆盖。
+ */
+.canvas-container {
+  background: transparent;
+}
+
+/* ============== 主题切换器 ============== */
+.theme-switcher {
+  position: relative;
+  display: inline-flex;
+}
+
+.theme-switcher-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--frame);
+  color: var(--silver-text);
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: border-color 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.theme-switcher-btn:hover {
+  border-color: var(--developer);
+  color: var(--developer);
+}
+
+.theme-switcher-label {
+  font-size: 11px;
+}
+
+.theme-switcher-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--darkroom-elevated);
+  border: 1px solid var(--frame);
+  border-radius: 4px;
+  padding: 4px;
+  z-index: 50;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  animation: theme-dropdown-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes theme-dropdown-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.theme-switcher-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  background: transparent;
+  border: none;
+  color: var(--silver-text);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  text-align: left;
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.theme-switcher-option:hover {
+  background: color-mix(in srgb, var(--developer-glow) 80%, transparent);
+}
+
+.theme-switcher-option[aria-checked="true"] {
+  color: var(--developer);
+}
+
+.theme-swatch {
+  display: inline-flex;
+  gap: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid var(--frame);
+}
+
+.theme-swatch-cell {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.theme-option-label {
+  flex: 1;
+}

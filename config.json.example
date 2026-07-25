@@ -1,0 +1,16 @@
+{
+  "comfy_root": "D:\\ComfyUI",
+  "civitai_token": "",
+  "hf_mirror": true,
+  "max_concurrent": 2,
+  "comfy_url": "http://127.0.0.1:8188",
+  "proxy_url": null,
+  "tray_minimize": true,
+  "notify_on_complete": true,
+  "comfy_args": "",
+  "civitai_host": "civitai.red",
+  "show_previews": true,
+  "torch_index": "cu130",
+  "pip_mirror": false,
+  "download_root": ""
+}

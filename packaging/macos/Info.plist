@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  最小 macOS .app bundle 元数据模板。
+  发布工作流 (.github/workflows/release.yml) 会用 sed 把 __VERSION__ 占位符
+  替换成真实版本号（如 0.1.0）后写入 ComfyUI Downloader.app/Contents/Info.plist。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 在 Finder / 程序坞中显示的应用名 -->
+    <key>CFBundleName</key>
+    <string>ComfyUI Downloader</string>
+    <key>CFBundleDisplayName</key>
+    <string>ComfyUI Downloader</string>
+
+    <!-- Contents/MacOS 下的可执行文件名，必须与拷入的二进制同名 -->
+    <key>CFBundleExecutable</key>
+    <string>comfy-downloader</string>
+
+    <!-- 反向域名唯一标识 -->
+    <key>CFBundleIdentifier</key>
+    <string>com.zhwangsir.comfy-downloader</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!-- 面向用户的版本号 与 构建号；由 release 工作流注入 -->
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__VERSION__</string>
+
+    <!-- 支持的最低 macOS 版本（11.0 Big Sur，覆盖 Apple Silicon 全部机型） -->
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+
+    <!-- 普通带界面应用（非后台 agent），在程序坞显示并可获焦 -->
+    <key>LSUIElement</key>
+    <false/>
+
+    <!-- 字体运行时从系统加载、图标程序化生成，无需内嵌资源；故不声明 CFBundleIconFile -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- 版权声明（显示在「关于」面板） -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 WangZhenYu (Winery)</string>
+</dict>
+</plist>

@@ -1,0 +1,8 @@
+# xDiT HunyuanVideo-I2V 服务层附加依赖
+# 注：diffusers 需 main 分支，在 Dockerfile 中通过 git+https 单独安装
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+aiofiles>=23.2
+httpx>=0.27
+pydantic>=2.5

@@ -1,0 +1,30 @@
+[package]
+name = "comfy-downloader"
+version = "0.1.0"
+edition = "2021"
+authors = ["Winery (WangZhenYu)"]
+description = "ComfyUI 模型下载器（AICG-DownLoader）— Civitai/HuggingFace 模型一键下载到 ComfyUI 目录。作者 Winery (WangZhenYu)。"
+license = "MIT"
+homepage = "https://github.com/zhwangsir/AICG-DownLoader"
+repository = "https://github.com/zhwangsir/AICG-DownLoader"
+
+[dependencies]
+eframe = "0.29"
+egui_extras = { version = "0.29", features = ["http", "file", "image"] }
+image = { version = "0.25", features = ["jpeg", "png", "webp"] }
+ureq = { version = "2", default-features = false, features = ["tls", "proxy-from-env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+sha2 = "0.10"
+rfd = "0.15"
+notify-rust = "4"
+tray-icon = "0.19"
+
+# 仅 Windows：编译期把署名/版权写进 exe 版本资源（右键属性→详细信息可见）
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+opt-level = 2
+strip = true

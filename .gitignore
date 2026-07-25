@@ -1,0 +1,36 @@
+# 构建产物
+/target/
+/dist/
+
+# 本地开发加速配置（lld 链接器，个人/机器偏好，不强加给他人与 release）
+/.cargo/
+
+# 本地运行时文件 —— config.json 含 Civitai token（明文），绝不提交
+config.json
+config.json.bak
+tasks.json
+app.lock
+*.part
+
+# 短剧工作台 platform/
+platform/backend/.env
+platform/backend/.venv/
+platform/backend/.coverage
+platform/backend/.pytest_cache/
+platform/backend/uv.lock
+platform/backend/__pycache__/
+platform/backend/**/*.egg-info/
+platform/backend/output/
+platform/frontend/node_modules/
+platform/frontend/dist/
+platform/frontend/package-lock.json
+platform/frontend/src-tauri/target/
+
+# Python 通用
+__pycache__/
+*.pyc
+
+# 编辑器/系统
+.DS_Store
+.vscode/
+.idea/

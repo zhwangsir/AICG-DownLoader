@@ -1,0 +1,300 @@
+import Canvas from "./components/Canvas";
+import {
+  ScriptModal,
+  CharacterModal,
+  StoryboardModal,
+  VideoModal,
+  VoiceModal,
+  SubtitleModal,
+  EditModal,
+  QualityModal,
+  VisualQualityModal,
+  LipSyncModal,
+  PostprocessModal,
+} from "./components/Modals";
+import { ParticleField } from "./components/ui/ParticleField";
+import { ThemeSwitcher } from "./components/ui/ThemeSwitcher";
+import { useDramaStore } from "./store/useDramaStore";
+
+export default function App() {
+  const store = useDramaStore();
+  const {
+    modals,
+    setModal,
+    scriptData,
+    storyboards,
+    videos,
+    voices,
+    subtitles,
+    editData,
+    qualityData,
+    visualQualityData,
+    characterCards,
+    statusInfo,
+    globalLoading,
+    setScriptData,
+    addStoryboard,
+    addVideo,
+    addVoice,
+    addSubtitle,
+    setEditData,
+    setQualityData,
+    setVisualQualityData,
+    addLipSync,
+    addPostprocess,
+    setStatusInfo,
+  } = store;
+
+  const handleScriptGenerated = (data: NonNullable<typeof scriptData>) => {
+    setScriptData(data);
+    setStatusInfo(
+      `剧本已生成: ${data.title} | ${data.characters.length} 角色 | ${data.scenes.length} 分镜`
+    );
+    setModal("script", false);
+  };
+
+  const handleCharacterGenerated = (name: string) => {
+    setStatusInfo(`角色定妆照已生成: ${name}`);
+    setModal("character", false);
+  };
+
+  const handleStoryboardGenerated = (data: Parameters<typeof addStoryboard>[0]) => {
+    addStoryboard(data);
+    setStatusInfo(`分镜关键帧已生成: 场景 ${data.scene_id}`);
+  };
+
+  const handleVideoGenerated = (data: Parameters<typeof addVideo>[0]) => {
+    addVideo(data);
+    setStatusInfo(`视频片段已生成: 场景 ${data.scene_id} (${data.duration_seconds}s)`);
+  };
+
+  const handleVoiceGenerated = (data: Parameters<typeof addVoice>[0]) => {
+    addVoice(data);
+    setStatusInfo(`配音已生成: 场景 ${data.scene_id} (${data.total_lines} 条语音)`);
+  };
+
+  const handleSubtitleGenerated = (data: Parameters<typeof addSubtitle>[0]) => {
+    addSubtitle(data);
+    setStatusInfo(`字幕已生成: 场景 ${data.scene_id} (${data.segments.length} 段)`);
+  };
+
+  const handleEditGenerated = (data: NonNullable<typeof editData>) => {
+    setEditData(data);
+    setStatusInfo(
+      `成片已合成: ${data.title} | ${data.segments_count} 场景 | ${data.duration_seconds.toFixed(1)}s`
+    );
+    setModal("edit", false);
+  };
+
+  const handleQualityChecked = (data: NonNullable<typeof qualityData>) => {
+    setQualityData(data);
+    const critical = data.issues.filter((i) => i.severity === "critical").length;
+    const warning = data.issues.filter((i) => i.severity === "warning").length;
+    setStatusInfo(`质检完成: ${data.title} | 质量分 ${data.score} | critical ${critical} | warning ${warning}`);
+    setModal("quality", false);
+  };
+
+  const handleVisualQualityChecked = (data: NonNullable<typeof visualQualityData>) => {
+    setVisualQualityData(data);
+    const critical = data.issues.filter((i) => i.severity === "critical").length;
+    const warning = data.issues.filter((i) => i.severity === "warning").length;
+    setStatusInfo(`视觉质检完成: 场景 ${data.scene_id} | 质量分 ${data.score} | critical ${critical} | warning ${warning}`);
+    setModal("visualQuality", false);
+  };
+
+  const handleLipSyncGenerated = (data: Parameters<typeof addLipSync>[0]) => {
+    addLipSync(data);
+    setStatusInfo(
+      data.synced
+        ? `唇形同步完成: 场景 ${data.scene_id} (${data.elapsed_seconds.toFixed(1)}s)`
+        : `唇形同步降级: 场景 ${data.scene_id} 返回原视频`
+    );
+  };
+
+  const handlePostprocessGenerated = (data: Parameters<typeof addPostprocess>[0]) => {
+    addPostprocess(data);
+    const ok = data.steps.filter((s) => s.success && !s.skipped).length;
+    setStatusInfo(
+      `后处理完成: 场景 ${data.scene_id} | ${ok}/${data.steps.length} 步成功 | ${data.elapsed_seconds.toFixed(1)}s`
+    );
+  };
+
+  return (
+    <>
+      <ParticleField />
+      <div className="app-layout">
+      <div className="topbar">
+        <div className="topbar-title">AI 短剧工作台 — M4 原型</div>
+        <div className="topbar-actions">
+          <ThemeSwitcher />
+          <button className="topbar-btn" onClick={() => setModal("character", true)} disabled={!scriptData || globalLoading}>
+            生成角色
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("storyboard", true)} disabled={!scriptData || globalLoading}>
+            生成分镜
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("video", true)} disabled={storyboards.length === 0 || globalLoading}>
+            生成视频
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("voice", true)} disabled={!scriptData || globalLoading}>
+            生成配音
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("subtitle", true)} disabled={voices.length === 0 || globalLoading}>
+            生成字幕
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("quality", true)} disabled={!scriptData || globalLoading}>
+            质检
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("visualQuality", true)} disabled={videos.length === 0 || globalLoading}>
+            视觉质检
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("lipSync", true)} disabled={videos.length === 0 || voices.length === 0 || globalLoading}>
+            唇形同步
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("postprocess", true)} disabled={videos.length === 0 || globalLoading}>
+            后处理
+          </button>
+          <button className="topbar-btn" onClick={() => setModal("edit", true)} disabled={videos.length === 0 || voices.length === 0 || subtitles.length === 0 || globalLoading}>
+            合成成片
+          </button>
+          <button
+            className="topbar-btn topbar-btn-primary"
+            onClick={() => setModal("script", true)}
+            disabled={globalLoading}
+          >
+            生成剧本
+          </button>
+        </div>
+      </div>
+
+      <div className="canvas-container">
+        <Canvas />
+      </div>
+
+      <div className="status-bar">
+        <div className="status-item">
+          <span className="status-dot"></span>
+          <span>LM Studio Qwen3.6-35B-A3B</span>
+        </div>
+        <div className="status-item">
+          <span className="status-dot"></span>
+          <span>ComfyUI 4×RTX PRO 6000</span>
+        </div>
+        <div className="status-item">
+          <span className="status-dot"></span>
+          <span>Qwen3-VL + CosyVoice 2 + Qwen3-ASR</span>
+        </div>
+        <div className="status-item">
+          <span className="status-dot"></span>
+          <span>LatentSync + RealBasicVSR/RIFE + DeepFilterNet3</span>
+        </div>
+        <div className="status-item">
+          <span style={{ marginLeft: "auto" }}>{statusInfo}</span>
+        </div>
+      </div>
+
+      {modals.script && (
+        <ScriptModal
+          scriptData={scriptData}
+          onClose={() => setModal("script", false)}
+          onSuccess={handleScriptGenerated}
+          onUpdate={() => {
+            setStatusInfo("剧本修改已保存");
+            setModal("script", false);
+          }}
+        />
+      )}
+
+      {modals.character && (
+        <CharacterModal
+          characters={scriptData?.characters || []}
+          onClose={() => setModal("character", false)}
+          onSuccess={handleCharacterGenerated}
+        />
+      )}
+
+      {modals.storyboard && (
+        <StoryboardModal
+          scenes={scriptData?.scenes || []}
+          characters={scriptData?.characters || []}
+          onClose={() => setModal("storyboard", false)}
+          onSuccess={handleStoryboardGenerated}
+        />
+      )}
+
+      {modals.video && (
+        <VideoModal
+          storyboards={storyboards}
+          scenes={scriptData?.scenes || []}
+          onClose={() => setModal("video", false)}
+          onSuccess={handleVideoGenerated}
+        />
+      )}
+
+      {modals.voice && (
+        <VoiceModal
+          scenes={scriptData?.scenes || []}
+          characters={scriptData?.characters || []}
+          onClose={() => setModal("voice", false)}
+          onSuccess={handleVoiceGenerated}
+        />
+      )}
+
+      {modals.subtitle && (
+        <SubtitleModal
+          voices={voices}
+          onClose={() => setModal("subtitle", false)}
+          onSuccess={handleSubtitleGenerated}
+        />
+      )}
+
+      {modals.edit && (
+        <EditModal
+          videos={videos}
+          voices={voices}
+          subtitles={subtitles}
+          onClose={() => setModal("edit", false)}
+          onSuccess={handleEditGenerated}
+        />
+      )}
+
+      {modals.quality && (
+        <QualityModal
+          scriptData={scriptData}
+          subtitles={subtitles}
+          onClose={() => setModal("quality", false)}
+          onSuccess={handleQualityChecked}
+        />
+      )}
+
+      {modals.visualQuality && (
+        <VisualQualityModal
+          videos={videos}
+          title={scriptData?.title || "未命名短剧"}
+          onClose={() => setModal("visualQuality", false)}
+          onSuccess={handleVisualQualityChecked}
+        />
+      )}
+
+      {modals.lipSync && (
+        <LipSyncModal
+          videos={videos}
+          voices={voices}
+          characterCards={characterCards}
+          onClose={() => setModal("lipSync", false)}
+          onSuccess={handleLipSyncGenerated}
+        />
+      )}
+
+      {modals.postprocess && (
+        <PostprocessModal
+          videos={videos}
+          voices={voices}
+          onClose={() => setModal("postprocess", false)}
+          onSuccess={handlePostprocessGenerated}
+        />
+      )}
+      </div>
+    </>
+  );
+}
