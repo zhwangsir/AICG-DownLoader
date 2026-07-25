@@ -63,6 +63,7 @@ async def health() -> dict:
 
     return {
         "status": "ok",
+        "version": "0.11.0",
         "exo_base_url": settings.exo_base_url,
         "exo_model": settings.exo_model_glm52,
         "comfyui_workers": {
@@ -70,6 +71,15 @@ async def health() -> dict:
             "image_fast": settings.comfyui_image_fast,
             "video_a": settings.comfyui_video_a,
             "video_b": settings.comfyui_video_b,
+        },
+        "p4_services": {
+            "xdit_video": {"endpoint": settings.xdit_endpoint, "enabled": settings.video_backend == "xdit"},
+            "hunyuanimage": {"endpoint": settings.hunyuanimage_endpoint, "enabled": settings.image_backend == "hunyuanimage"},
+            "latentsync": {"endpoint": settings.latentsync_endpoint, "enabled": settings.lip_sync_enabled},
+            "video_enhance": {"endpoint": settings.postprocess_endpoint, "enabled": settings.postprocess_enabled},
+            "deepfilternet": {"endpoint": settings.deepfilternet_endpoint, "enabled": settings.postprocess_audio_denoise_enabled},
+            "indextts": {"endpoint": settings.indextts_endpoint, "enabled": settings.tts_backend == "indextts"},
+            "qwen3_asr": {"endpoint": settings.qwen3_asr_endpoint, "enabled": settings.asr_backend == "qwen3_asr"},
         },
         "agents": [
             "script_agent",
@@ -81,6 +91,8 @@ async def health() -> dict:
             "edit_agent",
             "quality_agent",
             "visual_quality_agent",
+            "lip_sync_agent",
+            "postprocess_agent",
         ],
         "downloader_config_loaded": settings.downloader_config is not None,
     }
