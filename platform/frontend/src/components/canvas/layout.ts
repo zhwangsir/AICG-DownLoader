@@ -38,6 +38,12 @@ export interface DramaNodeData {
   preview?: string;
   /** 节点状态文本（替代默认的“已完成/等待开始”） */
   statusText?: string;
+  /** 节点字段内联更新回调：field 当前支持 label / preview */
+  onUpdateField?: (field: "label" | "preview", value: string) => void;
+  /** 是否在节点头部显示智能体辅助标识 */
+  showAgentAssist?: boolean;
+  /** 点击“去详情页编辑”时回调，用于 script input 等需要右侧编辑的场景 */
+  onOpenDetail?: () => void;
 }
 
 export const NODE_WIDTH = 280;

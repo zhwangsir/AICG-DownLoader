@@ -516,6 +516,24 @@ export async function applySubtitleFix(params: {
   return resp.json();
 }
 
+export async function agentAssist(params: {
+  text: string;
+  context: string;
+  action: "polish" | "expand" | "shorten" | "rewrite";
+  extra_instruction?: string;
+}): Promise<AgentResponse<{ text: string; action: string; context: string }>> {
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/agent/assist`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    60_000
+  );
+  return resp.json();
+}
+
 export async function checkHealth(): Promise<Record<string, unknown>> {
   const resp = await fetch(`${API_BASE}/health`);
   return resp.json();

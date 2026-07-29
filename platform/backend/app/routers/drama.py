@@ -21,6 +21,8 @@ from app.agents.voice_agent import voice_agent
 from app.config import settings
 from app.core.progress import progress_tracker
 from app.models.schemas import (
+    AgentAssistRequest,
+    AgentAssistResponse,
     AgentResponse,
     AsyncTaskResponse,
     CharacterPreviewRequest,
@@ -105,6 +107,68 @@ async def health() -> dict:
         ],
         "downloader_config_loaded": settings.downloader_config is not None,
     }
+
+
+@router.post("/agent/assist", response_model=AgentAssistResponse)
+async def agent_assist(request: AgentAssistRequest) -> AgentAssistResponse:
+    """通用智能体辅助：根据上下文润色、扩写、精简或改写文本。"""
+    action_map = {
+        "polish": "润色（提升表达质量，保持原意）",
+        "expand": "扩写（增加细节与画面感）",
+        "shorten": "精简（保留核心信息，压缩篇幅）",
+        "rewrite": "改写（用不同方式重新表达）",
+    }
+    action_desc = action_map.get(request.action, request.action)
+    context_map = {
+        "script": "剧本创作",
+        "character": "角色设定",
+        "storyboard": "分镜描述",
+        "video": "视频生成提示词",
+        "voice": "配音对白",
+        "subtitle": "字幕文本",
+        "edit": "成片剪辑",
+        "quality": "质检报告",
+    }
+    context_desc = context_map.get(request.context, request.context)
+
+    system_prompt = (
+        f"你是一位专业的 {context_desc} 智能体辅助助手。"
+        "请严格根据用户请求对文本进行处理，只返回处理后的文本，不要添加解释、前缀、Markdown 代码块。"
+        "必须保持原文的核心语义，不引入未提及的新角色、新情节或新场景。"
+    )
+    user_msg = (
+        f"上下文：{context_desc}\n"
+        f"动作：{action_desc}\n"
+        f"原文：\n{request.text}\n"
+    )
+    if request.extra_instruction:
+        user_msg += f"\n额外要求：{request.extra_instruction}\n"
+    user_msg += "\n请直接输出处理后的文本："
+
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(base_url=settings.exo_base_url, api_key=settings.exo_api_key or "not-needed")
+        resp = await client.chat.completions.create(
+            model=settings.exo_model_glm52,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.6,
+            max_tokens=1500,
+        )
+        content = resp.choices[0].message.content or request.text
+        # 去除可能的前缀与代码块
+        content = content.strip()
+        if content.startswith("```"):
+            content = "\n".join(content.split("\n")[1:])
+            if content.endswith("```"):
+                content = content[:-3].strip()
+        return AgentAssistResponse(text=content.strip(), action=request.action, context=request.context)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("智能体辅助失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"智能体辅助失败: {e}") from e
 
 
 @router.post("/rag/optimize", response_model=RAGOptimizeResponse)

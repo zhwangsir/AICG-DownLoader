@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import { useDramaStore } from "../../store/useDramaStore";
 import type { DramaNodeData } from "./layout";
-import type { ScriptGenerateOptions } from "../NodeDetailPanel";
 
 const iconMap: Record<string, React.ElementType> = {
   script: FileText,
@@ -160,45 +159,13 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
   const stopNodeDrag: MouseEventHandler<HTMLElement> = (e) => {
     e.stopPropagation();
   };
-  const globalLoading = useDramaStore((s) => s.globalLoading);
-  const projectStyle = useDramaStore((s) => s.projectStyle);
   const Icon = iconMap[data.type] ?? FileText;
   const PlaceholderIcon = placeholderIconMap[data.type] ?? ImageIcon;
   const cfg = getCfg(data.type);
 
-  const [scriptOptions, setScriptOptions] = useState<ScriptGenerateOptions>({
-    premise: "",
-    genre: "",
-    episodes: "",
-    scenes_per_episode: "",
-    style: "",
-    aspect_ratio: "",
-  });
-  const updateScriptOption = <K extends keyof ScriptGenerateOptions>(
-    key: K,
-    value: ScriptGenerateOptions[K]
-  ) => setScriptOptions((prev) => ({ ...prev, [key]: value }));
-
-  const [showEditPanel, setShowEditPanel] = useState(false);
-  const [editPositive, setEditPositive] = useState("");
-  const [editNegative, setEditNegative] = useState("");
   const [videoError, setVideoError] = useState(false);
-  const [nodeError, setNodeError] = useState<string | null>(null);
 
-  const showGenerateBtn = !!data.generateLabel && !data.loading;
-  const isLocked = showGenerateBtn && (data.canGenerate === false || globalLoading);
   const isFutureNode = !data.hasGenerated && !data.loading && !data.isScriptInput && !data.isEditInput;
-
-  const openEditPanel = () => {
-    setEditPositive(data.editablePrompts?.positive || "");
-    setEditNegative(data.editablePrompts?.negative || "");
-    setShowEditPanel(true);
-  };
-
-  const applyEditAndRegenerate = () => {
-    setShowEditPanel(false);
-    data.onEditPrompts?.(editPositive, editNegative);
-  };
 
   const hasMedia = !!(data.imageUrl || data.videoUrl || data.audioUrl || data.subtitleText);
   const isMediaType = ["character", "storyboard", "video"].includes(data.type);
@@ -208,8 +175,6 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
     ? cfg.color
     : data.hasGenerated
     ? "#4d8c54"
-    : isLocked && data.lockReason
-    ? "#b87a3f"
     : "#9a9184";
 
   const statusLabel = data.statusText
@@ -218,8 +183,6 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
     ? data.loadingText || "处理中…"
     : data.hasGenerated
     ? "已完成"
-    : isLocked && data.lockReason
-    ? "待解锁"
     : "等待开始";
 
   const cardBg = isDimmed ? "rgba(250,248,245,0.42)" : "var(--bg-elevated)";
@@ -348,272 +311,73 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
               <Loader2 size={10} style={{ animation: "node-spin 1.2s linear infinite" }} />
             ) : data.hasGenerated ? (
               <CheckCircle2 size={10} />
-            ) : isLocked && data.lockReason ? (
-              <Lock size={10} />
             ) : (
               <Wand2 size={10} />
             )}
             <span>{statusLabel}</span>
           </div>
         </div>
+
       </div>
 
       {/* 内容区域 */}
       <div style={{ padding: contentPadding }}>
-        {/* 创意输入区域 */}
+        {/* 创意输入区域：节点上仅展示，编辑请前往右侧详情面板 */}
         {data.isScriptInput && !data.hasGenerated && !data.loading && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <textarea
-              value={scriptOptions.premise}
-              onChange={(e) => updateScriptOption("premise", e.target.value)}
-              onMouseDown={stopNodeDrag}
-              onClick={stopNodeDrag}
-              placeholder="输入一句话创意…"
-              className="nodrag"
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 10,
+              padding: "12px 10px",
+              borderRadius: 12,
+              background: `linear-gradient(135deg, ${cfg.bg}, rgba(255,255,255,0.6))`,
+              border: `1.5px dashed ${cfg.color}40`,
+              textAlign: "center",
+            }}
+          >
+            <div
               style={{
-                width: "100%",
-                minHeight: 58,
-                padding: "10px 12px",
-                background: "var(--bg-secondary)",
-                border: "1.5px solid var(--border)",
-                borderRadius: 12,
-                color: "var(--text-primary)",
-                fontSize: 12,
-                fontFamily: "inherit",
-                lineHeight: 1.5,
-                resize: "vertical",
-                outline: "none",
-                transition: "all 0.2s var(--ease-out)",
-                boxSizing: "border-box",
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: "rgba(255,255,255,0.72)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: `0 2px 8px ${cfg.glow}`,
               }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = cfg.color;
-                e.currentTarget.style.boxShadow = `0 0 0 3px ${cfg.glow}`;
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "var(--border)";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            />
-            <input
-              list="genre-presets"
-              value={scriptOptions.genre}
-              onChange={(e) => updateScriptOption("genre", e.target.value)}
-              onMouseDown={stopNodeDrag}
-              onClick={stopNodeDrag}
-              placeholder="输入题材或选择推荐项"
-              className="nodrag"
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                background: "var(--bg-secondary)",
-                border: "1.5px solid var(--border)",
-                borderRadius: 12,
-                color: "var(--text-primary)",
-                fontSize: 12,
-                fontFamily: "inherit",
-                outline: "none",
-                transition: "all 0.2s var(--ease-out)",
-                boxSizing: "border-box",
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = cfg.color;
-                e.currentTarget.style.boxShadow = `0 0 0 3px ${cfg.glow}`;
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "var(--border)";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            />
-            <datalist id="genre-presets">
-              {GENRE_PRESETS.map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
-
-            {/* 脚本全局控制项：集数 / 分镜数 / 风格 / 画幅 */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: "var(--text-tertiary)",
-                    marginBottom: 3,
-                  }}
-                >
-                  集数
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  placeholder="请输入"
-                  value={scriptOptions.episodes}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    updateScriptOption(
-                      "episodes",
-                      raw === "" ? "" : Math.max(1, Math.min(100, Number(raw) || 1))
-                    );
-                  }}
-                  onMouseDown={stopNodeDrag}
-                  onClick={stopNodeDrag}
-                  className="nodrag"
-                  style={{
-                    width: "100%",
-                    padding: "6px 8px",
-                    background: "var(--bg-secondary)",
-                    border: "1.5px solid var(--border)",
-                    borderRadius: 10,
-                    color: "var(--text-primary)",
-                    fontSize: 11,
-                    fontFamily: "inherit",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: "var(--text-tertiary)",
-                    marginBottom: 3,
-                  }}
-                >
-                  每集分镜
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  placeholder="请输入"
-                  value={scriptOptions.scenes_per_episode}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    updateScriptOption(
-                      "scenes_per_episode",
-                      raw === "" ? "" : Math.max(1, Math.min(30, Number(raw) || 1))
-                    );
-                  }}
-                  onMouseDown={stopNodeDrag}
-                  onClick={stopNodeDrag}
-                  className="nodrag"
-                  style={{
-                    width: "100%",
-                    padding: "6px 8px",
-                    background: "var(--bg-secondary)",
-                    border: "1.5px solid var(--border)",
-                    borderRadius: 10,
-                    color: "var(--text-primary)",
-                    fontSize: 11,
-                    fontFamily: "inherit",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
+            >
+              <Icon size={20} color={cfg.color} strokeWidth={1.8} />
             </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: "var(--text-tertiary)",
-                    marginBottom: 3,
-                  }}
-                >
-                  视觉风格
-                </label>
-                <select
-                  value={scriptOptions.style}
-                  onChange={(e) => updateScriptOption("style", e.target.value)}
-                  onMouseDown={stopNodeDrag}
-                  onClick={stopNodeDrag}
-                  className="nodrag"
-                  style={{
-                    width: "100%",
-                    padding: "6px 8px",
-                    background: "var(--bg-secondary)",
-                    border: "1.5px solid var(--border)",
-                    borderRadius: 10,
-                    color: "var(--text-primary)",
-                    fontSize: 11,
-                    fontFamily: "inherit",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <option value="" disabled>
-                    请选择
-                  </option>
-                  {[
-                    "写实电影感",
-                    "都市情感",
-                    "悬疑暗调",
-                    "赛博朋克",
-                    "古风仙侠",
-                    "国漫",
-                    "动漫",
-                    "卡通 3D",
-                    "东方水墨",
-                    "童话绘本",
-                  ].map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: "var(--text-tertiary)",
-                    marginBottom: 3,
-                  }}
-                >
-                  画幅
-                </label>
-                <select
-                  value={scriptOptions.aspect_ratio}
-                  onChange={(e) => updateScriptOption("aspect_ratio", e.target.value)}
-                  onMouseDown={stopNodeDrag}
-                  onClick={stopNodeDrag}
-                  className="nodrag"
-                  style={{
-                    width: "100%",
-                    padding: "6px 8px",
-                    background: "var(--bg-secondary)",
-                    border: "1.5px solid var(--border)",
-                    borderRadius: 10,
-                    color: "var(--text-primary)",
-                    fontSize: 11,
-                    fontFamily: "inherit",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <option value="" disabled>
-                    请选择
-                  </option>
-                  {["9:16", "16:9", "1:1"].map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              点击节点在右侧「剧本详情」中输入创意并生成
             </div>
+            {data.onOpenDetail && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  data.onOpenDetail?.();
+                }}
+                onMouseDown={stopNodeDrag}
+                className="nodrag"
+                style={{
+                  padding: "7px 16px",
+                  background: `linear-gradient(135deg, ${cfg.color}, ${cfg.dark})`,
+                  border: "none",
+                  color: "#fff",
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  boxShadow: `0 2px 8px ${cfg.glow}`,
+                }}
+              >
+                去详情页编辑
+              </button>
+            )}
           </div>
         )}
 
@@ -697,7 +461,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
                 cfg={cfg}
                 icon={PlaceholderIcon}
                 label={data.hasGenerated ? cfg.label : `待生成${cfg.label}`}
-                reason={isLocked && data.lockReason ? data.lockReason : undefined}
+                reason={data.lockReason || undefined}
                 compact={isFutureNode}
               />
             )}
@@ -946,8 +710,8 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
           </div>
         )}
 
-        {/* 非媒体类型锁定提示 */}
-        {!isMediaType && isLocked && data.lockReason && !hasMedia && !data.loading && (
+        {/* 非媒体类型提示：仅展示流程锁定原因，不提供编辑入口 */}
+        {!isMediaType && data.lockReason && !hasMedia && !data.loading && (
           <div
             style={{
               marginTop: 8,
@@ -964,259 +728,6 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
             <Lock size={11} strokeWidth={2} />
             <span>{data.lockReason}</span>
           </div>
-        )}
-
-        {/* 编辑提示词按钮 */}
-        {data.hasGenerated && !data.loading && data.editablePrompts && data.onEditPrompts && !showEditPanel && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              openEditPanel();
-            }}
-            onMouseDown={stopNodeDrag}
-            style={{
-              width: "100%",
-              marginTop: 10,
-              padding: "7px 12px",
-              background: "var(--bg-secondary)",
-              border: "1.5px solid var(--border)",
-              color: "var(--text-secondary)",
-              borderRadius: 8,
-              fontSize: 11,
-              fontWeight: 500,
-              cursor: "pointer",
-              transition: "all 0.15s var(--ease-out)",
-              fontFamily: "inherit",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.borderColor = cfg.color;
-              (e.currentTarget as HTMLButtonElement).style.color = cfg.color;
-              (e.currentTarget as HTMLButtonElement).style.background = cfg.bg;
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)";
-              (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)";
-              (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-secondary)";
-            }}
-          >
-            编辑提示词
-          </button>
-        )}
-
-        {/* 编辑面板 */}
-        {showEditPanel && (
-          <div
-            onClick={stopNodeDrag}
-            style={{
-              marginTop: 10,
-              padding: 12,
-              background: "var(--bg-secondary)",
-              borderRadius: 10,
-              border: "1px solid var(--border)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 10,
-                color: "var(--text-tertiary)",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              正面提示词
-            </div>
-            <textarea
-              value={editPositive}
-              onChange={(e) => setEditPositive(e.target.value)}
-              onMouseDown={stopNodeDrag}
-              className="nodrag"
-              style={{
-                width: "100%",
-                minHeight: 40,
-                padding: "8px 10px",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 10,
-                fontFamily: "inherit",
-                lineHeight: 1.5,
-                resize: "vertical",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-            <div
-              style={{
-                fontSize: 10,
-                color: "var(--text-tertiary)",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              负面提示词
-            </div>
-            <textarea
-              value={editNegative}
-              onChange={(e) => setEditNegative(e.target.value)}
-              onMouseDown={stopNodeDrag}
-              className="nodrag"
-              style={{
-                width: "100%",
-                minHeight: 30,
-                padding: "8px 10px",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 10,
-                fontFamily: "inherit",
-                lineHeight: 1.5,
-                resize: "vertical",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-            <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-              <button
-                disabled={globalLoading}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  applyEditAndRegenerate();
-                }}
-                onMouseDown={stopNodeDrag}
-                style={{
-                  flex: 1,
-                  padding: "7px 10px",
-                  background: `linear-gradient(135deg, ${cfg.color}, ${cfg.dark})`,
-                  border: "none",
-                  color: "#fff",
-                  borderRadius: 8,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: globalLoading ? "not-allowed" : "pointer",
-                  opacity: globalLoading ? 0.6 : 1,
-                  transition: "all 0.15s var(--ease-out)",
-                  fontFamily: "inherit",
-                  boxShadow: `0 2px 8px ${cfg.glow}`,
-                }}
-              >
-                {globalLoading ? "生成中..." : "应用并重新生成"}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowEditPanel(false);
-                }}
-                onMouseDown={stopNodeDrag}
-                style={{
-                  padding: "7px 12px",
-                  background: "var(--bg-primary)",
-                  border: "1px solid var(--border)",
-                  color: "var(--text-secondary)",
-                  borderRadius: 8,
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  transition: "all 0.15s var(--ease-out)",
-                  fontFamily: "inherit",
-                }}
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 生成按钮：未来节点使用更轻量的样式 */}
-        {nodeError && data.isScriptInput && (
-          <div
-            style={{
-              marginTop: 8,
-              padding: "7px 10px",
-              borderRadius: 8,
-              fontSize: 10,
-              color: "#a04848",
-              background: "rgba(160,72,72,0.08)",
-              border: "1px solid rgba(160,72,72,0.2)",
-            }}
-          >
-            {nodeError}
-          </div>
-        )}
-        {showGenerateBtn && (
-          <button
-            disabled={isLocked}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isLocked) return;
-              if (data.isScriptInput) {
-                if (!scriptOptions.premise.trim()) {
-                  setNodeError("请输入一句话创意");
-                  return;
-                }
-                if (!scriptOptions.genre.trim()) {
-                  setNodeError("请输入题材");
-                  return;
-                }
-                if (scriptOptions.episodes === "") {
-                  setNodeError("请设置集数");
-                  return;
-                }
-                if (scriptOptions.scenes_per_episode === "") {
-                  setNodeError("请设置每集分镜数");
-                  return;
-                }
-                if (!scriptOptions.style) {
-                  setNodeError("请选择视觉风格");
-                  return;
-                }
-                if (!scriptOptions.aspect_ratio) {
-                  setNodeError("请选择画幅比例");
-                  return;
-                }
-                setNodeError(null);
-              }
-              data.onGenerate?.(scriptOptions);
-            }}
-            onMouseDown={stopNodeDrag}
-            style={{
-              width: "100%",
-              marginTop: isFutureNode ? 6 : 10,
-              padding: isFutureNode ? "6px 10px" : "9px 14px",
-              background: isLocked
-                ? isFutureNode ? "transparent" : "var(--bg-tertiary)"
-                : `linear-gradient(135deg, ${cfg.color}, ${cfg.dark})`,
-              border: isFutureNode && isLocked ? `1px dashed ${cfg.color}40` : "none",
-              color: isLocked ? (isFutureNode ? cfg.dark : "var(--text-tertiary)") : "#fff",
-              borderRadius: isFutureNode ? 8 : 10,
-              fontSize: isFutureNode ? 10.5 : 11.5,
-              fontWeight: 600,
-              cursor: isLocked ? "not-allowed" : "pointer",
-              opacity: isLocked ? (isFutureNode ? 0.55 : 0.6) : 1,
-              transition: "all 0.2s var(--ease-out)",
-              fontFamily: "inherit",
-              boxShadow: isLocked || isFutureNode ? "none" : `0 4px 12px ${cfg.glow}`,
-              letterSpacing: "-0.005em",
-            }}
-            onMouseEnter={(e) => {
-              if (!isLocked) {
-                (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)";
-                (e.currentTarget as HTMLButtonElement).style.boxShadow = isFutureNode ? `0 3px 10px ${cfg.glow}` : `0 6px 16px ${cfg.glow}`;
-              }
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0)";
-              if (!isLocked) {
-                (e.currentTarget as HTMLButtonElement).style.boxShadow = isFutureNode ? "none" : `0 4px 12px ${cfg.glow}`;
-              }
-            }}
-          >
-            {data.generateLabel}
-          </button>
         )}
       </div>
 

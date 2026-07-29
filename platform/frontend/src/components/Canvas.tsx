@@ -741,10 +741,15 @@ export default function Canvas() {
               detail: "点击重置并输入新的创意",
               isEditInput: true,
               hasGenerated: false,
-              generateLabel: "新建剧本",
               loading: loadingFor("start"),
               loadingText: loadingTextFor("start"),
               onGenerate: handleResetScript,
+              onOpenDetail: () =>
+                setActiveDetailNode({
+                  id: "start",
+                  type: "script",
+                  onGenerate: handleResetScript,
+                }),
             }
           : {
               label: "创意输入",
@@ -752,10 +757,15 @@ export default function Canvas() {
               detail: "输入一句话创意，一键生成剧本",
               isScriptInput: true,
               hasGenerated: false,
-              generateLabel: "生成剧本",
               loading: loadingFor("start"),
               loadingText: loadingTextFor("start"),
               onGenerate: handleGenerateScript,
+              onOpenDetail: () =>
+                setActiveDetailNode({
+                  id: "start",
+                  type: "script",
+                  onGenerate: handleGenerateScript,
+                }),
             },
       },
     ];
@@ -804,6 +814,7 @@ export default function Canvas() {
             { label: "集数", value: String(scriptData.total_episodes) },
           ],
           hasGenerated: true,
+
         },
       });
       addEdgeWithAnim("e-start-script", "start", "script");
@@ -833,6 +844,7 @@ export default function Canvas() {
             hasGenerated: !!img,
             statusText: img ? "定妆照已生成" : "待生成定妆照",
             generateLabel: img ? "重新生成定妆照" : "生成定妆照",
+            showAgentAssist: true,
             loading: loadingFor(charId),
             loadingText: loadingTextFor(charId),
             onGenerate: () => handleGenerateCharacter(char),
@@ -843,6 +855,7 @@ export default function Canvas() {
                     handleGenerateCharacter(char, positive, negative),
                 }
               : {}),
+
           },
         });
         addEdgeWithAnim(`e-script-${charId}`, "script", charId);

@@ -488,3 +488,20 @@ class RAGOptimizeResponse(BaseModel):
     original_prompt: str = Field("", description="原始用户描述")
     retrieved_count: int = Field(0, description="检索到的知识条目数")
     fallback: bool = Field(False, description="是否使用了兜底结果")
+
+
+class AgentAssistRequest(BaseModel):
+    """通用智能体辅助请求：对指定上下文中的文本进行润色/扩写/精简/改写。"""
+
+    text: str = Field(..., description="待处理的原始文本", min_length=1)
+    context: str = Field(..., description="上下文类型：script/character/storyboard/video/voice/subtitle/edit/quality")
+    action: str = Field("polish", description="动作：polish(润色)/expand(扩写)/shorten(精简)/rewrite(改写)")
+    extra_instruction: str = Field("", description="额外要求")
+
+
+class AgentAssistResponse(BaseModel):
+    """通用智能体辅助响应。"""
+
+    text: str = Field("", description="处理后的文本")
+    action: str = Field("", description="执行的动作")
+    context: str = Field("", description="上下文类型")

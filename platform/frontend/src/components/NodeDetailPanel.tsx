@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { Bot, Loader2 } from "lucide-react";
 import { useDramaStore } from "../store/useDramaStore";
-import type {
-  CharacterData,
-  SceneData,
-  SubtitleData,
+import {
+  agentAssist,
+  type CharacterData,
+  type SceneData,
+  type SubtitleData,
 } from "../api/client";
 import type { DramaNodeData } from "./canvas/layout";
 
@@ -227,12 +229,28 @@ export default function NodeDetailPanel({
                 setScriptForm((prev) => ({ ...prev, title: e.target.value }))
               }
             />
+            <AgentAssistToolbar
+              text={scriptForm.title}
+              context="script"
+              extraInstruction="标题更吸引人，简洁有力"
+              onApply={(text) =>
+                setScriptForm((prev) => ({ ...prev, title: text }))
+              }
+            />
             <label className="panel-label">题材</label>
             <input
               className="panel-input"
               value={scriptForm.genre}
               onChange={(e) =>
                 setScriptForm((prev) => ({ ...prev, genre: e.target.value }))
+              }
+            />
+            <AgentAssistToolbar
+              text={scriptForm.genre}
+              context="script"
+              extraInstruction="题材描述更精准，便于后续生成"
+              onApply={(text) =>
+                setScriptForm((prev) => ({ ...prev, genre: text }))
               }
             />
             <ScriptGlobalControls
@@ -254,12 +272,28 @@ export default function NodeDetailPanel({
                 setIdeaForm((prev) => ({ ...prev, premise: e.target.value }))
               }
             />
+            <AgentAssistToolbar
+              text={ideaForm.premise}
+              context="script"
+              extraInstruction="围绕核心创意展开，增强画面感与冲突"
+              onApply={(text) =>
+                setIdeaForm((prev) => ({ ...prev, premise: text }))
+              }
+            />
             <label className="panel-label">题材</label>
             <input
               className="panel-input"
               value={ideaForm.genre}
               onChange={(e) =>
                 setIdeaForm((prev) => ({ ...prev, genre: e.target.value }))
+              }
+            />
+            <AgentAssistToolbar
+              text={ideaForm.genre}
+              context="script"
+              extraInstruction="题材描述更精准，便于后续生成"
+              onApply={(text) =>
+                setIdeaForm((prev) => ({ ...prev, genre: text }))
               }
             />
             <ScriptGlobalControls form={ideaForm} onChange={setIdeaForm} />
@@ -276,12 +310,28 @@ export default function NodeDetailPanel({
                 setCharForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
               }
             />
+            <AgentAssistToolbar
+              text={charForm.name}
+              context="character"
+              extraInstruction="角色名更贴合题材与性格"
+              onApply={(text) =>
+                setCharForm((prev) => (prev ? { ...prev, name: text } : prev))
+              }
+            />
             <label className="panel-label">身份</label>
             <input
               className="panel-input"
               value={charForm.role}
               onChange={(e) =>
                 setCharForm((prev) => (prev ? { ...prev, role: e.target.value } : prev))
+              }
+            />
+            <AgentAssistToolbar
+              text={charForm.role}
+              context="character"
+              extraInstruction="身份描述更鲜明"
+              onApply={(text) =>
+                setCharForm((prev) => (prev ? { ...prev, role: text } : prev))
               }
             />
             <label className="panel-label">年龄</label>
@@ -307,6 +357,16 @@ export default function NodeDetailPanel({
                 )
               }
             />
+            <AgentAssistToolbar
+              text={charForm.description}
+              context="character"
+              extraInstruction="增加外貌细节与视觉特征，便于生成一致形象"
+              onApply={(text) =>
+                setCharForm((prev) =>
+                  prev ? { ...prev, description: text } : prev
+                )
+              }
+            />
             <label className="panel-label">性格</label>
             <textarea
               className="panel-textarea"
@@ -314,6 +374,16 @@ export default function NodeDetailPanel({
               onChange={(e) =>
                 setCharForm((prev) =>
                   prev ? { ...prev, personality: e.target.value } : prev
+                )
+              }
+            />
+            <AgentAssistToolbar
+              text={charForm.personality}
+              context="character"
+              extraInstruction="性格更立体，便于配音与表演"
+              onApply={(text) =>
+                setCharForm((prev) =>
+                  prev ? { ...prev, personality: text } : prev
                 )
               }
             />
@@ -354,6 +424,16 @@ export default function NodeDetailPanel({
                     )
                   }
                 />
+                <AgentAssistToolbar
+                  text={sceneForm.description}
+                  context="storyboard"
+                  extraInstruction="增强画面感与镜头语言"
+                  onApply={(text) =>
+                    setSceneForm((prev) =>
+                      prev ? { ...prev, description: text } : prev
+                    )
+                  }
+                />
                 <label className="panel-label">角色动作</label>
                 <textarea
                   className="panel-textarea"
@@ -361,6 +441,16 @@ export default function NodeDetailPanel({
                   onChange={(e) =>
                     setSceneForm((prev) =>
                       prev ? { ...prev, character_actions: e.target.value } : prev
+                    )
+                  }
+                />
+                <AgentAssistToolbar
+                  text={sceneForm.character_actions}
+                  context="storyboard"
+                  extraInstruction="动作描述更具体、有戏剧张力"
+                  onApply={(text) =>
+                    setSceneForm((prev) =>
+                      prev ? { ...prev, character_actions: text } : prev
                     )
                   }
                 />
@@ -374,6 +464,16 @@ export default function NodeDetailPanel({
                     )
                   }
                 />
+                <AgentAssistToolbar
+                  text={sceneForm.emotion}
+                  context="storyboard"
+                  extraInstruction="情绪表达更精准"
+                  onApply={(text) =>
+                    setSceneForm((prev) =>
+                      prev ? { ...prev, emotion: text } : prev
+                    )
+                  }
+                />
                 <label className="panel-label">运镜</label>
                 <input
                   className="panel-input"
@@ -381,6 +481,16 @@ export default function NodeDetailPanel({
                   onChange={(e) =>
                     setSceneForm((prev) =>
                       prev ? { ...prev, camera_movement: e.target.value } : prev
+                    )
+                  }
+                />
+                <AgentAssistToolbar
+                  text={sceneForm.camera_movement}
+                  context="storyboard"
+                  extraInstruction="运镜描述更专业、有电影感"
+                  onApply={(text) =>
+                    setSceneForm((prev) =>
+                      prev ? { ...prev, camera_movement: text } : prev
                     )
                   }
                 />
@@ -397,6 +507,16 @@ export default function NodeDetailPanel({
                 )
               }
             />
+            <AgentAssistToolbar
+              text={sceneForm.prompt}
+              context="video"
+              extraInstruction="优化为英文提示词，提升生成质量"
+              onApply={(text) =>
+                setSceneForm((prev) =>
+                  prev ? { ...prev, prompt: text } : prev
+                )
+              }
+            />
             <label className="panel-label">反向提示词</label>
             <textarea
               className="panel-textarea"
@@ -404,6 +524,16 @@ export default function NodeDetailPanel({
               onChange={(e) =>
                 setSceneForm((prev) =>
                   prev ? { ...prev, negative_prompt: e.target.value } : prev
+                )
+              }
+            />
+            <AgentAssistToolbar
+              text={sceneForm.negative_prompt}
+              context="video"
+              extraInstruction="精简并保留最关键的排除项"
+              onApply={(text) =>
+                setSceneForm((prev) =>
+                  prev ? { ...prev, negative_prompt: text } : prev
                 )
               }
             />
@@ -434,6 +564,16 @@ export default function NodeDetailPanel({
                     )
                   }
                 />
+                <AgentAssistToolbar
+                  text={sceneForm.dialogue}
+                  context="voice"
+                  extraInstruction="台词更口语化、符合角色性格"
+                  onApply={(text) =>
+                    setSceneForm((prev) =>
+                      prev ? { ...prev, dialogue: text } : prev
+                    )
+                  }
+                />
               </>
             )}
           </div>
@@ -457,6 +597,19 @@ export default function NodeDetailPanel({
                       if (!prev) return prev;
                       const segments = [...prev.segments];
                       segments[idx] = { ...segments[idx], text: e.target.value };
+                      return { ...prev, segments };
+                    })
+                  }
+                />
+                <AgentAssistToolbar
+                  text={seg.text}
+                  context="subtitle"
+                  extraInstruction="字幕更简洁、与画面节奏匹配"
+                  onApply={(text) =>
+                    setSubtitleForm((prev) => {
+                      if (!prev) return prev;
+                      const segments = [...prev.segments];
+                      segments[idx] = { ...segments[idx], text };
                       return { ...prev, segments };
                     })
                   }
@@ -668,4 +821,100 @@ function formatTime(seconds: number): string {
   const s = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 1000);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+}
+
+interface AgentAssistToolbarProps {
+  text: string;
+  onApply: (text: string) => void;
+  context: string;
+  extraInstruction?: string;
+  disabled?: boolean;
+}
+
+function AgentAssistToolbar({
+  text,
+  onApply,
+  context,
+  extraInstruction,
+  disabled,
+}: AgentAssistToolbarProps) {
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  const handleAction = async (
+    action: "polish" | "expand" | "shorten" | "rewrite"
+  ) => {
+    if (!text.trim() || loadingAction || disabled) return;
+    setLoadingAction(action);
+    try {
+      const resp = await agentAssist({
+        text,
+        context,
+        action,
+        extra_instruction: extraInstruction,
+      });
+      if (resp.success && resp.data) {
+        onApply(resp.data.text);
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const actions: { key: "polish" | "expand" | "shorten" | "rewrite"; label: string }[] = [
+    { key: "polish", label: "润色" },
+    { key: "expand", label: "扩写" },
+    { key: "shorten", label: "精简" },
+    { key: "rewrite", label: "改写" },
+  ];
+
+  return (
+    <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+      {actions.map(({ key, label }) => {
+        const loading = loadingAction === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => handleAction(key)}
+            disabled={!text.trim() || loadingAction !== null || disabled}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--border-light)",
+              background: "var(--bg-elevated)",
+              color: "var(--text-secondary)",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: !text.trim() || loadingAction !== null || disabled ? "not-allowed" : "pointer",
+              opacity: !text.trim() || loadingAction !== null || disabled ? 0.55 : 1,
+              transition: "all 0.15s var(--ease-out)",
+              fontFamily: "inherit",
+            }}
+            onMouseEnter={(e) => {
+              if (text.trim() && !loadingAction && !disabled) {
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--primary)";
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--primary)";
+                (e.currentTarget as HTMLButtonElement).style.background = "rgba(184,130,63,0.08)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border-light)";
+              (e.currentTarget as HTMLButtonElement).style.color = "var(--text-secondary)";
+              (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-elevated)";
+            }}
+          >
+            {loading ? (
+              <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+            ) : (
+              <Bot size={11} strokeWidth={2} />
+            )}
+            <span>{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
