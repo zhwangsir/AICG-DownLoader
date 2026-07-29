@@ -1,5 +1,46 @@
 const API_BASE = "/api/drama";
 
+/** 各端点分级超时（毫秒）：按后端实际耗时分布设定，避免阻塞时前端永久等待 */
+export const API_TIMEOUTS = {
+  script: 300_000, // 剧本生成（LLM 多场景展开）
+  character: 180_000, // 角色卡生成（图像）
+  storyboard: 240_000, // 单场景分镜
+  storyboardBatch: 600_000, // 批量分镜
+  video: 600_000, // 单场景视频
+  videoBatch: 1_800_000, // 批量视频
+  taskCreate: 30_000, // 异步任务创建/单次轮询请求
+  voice: 120_000, // 配音
+  subtitle: 120_000, // 字幕
+  compose: 900_000, // 剪辑合成
+  quality: 300_000, // 整体质检
+  visualQuality: 600_000, // 视觉质检（抽帧+VLM）
+  lipSync: 600_000, // 唇形同步
+  postprocess: 1_800_000, // 后处理 5 步管线
+  pollInterval: 3_000, // 轮询间隔
+} as const;
+
+/** 带超时保护的 fetch：超时后抛出友好错误，避免后端阻塞时前端永久等待 */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error(
+        `请求超时（${Math.round(timeoutMs / 1000)}秒）。后端可能负载过高，请稍后重试。`
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface ScriptData {
   project_id: string;
   title: string;
@@ -212,11 +253,15 @@ export async function generateScript(params: {
   episodes: number;
   scenes_per_episode: number;
 }): Promise<AgentResponse<ScriptData>> {
-  const resp = await fetch(`${API_BASE}/script/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/script/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.script
+  );
   return resp.json();
 }
 
@@ -229,11 +274,15 @@ export async function generateCharacter(params: {
   preview_positive_prompt?: string;
   preview_negative_prompt?: string;
 }): Promise<AgentResponse<CharacterCardData>> {
-  const resp = await fetch(`${API_BASE}/character/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/character/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.character
+  );
   return resp.json();
 }
 
@@ -258,11 +307,15 @@ export async function generateStoryboard(params: {
   characters: CharacterData[];
   style: string;
 }): Promise<AgentResponse<StoryboardData>> {
-  const resp = await fetch(`${API_BASE}/storyboard/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/storyboard/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.storyboard
+  );
   return resp.json();
 }
 
@@ -271,11 +324,15 @@ export async function generateStoryboardBatch(params: {
   characters: CharacterData[];
   style: string;
 }): Promise<AgentResponse<StoryboardBatchData>> {
-  const resp = await fetch(`${API_BASE}/storyboard/generate_batch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/storyboard/generate_batch`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.storyboardBatch
+  );
   return resp.json();
 }
 
@@ -286,11 +343,15 @@ export async function generateVideo(params: {
   negative_prompt: string;
   duration_seconds: number;
 }): Promise<AgentResponse<VideoData>> {
-  const resp = await fetch(`${API_BASE}/video/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/video/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.video
+  );
   return resp.json();
 }
 
@@ -303,11 +364,15 @@ export async function generateVideoBatch(params: {
     duration_seconds: number;
   }>;
 }): Promise<AgentResponse<VideoBatchData>> {
-  const resp = await fetch(`${API_BASE}/video/generate_batch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/video/generate_batch`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.videoBatch
+  );
   return resp.json();
 }
 
@@ -318,11 +383,15 @@ export async function generateVideoAsync(params: {
   negative_prompt: string;
   duration_seconds: number;
 }): Promise<AsyncTaskResponse> {
-  const resp = await fetch(`${API_BASE}/video/generate_async`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/video/generate_async`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.taskCreate
+  );
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`创建异步任务失败: ${resp.status} ${text}`);
@@ -340,11 +409,15 @@ export async function generateVoice(params: {
     rate: string;
   }>;
 }): Promise<AgentResponse<VoiceData>> {
-  const resp = await fetch(`${API_BASE}/voice/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/voice/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.voice
+  );
   return resp.json();
 }
 
@@ -353,11 +426,15 @@ export async function generateSubtitle(params: {
   audio_url: string;
   language: string;
 }): Promise<AgentResponse<SubtitleData>> {
-  const resp = await fetch(`${API_BASE}/subtitle/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/subtitle/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.subtitle
+  );
   return resp.json();
 }
 
@@ -370,11 +447,15 @@ export async function composeVideo(params: {
   output_resolution?: string;
   output_fps?: number;
 }): Promise<AgentResponse<EditData>> {
-  const resp = await fetch(`${API_BASE}/edit/compose`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/edit/compose`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.compose
+  );
   return resp.json();
 }
 
@@ -386,11 +467,15 @@ export async function checkQuality(params: {
   subtitles: SubtitleData[];
   check_types?: string[];
 }): Promise<AgentResponse<QualityCheckData>> {
-  const resp = await fetch(`${API_BASE}/quality/check`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/quality/check`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.quality
+  );
   return resp.json();
 }
 
@@ -402,11 +487,15 @@ export async function checkVisualQuality(params: {
   check_types?: string[];
   max_frames?: number;
 }): Promise<AgentResponse<QualityVisualData>> {
-  const resp = await fetch(`${API_BASE}/quality/visual`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/quality/visual`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.visualQuality
+  );
   return resp.json();
 }
 
@@ -485,11 +574,15 @@ export async function generateLipSync(params: {
   audio_url: string;
   reference_image_url?: string | null;
 }): Promise<AgentResponse<LipSyncData>> {
-  const resp = await fetch(`${API_BASE}/lipsync/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/lipsync/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.lipSync
+  );
   return resp.json();
 }
 
@@ -505,10 +598,41 @@ export async function generatePostprocess(params: {
   steps?: PostprocessStep[];
   output_resolution?: string | null;
 }): Promise<AgentResponse<PostprocessData>> {
-  const resp = await fetch(`${API_BASE}/postprocess/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/postprocess/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.postprocess
+  );
   return resp.json();
+}
+
+/**
+ * 视频异步任务轮询：每 3 秒查询一次，直到完成/失败或超过最大等待时间。
+ * 单次请求带 taskCreate 超时，整体带截止期限，避免任务卡死时前端永久轮询。
+ */
+export async function pollVideoTask(
+  pollUrl: string,
+  maxWaitMs: number = API_TIMEOUTS.video
+): Promise<ProgressEvent> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, API_TIMEOUTS.pollInterval)
+    );
+    const resp = await fetchWithTimeout(pollUrl, {}, API_TIMEOUTS.taskCreate);
+    if (!resp.ok) {
+      throw new Error(`轮询失败: ${resp.status}`);
+    }
+    const evt: ProgressEvent = await resp.json();
+    if (evt.status === "completed" || evt.status === "failed") {
+      return evt;
+    }
+  }
+  throw new Error(
+    `轮询超时（${Math.round(maxWaitMs / 1000)}秒）。任务仍在运行，请稍后重试。`
+  );
 }

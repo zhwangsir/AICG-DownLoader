@@ -34,7 +34,7 @@ def _patch_settings(monkeypatch):
     monkeypatch.setattr(settings, "firered_asr_endpoint", "http://localhost:8300/v1")
     monkeypatch.setattr(settings, "tts_backend", "edge")
     monkeypatch.setattr(settings, "cosyvoice_endpoint", "http://localhost:8400/v1")
-    monkeypatch.setattr(settings, "indextts_endpoint", "http://localhost:8500/v1")
+    monkeypatch.setattr(settings, "indextts_endpoint", "http://localhost:9200")
     # P4.3: 默认走回退路径（sdxl），保持向后兼容；
     # 专门测试 HunyuanImage/FLUX+PuLID/LTX-Video 的用例局部 monkeypatch 覆盖
     monkeypatch.setattr(settings, "image_backend", "sdxl")
@@ -49,6 +49,9 @@ def _patch_settings(monkeypatch):
     monkeypatch.setattr(settings, "postprocess_enabled", False)
     monkeypatch.setattr(settings, "postprocess_endpoint", "http://localhost:8290/v1")
     monkeypatch.setattr(settings, "deepfilternet_endpoint", "http://localhost:8301/v1")
+    # RAG: 默认关闭提示词优化，避免单元测试触发 fastembed/LLM 调用；
+    # 专门测试 RAG 的用例可局部 monkeypatch settings.rag_optimize_enabled = True
+    monkeypatch.setattr(settings, "rag_optimize_enabled", False)
 
 
 @pytest.fixture
@@ -57,6 +60,44 @@ def base_agent():
     from app.agents.base import BaseAgent
 
     return BaseAgent("test_agent")
+
+
+@pytest.fixture
+def storyboard_agent():
+    """返回一个 StoryboardAgent 实例，供分镜相关测试使用。"""
+    from app.agents.storyboard_agent import StoryboardAgent
+
+    return StoryboardAgent()
+
+
+@pytest.fixture(autouse=True)
+def mock_web_search():
+    """Mock web_search，避免单元测试触发真实网络请求。
+
+    各 Agent 通过 `from app.agents.ai_optimizer import web_search` 引入局部别名，
+    仅 patch ai_optimizer 模块中的属性无法覆盖这些别名，因此需要同时 patch
+    各 Agent 模块中的 web_search 引用。
+    """
+    with patch("app.agents.ai_optimizer.web_search", new_callable=AsyncMock, return_value="") as mock:
+        # 同步替换各 Agent 模块中的局部别名，保持 mock 一致性
+        import app.agents.script_agent as _script
+        import app.agents.storyboard_agent as _story
+        import app.agents.character_agent as _char
+
+        original = {
+            "script": _script.web_search,
+            "story": _story.web_search,
+            "char": _char.web_search,
+        }
+        _script.web_search = mock
+        _story.web_search = mock
+        _char.web_search = mock
+        try:
+            yield mock
+        finally:
+            _script.web_search = original["script"]
+            _story.web_search = original["story"]
+            _char.web_search = original["char"]
 
 
 @pytest.fixture

@@ -13,46 +13,21 @@ export function ProgressBar({
   const isCompleted = status === "completed";
 
   return (
-    <div style={{ marginTop: "12px" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          fontSize: "11px",
-          color: "var(--text-secondary)",
-          marginBottom: "4px",
-        }}
-      >
+    <div className="progress-bar-container">
+      <div className="progress-bar-header">
         <span>
           {connected ? "● 已连接" : "○ 连接中"} · {message || status}
         </span>
         <span>{percent}%</span>
       </div>
-      <div
-        style={{
-          width: "100%",
-          height: "6px",
-          background: "var(--bg-primary)",
-          borderRadius: "3px",
-          overflow: "hidden",
-        }}
-      >
+      <div className="progress-bar-track">
         <div
-          style={{
-            width: `${percent}%`,
-            height: "100%",
-            background: isFailed
-              ? "#a55"
-              : isCompleted
-              ? "#4a5"
-              : "var(--accent)",
-            transition: "width 0.3s ease",
-          }}
+          className={`progress-bar-fill${isFailed ? " failed" : ""}${isCompleted ? " completed" : ""}`}
+          style={{ width: `${percent}%` }}
         />
       </div>
       {error && (
-        <div style={{ color: "#a55", fontSize: "12px", marginTop: "6px" }}>
+        <div className="progress-bar-error">
           {error}
         </div>
       )}

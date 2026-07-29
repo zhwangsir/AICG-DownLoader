@@ -1,0 +1,436 @@
+{
+  "version": "1.0.0",
+  "description": "影视镜头语言、运镜、光影与构图技法库",
+  "entries": [
+    {
+      "id": "shot_close_up",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "特写镜头",
+      "content": "特写镜头 Close-up shot：聚焦人物面部或关键物体，突出情绪与细节。提示词：close-up shot, sharp focus on face, emotional expression, shallow depth of field, cinematic lighting, skin texture.",
+      "tags": ["特写", "面部", "情绪", "浅景深"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_medium",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "中景镜头",
+      "content": "中景镜头 Medium shot：拍摄人物腰部以上，兼顾动作与表情。提示词：medium shot, waist-up framing, natural pose, clear body language, balanced composition.",
+      "tags": ["中景", "半身", "动作", "表情"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "shot_wide_establishing",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "广角 establishing shot",
+      "content": "广角 establishing shot：展示环境与空间关系，奠定场景基调。提示词：wide establishing shot, grand environment, detailed background, atmospheric perspective, cinematic scale.",
+      "tags": ["广角", "全景", "环境", "空间"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_low_angle",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "低角度仰拍",
+      "content": "低角度仰拍 Low angle shot：镜头从下往上，强化主体威严、压迫感或英雄感。提示词：low angle shot, looking up at subject, powerful composition, dramatic sky background, imposing atmosphere.",
+      "tags": ["低角度", "仰拍", "压迫感", "威严"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "shot_dutch_angle",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "荷兰角",
+      "content": "荷兰角 Dutch angle：倾斜构图，制造不安、紧张或悬疑氛围。提示词：Dutch angle, tilted horizon, disorienting composition, tense mood, dramatic shadows.",
+      "tags": ["荷兰角", "倾斜", "紧张", "悬疑"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "shot_over_shoulder",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "过肩镜头",
+      "content": "过肩镜头 Over-the-shoulder shot：从一人背后拍摄对话对象，增强对话代入感。提示词：over-the-shoulder shot, dialogue framing, shallow depth of field, natural conversation, cinematic.",
+      "tags": ["过肩", "对话", "代入感", "景深"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "shot_tracking",
+      "category": "shot",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "跟随镜头",
+      "content": "跟随镜头 Tracking shot：摄影机跟随主体移动，保持动态连贯。提示词：tracking shot, smooth camera follow, dynamic movement, consistent speed, cinematic motion.",
+      "tags": ["跟随", "运镜", "动态", "连贯"],
+      "model_target": ["Sora-like", "ComfyUI"]
+    },
+    {
+      "id": "shot_dolly_in",
+      "category": "shot",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "推镜 Dolly in",
+      "content": "推镜 Dolly in：摄影机缓慢前推，放大情绪张力。提示词：slow dolly in, gradual zoom, emotional intensity, shallow depth of field, cinematic.",
+      "tags": ["推镜", "dolly", "情绪", "放大"],
+      "model_target": ["Sora-like", "ComfyUI"]
+    },
+    {
+      "id": "shot_handheld",
+      "category": "shot",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "手持镜头",
+      "content": "手持镜头 Handheld shot：轻微晃动增强真实感与紧张感。提示词：handheld camera, subtle shake, documentary feel, gritty realism, immersive.",
+      "tags": ["手持", "晃动", "纪实", "真实"],
+      "model_target": ["Sora-like", "ComfyUI"]
+    },
+    {
+      "id": "shot_aerial",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "航拍镜头",
+      "content": "航拍镜头 Aerial shot：从高空俯瞰，展现场景宏大与空间关系。提示词：aerial drone shot, bird's eye view, vast landscape, sweeping scale, cinematic establishing.",
+      "tags": ["航拍", "俯瞰", "宏大", "全景"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "light_rembrandt",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "伦勃朗光",
+      "content": "伦勃朗光 Rembrandt lighting：经典人像布光，面部三角形光斑，戏剧感强。提示词：Rembrandt lighting, dramatic portrait, triangle of light on cheek, deep shadows, cinematic mood.",
+      "tags": ["伦勃朗光", "布光", "人像", "戏剧"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "light_golden_hour",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "黄金时刻光线",
+      "content": "黄金时刻 Golden hour：日出日落前后的暖色柔和光线，浪漫温馨。提示词：golden hour lighting, warm soft sunlight, long shadows, dreamy atmosphere, orange glow.",
+      "tags": ["黄金时刻", "暖光", "日落", "浪漫"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "light_neon",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "霓虹灯光",
+      "content": "霓虹灯光 Neon lighting：霓虹灯管发出的高饱和色彩，营造都市夜景或赛博氛围。提示词：neon lighting, vibrant colored lights, reflections on wet pavement, cyberpunk mood, high contrast.",
+      "tags": ["霓虹", "夜景", "高饱和", "反射"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "light_backlight",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "逆光剪影",
+      "content": "逆光剪影 Backlight silhouette：主体背对强光源，形成轮廓光或剪影。提示词：backlit silhouette, rim light, strong backlight, dramatic outline, misty atmosphere.",
+      "tags": ["逆光", "剪影", "轮廓光", "戏剧"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "color_teal_orange",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "青橙色调",
+      "content": "青橙色调 Teal and orange：经典电影调色，肤色偏橙、阴影偏青，对比强烈。提示词：teal and orange color grading, cinematic color palette, high contrast, film look, professional grading.",
+      "tags": ["青橙", "调色", "电影", "对比"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "color_desaturated",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "低饱和色调",
+      "content": "低饱和色调 Desaturated：降低色彩饱和度，营造压抑、纪实或末日氛围。提示词：desaturated color grading, muted tones, grim atmosphere, documentary style, realistic.",
+      "tags": ["低饱和", "压抑", "纪实", "末日"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "shot_extreme_close_up",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "面部/眼睛 extreme close-up",
+      "content": "extreme close-up shot: focus on eyes or facial micro-expressions, shallow depth of field, intimate, dramatic",
+      "tags": ["极特写", "面部", "眼睛", "微表情", "亲密"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_full_body",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "全身 full body shot",
+      "content": "full body shot: show entire figure and posture, clean framing, head to toe, fashion or action context",
+      "tags": ["全身", "姿态", "时尚", "动作", "完整构图"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_two_shot",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "双人镜头 two-shot",
+      "content": "two-shot: frame two subjects together, suitable for dialogue or emotional interaction, balanced composition",
+      "tags": ["双人镜头", "对话", "互动", "平衡构图"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_group_shot",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "群像 group shot",
+      "content": "group shot: multiple subjects arranged in layers, ensemble composition, clear spatial relations",
+      "tags": ["群像", "多人", "层次", "空间关系"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_pov",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "第一人称视角 POV shot",
+      "content": "POV shot: first-person perspective, immersive, hands or foreground props visible, subjective camera",
+      "tags": ["POV", "第一人称", "主观镜头", "沉浸"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_rack_focus",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "移焦 rack focus",
+      "content": "rack focus: shift focus from foreground to background or vice versa, dramatic attention transition",
+      "tags": ["移焦", "焦点转移", "戏剧性", "注意切换"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_whip_pan",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "快速摇镜 whip pan",
+      "content": "whip pan: fast horizontal camera pan, motion blur, energetic transition, dynamic",
+      "tags": ["快速摇镜", "动态模糊", "动感", "转场"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_zoom_in",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "变焦推近 zoom in",
+      "content": "zoom in: lens focal length gradually tightens, dramatic emphasis, increasing tension",
+      "tags": ["变焦", "推近", "张力", "强调"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_crane",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "升降镜头 crane shot",
+      "content": "crane shot: camera rises or descends on a crane, sweeping vertical movement, grand scale",
+      "tags": ["升降镜头", "垂直运动", "宏大", "摇臂"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_steadicam",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "斯坦尼康稳定镜头 steadicam smooth glide",
+      "content": "steadicam shot: smooth floating camera movement, seamless glide through space, professional cinematic motion",
+      "tags": ["斯坦尼康", "稳定", "滑行", "电影级运镜"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_static_long_take",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "固定长镜头 static long take",
+      "content": "static long take: fixed camera position, sustained observation, theatrical staging, minimalist",
+      "tags": ["固定长镜头", "长镜头", "舞台调度", "极简"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_split_screen",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "分屏 split screen",
+      "content": "split screen: multiple frames shown simultaneously, parallel narrative, graphic layout",
+      "tags": ["分屏", "平行叙事", "版式", "多画幅"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_match_cut",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "匹配剪辑 match cut transition",
+      "content": "match cut: seamless transition between two visually similar shots, graphic match, continuity",
+      "tags": ["匹配剪辑", "无缝转场", "图形匹配", "连续性"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_macro",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "微距 macro shot",
+      "content": "macro shot: extreme magnification of small details, shallow depth of field, texture rich",
+      "tags": ["微距", "细节", "放大", "质感"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "shot_slow_motion",
+      "category": "shot",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "慢动作 slow motion",
+      "content": "slow motion: high frame rate playback, stretched time, dramatic emphasis on movement and detail",
+      "tags": ["慢动作", "时间延展", "戏剧性", "高帧率"],
+      "model_target": ["Sora-like", "ComfyUI"]
+    },
+    {
+      "id": "shot_timelapse",
+      "category": "shot",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "延时摄影 time-lapse / hyperlapse",
+      "content": "time-lapse / hyperlapse: compressed time, clouds or crowds streaking, dynamic spatial movement",
+      "tags": ["延时", "时间压缩", "云层", "移动延时"],
+      "model_target": ["Sora-like", "ComfyUI"]
+    },
+    {
+      "id": "light_softbox",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "柔光箱 softbox lighting",
+      "content": "softbox lighting: large, soft, even light source, gentle shadows, studio portrait or interview look",
+      "tags": ["柔光箱", "柔光", "均匀", "人像"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "light_candle",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "烛光 candlelight",
+      "content": "candlelight: warm flickering light, soft orange glow, intimate period atmosphere, gentle shadows",
+      "tags": ["烛光", "暖光", "摇曳", "古典氛围"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "light_moonlight",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "月光 moonlight",
+      "content": "moonlight: cool blue-silver night illumination, soft shadows, romantic or mysterious mood",
+      "tags": ["月光", "蓝银", "夜景", "神秘"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "color_warm_glow",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "暖色辉光 warm glow",
+      "content": "warm glow: golden-orange highlights, hazy softness, cozy and nostalgic atmosphere",
+      "tags": ["暖色辉光", "金色", "柔光", "怀旧"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "color_high_key",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "高调 high-key lighting",
+      "content": "high-key lighting: bright, low contrast, minimal shadows, cheerful and clean look",
+      "tags": ["高调", "明亮", "低对比", "干净"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "color_monochrome",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "单色 monochrome",
+      "content": "monochrome: single color family or black and white, strong tonal contrast, timeless aesthetic",
+      "tags": ["单色", "黑白", "色调", "经典"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "comp_rule_of_thirds",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "三分法 rule of thirds",
+      "content": "rule of thirds: place subject at intersection lines, balanced and visually pleasing composition",
+      "tags": ["三分法", "构图", "平衡", "视觉引导"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "comp_symmetry",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "对称构图 symmetrical composition",
+      "content": "symmetrical composition: mirror-like balance, centered subject, formal and grand aesthetic",
+      "tags": ["对称", "居中", "庄重", "形式感"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "weather_rain",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "雨天 rain atmosphere",
+      "content": "rain atmosphere: visible rain streaks, wet reflective surfaces, moody cinematic environment",
+      "tags": ["雨天", "雨丝", "湿滑反光", "情绪"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "weather_snow",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "雪天 snow atmosphere",
+      "content": "snow atmosphere: falling snowflakes, soft white blanket, cold muted tones, serene or melancholic",
+      "tags": ["雪天", "雪花", "白色", "清冷"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "weather_fog",
+      "category": "shot",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "雾气 fog/mist atmosphere",
+      "content": "fog/mist atmosphere: hazy visibility, soft diffused light, mysterious depth layers",
+      "tags": ["雾气", "朦胧", "层次感", "神秘"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    }
+  ]
+}

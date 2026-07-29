@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import ReactFlow, {
   Background,
   Controls,
-  MiniMap,
   addEdge,
   applyNodeChanges,
   applyEdgeChanges,
@@ -12,12 +18,11 @@ import ReactFlow, {
   type OnEdgesChange,
   type OnConnect,
   type NodeTypes,
-  Handle,
-  Position,
+  useStore,
+  useReactFlow,
+  BackgroundVariant,
 } from "reactflow";
-import dagre from "dagre";
 import "reactflow/dist/style.css";
-import { Check, Lock } from "./ui/Icon";
 import {
   generateScript,
   generateCharacter,
@@ -30,7 +35,7 @@ import {
   composeVideo,
   checkQuality,
   checkVisualQuality,
-  type ScriptData,
+  pollVideoTask,
   type CharacterData,
   type CharacterCardData,
   type SceneData,
@@ -42,542 +47,63 @@ import {
   type QualityCheckData,
   type QualityVisualData,
   type EditSegmentInput,
-  type ProgressEvent,
 } from "../api/client";
 import { useDramaStore } from "../store/useDramaStore";
 import CharacterPreviewPanel from "./CharacterPreviewPanel";
-import NodeDetailPanel from "./NodeDetailPanel";
-
-const GENRE_OPTIONS = [
-  "都市悬疑",
-  "古风仙侠",
-  "科幻未来",
-  "校园青春",
-  "职场商战",
-  "武侠江湖",
-  "末日废土",
-  "温情治愈",
-  "犯罪推理",
-];
-
-// 支持自定义题材的推荐列表（与下拉框解耦，用户可自由输入）
-const GENRE_PRESETS = [
-  ...GENRE_OPTIONS,
-  "奇幻冒险",
-  "家庭伦理",
-  "历史穿越",
-  "甜宠恋爱",
-  "恐怖惊悚",
-  "医疗救援",
-  "体育竞技",
-  "美食治愈",
-  "商战复仇",
-];
-
-interface DramaNodeData {
-  label: string;
-  type: string;
-  detail: string;
-  imageUrl?: string;
-  videoUrl?: string;
-  audioUrl?: string;
-  subtitleText?: string;
-  loading?: boolean;
-  loadingText?: string;
-  hasGenerated?: boolean;
-  onGenerate?: (premise?: string, genre?: string) => void;
-  generateLabel?: string;
-  /** 是否可以生成（流程控制：前置条件是否满足） */
-  canGenerate?: boolean;
-  /** 流程锁定原因（前置条件未满足时的提示） */
-  lockReason?: string;
-  /** 是否为创意输入节点（内嵌 textarea） */
-  isScriptInput?: boolean;
-  /** 质检摘要文本 */
-  qualitySummary?: string;
-  /** 质检问题预览 */
-  qualityIssues?: string;
-  /** 可编辑的提示词（角色节点用） */
-  editablePrompts?: { positive: string; negative: string };
-  /** 提示词编辑后重新生成回调 */
-  onEditPrompts?: (positive: string, negative: string) => void;
-}
+import NodeDetailPanel, { type ScriptGenerateOptions } from "./NodeDetailPanel";
+import DramaNode from "./canvas/DramaNode";
+import { getLayoutedElements, type DramaNodeData } from "./canvas/layout";
+import { Image as ImageIcon, Film, Sparkles } from "lucide-react";
 
 const nodeTypes: NodeTypes = {
   custom: DramaNode,
 };
 
-/** 深色主题内联样式片段 */
-const btnStyle = {
-  padding: "4px 10px",
-  fontSize: "12px",
-  background: "var(--accent-dim)",
-  border: "1px solid var(--border)",
-  color: "var(--text-primary)",
-  borderRadius: "4px",
-  cursor: "pointer",
-  width: "100%",
-} as const;
-
-const inputStyle = {
-  width: "100%",
-  padding: "4px 6px",
-  background: "var(--bg-primary)",
-  border: "1px solid var(--border)",
-  borderRadius: "4px",
-  color: "var(--text-primary)",
-  fontSize: "12px",
-  fontFamily: "inherit",
-} as const;
-
-function DramaNode({ data }: { data: DramaNodeData }) {
-  // 阻止节点内部交互元素触发 React Flow 拖拽
-  const stopNodeDrag: React.MouseEventHandler<HTMLElement> = (e) => {
-    e.stopPropagation();
-  };
-  // 全局生成锁：任意 Agent 生成中时，本节点所有可能触发生成的按钮禁用
-  const globalLoading = useDramaStore((s) => s.globalLoading);
-  const colorMap: Record<string, string> = {
-    script: "var(--node-script)",
-    character: "var(--node-character)",
-    storyboard: "var(--node-storyboard)",
-    video: "var(--node-video)",
-    voice: "var(--node-voice)",
-    subtitle: "var(--node-subtitle)",
-    edit: "var(--node-edit)",
-    quality: "var(--node-quality)",
-    visual_quality: "var(--node-visual-quality)",
-  };
-  const color = colorMap[data.type] || "var(--accent-dim)";
-
-  // 创意输入节点的本地输入状态
-  const [premise, setPremise] = useState("都市悬疑，外卖员发现客户是凶手");
-  const [genre, setGenre] = useState("都市悬疑");
-
-  // 提示词编辑面板状态
-  const [showEditPanel, setShowEditPanel] = useState(false);
-  const [editPositive, setEditPositive] = useState("");
-  const [editNegative, setEditNegative] = useState("");
-
-  // 已生成节点也显示“重新生成”按钮；生成中时不显示按钮（由 loading 提示替代）
-  const showGenerateBtn = !!data.generateLabel && !data.loading;
-  // 流程前置条件未满足 或 全局生成锁 都会锁定按钮
-  const isLocked = showGenerateBtn && (data.canGenerate === false || globalLoading);
-
-  // 打开编辑面板时，用当前提示词填充
-  const openEditPanel = () => {
-    setEditPositive(data.editablePrompts?.positive || "");
-    setEditNegative(data.editablePrompts?.negative || "");
-    setShowEditPanel(true);
-  };
-
-  // 应用编辑并重新生成
-  const applyEditAndRegenerate = () => {
-    setShowEditPanel(false);
-    data.onEditPrompts?.(editPositive, editNegative);
-  };
-
-  return (
-    <div
-      className="react-flow__node-custom"
-      style={
-        data.loading
-          ? { boxShadow: `0 0 0 2px ${color}`, borderColor: color }
-          : undefined
+/**
+ * 节点内部数据同步器：在 rAF 被节流的环境（后台标签页/自动化浏览器）中，
+ * React Flow v11 的 ResizeObserver 测量链路失效，handleBounds 永不写入导致边不渲染。
+ * store 的 updateNodeDimensions 同步读取 DOM 节点与 handle 位置并写入 store，
+ * 不依赖 rAF，因此在节点集合变化后主动触发一次，保证边在任何环境下都能渲染。
+ */
+function NodeInternalsUpdater({ nodesKey }: { nodesKey: string }) {
+  const updateNodeDimensions = useStore((s) => s.updateNodeDimensions);
+  const instance = useReactFlow();
+  const prevCountRef = useRef<number | null>(null);
+  const hasInitiallyFitRef = useRef(false);
+  useEffect(() => {
+    if (!nodesKey) return;
+    const timer = setTimeout(() => {
+      const ids = nodesKey.split(",");
+      const updates = ids
+        .map((id) => {
+          const el = document.querySelector(
+            `.react-flow__node[data-id="${id}"]`
+          );
+          return el
+            ? { id, nodeElement: el as HTMLDivElement, forceUpdate: true }
+            : null;
+        })
+        .filter(
+          (u): u is { id: string; nodeElement: HTMLDivElement; forceUpdate: boolean } =>
+            !!u
+        );
+      if (updates.length) updateNodeDimensions(updates);
+      const shouldFit = !hasInitiallyFitRef.current || 
+        (prevCountRef.current !== null && prevCountRef.current !== ids.length);
+      if (shouldFit) {
+        requestAnimationFrame(() => {
+          instance.fitView({ padding: 0.06, maxZoom: 0.85, minZoom: 0.35, duration: 600 });
+        });
+        hasInitiallyFitRef.current = true;
       }
-    >
-      <Handle type="target" position={Position.Left} />
-      <div className="node-header">
-        <span className="node-dot" style={{ background: color }}></span>
-        {data.label}
-      </div>
-      <div className="node-body">{data.detail}</div>
-
-      {/* 创意输入：textarea + 题材下拉 */}
-      {data.isScriptInput && !data.hasGenerated && !data.loading && (
-        <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" }}>
-          <textarea
-            value={premise}
-            onChange={(e) => setPremise(e.target.value)}
-            onMouseDown={stopNodeDrag}
-            onClick={stopNodeDrag}
-            placeholder="输入一句话创意..."
-            style={{ ...inputStyle, minHeight: "48px", resize: "vertical" }}
-            className="nodrag"
-          />
-          <input
-            list="genre-presets"
-            value={genre}
-            onChange={(e) => setGenre(e.target.value)}
-            onMouseDown={stopNodeDrag}
-            onClick={stopNodeDrag}
-            placeholder="输入题材或选择推荐项"
-            style={inputStyle}
-            className="nodrag"
-          />
-          <datalist id="genre-presets">
-            {GENRE_PRESETS.map((g) => (
-              <option key={g} value={g} />
-            ))}
-          </datalist>
-        </div>
-      )}
-
-      {/* 图片预览 */}
-      {data.imageUrl && (
-        <img
-          src={data.imageUrl}
-          alt={data.label}
-          loading="lazy"
-          style={{
-            width: "100%",
-            maxHeight: "140px",
-            objectFit: "cover",
-            borderRadius: "4px",
-            marginTop: "6px",
-            display: "block",
-          }}
-        />
-      )}
-
-      {/* 视频预览 */}
-      {data.videoUrl && (
-        <video
-          src={data.videoUrl}
-          controls
-          loop
-          muted
-          style={{
-            width: "100%",
-            maxHeight: "180px",
-            borderRadius: "4px",
-            marginTop: "6px",
-            display: "block",
-          }}
-        />
-      )}
-
-      {/* 音频预览 */}
-      {data.audioUrl && (
-        <audio
-          controls
-          src={data.audioUrl}
-          style={{ width: "100%", marginTop: "6px", display: "block" }}
-        />
-      )}
-
-      {/* 字幕预览 */}
-      {data.subtitleText && (
-        <div
-          style={{
-            marginTop: "6px",
-            padding: "4px 6px",
-            background: "rgba(74,165,165,0.12)",
-            borderRadius: "4px",
-            fontSize: "11px",
-            lineHeight: "1.4",
-            maxHeight: "80px",
-            overflow: "auto",
-          }}
-        >
-          {data.subtitleText}
-        </div>
-      )}
-
-      {/* 质检摘要 */}
-      {data.qualitySummary && (
-        <div
-          style={{
-            marginTop: "6px",
-            padding: "4px 6px",
-            background: "rgba(165,165,74,0.12)",
-            borderRadius: "4px",
-            fontSize: "11px",
-            lineHeight: "1.4",
-          }}
-        >
-          {data.qualitySummary}
-        </div>
-      )}
-      {data.qualityIssues && (
-        <div
-          style={{
-            marginTop: "4px",
-            fontSize: "11px",
-            color: "var(--text-secondary)",
-            maxHeight: "70px",
-            overflow: "auto",
-          }}
-        >
-          {data.qualityIssues}
-        </div>
-      )}
-
-      {/* Loading 提示 */}
-      {data.loading && (
-        <div
-          style={{
-            marginTop: "6px",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            fontSize: "12px",
-            color: "var(--accent)",
-          }}
-        >
-          <span className="loading" style={{ width: "12px", height: "12px" }}></span>
-          {data.loadingText || "生成中..."}
-        </div>
-      )}
-
-      {/* 已生成标记 */}
-      {data.hasGenerated && !data.loading && (
-        <div
-          style={{
-            marginTop: "6px",
-            fontSize: "11px",
-            color: "var(--node-storyboard)",
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-          }}
-        >
-          <Check size={12} strokeWidth={2.5} />
-          <span>已生成</span>
-        </div>
-      )}
-
-      {/* 编辑提示词按钮（仅已生成且有可编辑提示词时显示） */}
-      {data.hasGenerated && !data.loading && data.editablePrompts && data.onEditPrompts && !showEditPanel && (
-        <button
-          style={{
-            ...btnStyle,
-            marginTop: "4px",
-            background: "transparent",
-            border: "1px solid var(--border)",
-            fontSize: "11px",
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            openEditPanel();
-          }}
-          onMouseDown={stopNodeDrag}
-          onMouseOver={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--accent)";
-          }}
-          onMouseOut={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)";
-          }}
-          className="nodrag"
-        >
-          编辑提示词
-        </button>
-      )}
-
-      {/* 提示词编辑面板 */}
-      {showEditPanel && (
-        <div
-          onClick={stopNodeDrag}
-          style={{
-            marginTop: "6px",
-            padding: "6px",
-            background: "var(--bg-primary)",
-            borderRadius: "4px",
-            border: "1px solid var(--border)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px",
-          }}
-        >
-          <div style={{ fontSize: "10px", color: "var(--text-secondary)" }}>
-            正面提示词
-          </div>
-          <textarea
-            value={editPositive}
-            onChange={(e) => setEditPositive(e.target.value)}
-            onMouseDown={stopNodeDrag}
-            style={{
-              ...inputStyle,
-              minHeight: "48px",
-              resize: "vertical",
-              fontSize: "10px",
-            }}
-            className="nodrag"
-          />
-          <div style={{ fontSize: "10px", color: "var(--text-secondary)" }}>
-            负面提示词
-          </div>
-          <textarea
-            value={editNegative}
-            onChange={(e) => setEditNegative(e.target.value)}
-            onMouseDown={stopNodeDrag}
-            style={{
-              ...inputStyle,
-              minHeight: "36px",
-              resize: "vertical",
-              fontSize: "10px",
-            }}
-            className="nodrag"
-          />
-          <div style={{ display: "flex", gap: "4px", marginTop: "2px" }}>
-            <button
-              style={{
-                ...btnStyle,
-                fontSize: "11px",
-                padding: "3px 8px",
-                width: "auto",
-                flex: 1,
-                ...(globalLoading
-                  ? { opacity: 0.4, cursor: "not-allowed", background: "#333" }
-                  : {}),
-              }}
-              disabled={globalLoading}
-              onClick={(e) => {
-                e.stopPropagation();
-                applyEditAndRegenerate();
-              }}
-              onMouseDown={stopNodeDrag}
-              className="nodrag"
-            >
-              {globalLoading ? "其他任务生成中..." : "应用并重新生成"}
-            </button>
-            <button
-              style={{
-                fontSize: "11px",
-                padding: "3px 8px",
-                background: "transparent",
-                border: "1px solid var(--border)",
-                color: "var(--text-secondary)",
-                borderRadius: "4px",
-                cursor: "pointer",
-                width: "auto",
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowEditPanel(false);
-              }}
-              onMouseDown={stopNodeDrag}
-              className="nodrag"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 流程锁定提示 */}
-      {isLocked && data.lockReason && (
-        <div
-          style={{
-            marginTop: "6px",
-            fontSize: "10px",
-            color: "#888",
-            padding: "4px 6px",
-            background: "rgba(255,255,255,0.03)",
-            borderRadius: "4px",
-            border: "1px solid #333",
-            display: "flex",
-            alignItems: "center",
-            gap: "4px",
-          }}
-        >
-          <Lock size={10} strokeWidth={2} />
-          <span>{data.lockReason}</span>
-        </div>
-      )}
-
-      {/* 一键生成按钮 */}
-      {showGenerateBtn && (
-        <button
-          style={{
-            ...btnStyle,
-            marginTop: "6px",
-            ...(isLocked
-              ? { opacity: 0.4, cursor: "not-allowed", background: "#333" }
-              : {}),
-          }}
-          disabled={isLocked}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!isLocked) data.onGenerate?.(premise, genre);
-          }}
-          onMouseDown={stopNodeDrag}
-          onMouseOver={(e) => {
-            if (!isLocked)
-              (e.currentTarget as HTMLButtonElement).style.background = "var(--accent)";
-          }}
-          onMouseOut={(e) => {
-            if (!isLocked)
-              (e.currentTarget as HTMLButtonElement).style.background = "var(--accent-dim)";
-          }}
-          className="nodrag"
-        >
-          {data.generateLabel}
-        </button>
-      )}
-
-      <Handle type="source" position={Position.Right} />
-    </div>
-  );
-}
-
-/** 视频异步任务轮询：每 3 秒查询一次，直到完成或失败 */
-async function pollVideoTask(pollUrl: string): Promise<ProgressEvent> {
-  while (true) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const resp = await fetch(pollUrl);
-    if (!resp.ok) {
-      throw new Error(`轮询失败: ${resp.status}`);
-    }
-    const evt: ProgressEvent = await resp.json();
-    if (evt.status === "completed" || evt.status === "failed") {
-      return evt;
-    }
-  }
-}
-
-const NODE_WIDTH = 280;
-
-function nodeHeight(node: Node<DramaNodeData>): number {
-  if (node.id === "start") return 280;
-  if (node.data.videoUrl) return 240;
-  if (node.data.imageUrl) return 220;
-  if (node.data.audioUrl) return 170;
-  if (node.data.qualitySummary) return 180;
-  return 160;
-}
-
-function getLayoutedElements(nodes: Node<DramaNodeData>[], edges: Edge[]) {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 120 });
-
-  nodes.forEach((node) => {
-    g.setNode(node.id, { width: NODE_WIDTH, height: nodeHeight(node) });
-  });
-
-  edges.forEach((edge) => {
-    g.setEdge(edge.source, edge.target);
-  });
-
-  dagre.layout(g);
-
-  const layoutedNodes = nodes.map((node) => {
-    const layoutNode = g.node(node.id);
-    return {
-      ...node,
-      position: {
-        x: layoutNode.x - NODE_WIDTH / 2,
-        y: layoutNode.y - nodeHeight(node) / 2,
-      },
-    };
-  });
-
-  return { nodes: layoutedNodes, edges };
+      prevCountRef.current = ids.length;
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [nodesKey, updateNodeDimensions, instance]);
+  return null;
 }
 
 export default function Canvas() {
-  // 从 store 获取所有数据与方法
   const scriptData = useDramaStore((s) => s.scriptData);
   const storyboards = useDramaStore((s) => s.storyboards);
   const videos = useDramaStore((s) => s.videos);
@@ -595,18 +121,17 @@ export default function Canvas() {
   const setQualityData = useDramaStore((s) => s.setQualityData);
   const setVisualQualityData = useDramaStore((s) => s.setVisualQualityData);
   const setStatusInfo = useDramaStore((s) => s.setStatusInfo);
+  const projectStyle = useDramaStore((s) => s.projectStyle);
+  const setProjectStyle = useDramaStore((s) => s.setProjectStyle);
   const globalLoading = useDramaStore((s) => s.globalLoading);
-  const globalLoadingText = useDramaStore((s) => s.globalLoadingText);
   const startGlobalLoading = useDramaStore((s) => s.startGlobalLoading);
   const stopGlobalLoading = useDramaStore((s) => s.stopGlobalLoading);
 
-  // 当前打开预览面板的角色 ID
   const [activePreviewCharacterId, setActivePreviewCharacterId] = useState<string | null>(null);
-  // 当前打开的通用节点详情面板
   const [activeDetailNode, setActiveDetailNode] = useState<{
     id: string;
     type: string;
-    onGenerate?: () => void;
+    onGenerate?: (options: ScriptGenerateOptions) => void;
   } | null>(null);
 
   const [nodes, setNodes] = useState<Node<DramaNodeData>[]>([
@@ -625,31 +150,49 @@ export default function Canvas() {
   ]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
-  // loading 状态管理
   const [loadingMap, setLoadingMap] = useState<
     Record<string, { loading: boolean; text: string }>
   >({});
 
-  // 角色定妆照与提示词从持久化的 store 读取，刷新后状态不丢失
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleCanvasMouseMove = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    el.style.setProperty("--mx", `${x}%`);
+    el.style.setProperty("--my", `${y}%`);
+  }, []);
+
   const characterCards = useDramaStore((s) => s.characterCards);
   const addCharacterCard = useDramaStore((s) => s.addCharacterCard);
-  const characterCardImages = Object.fromEntries(
-    characterCards.map((c) => {
-      const imgs = c.reference_images || {};
-      const firstUrl = imgs.front || imgs.portrait || Object.values(imgs)[0] || "";
-      return [c.character_id, firstUrl];
-    })
+  const characterCardImages = useMemo(
+    () =>
+      Object.fromEntries(
+        characterCards.map((c) => {
+          const imgs = c.reference_images || {};
+          const firstUrl = imgs.front || imgs.portrait || Object.values(imgs)[0] || "";
+          return [c.character_id, firstUrl];
+        })
+      ),
+    [characterCards]
   );
-  const characterPrompts = Object.fromEntries(
-    characterCards
-      .filter((c) => c.used_prompts)
-      .map((c) => [
-        c.character_id,
-        {
-          positive: c.used_prompts!.positive_prompt,
-          negative: c.used_prompts!.negative_prompt,
-        },
-      ])
+  const characterPrompts = useMemo(
+    () =>
+      Object.fromEntries(
+        characterCards
+          .filter((c) => c.used_prompts)
+          .map((c) => [
+            c.character_id,
+            {
+              positive: c.used_prompts!.positive_prompt,
+              negative: c.used_prompts!.negative_prompt,
+            },
+          ])
+      ),
+    [characterCards]
   );
 
   const setLoading = useCallback((id: string, text: string) => {
@@ -679,7 +222,21 @@ export default function Canvas() {
     []
   );
 
-  // 批量生成所有缺失分镜，利用多 GPU 并行
+  const handleNodeClick = useCallback(
+    (_: ReactMouseEvent, node: Node<DramaNodeData>) => {
+      if (node.data.type === "character" && node.id.startsWith("char-")) {
+        setActivePreviewCharacterId(node.id.replace("char-", ""));
+        return;
+      }
+      setActiveDetailNode({
+        id: node.id,
+        type: node.data.type,
+        onGenerate: node.data.onGenerate,
+      });
+    },
+    []
+  );
+
   const handleGenerateAllStoryboards = useCallback(async () => {
     if (globalLoading || !scriptData) return;
     const pending = scriptData.scenes.filter(
@@ -696,7 +253,7 @@ export default function Canvas() {
       const resp = await generateStoryboardBatch({
         scenes: pending,
         characters: scriptData.characters,
-        style: "写实电影感",
+        style: projectStyle,
       });
       if (resp.success && resp.data) {
         resp.data.results.forEach((r) => addStoryboard(r));
@@ -726,7 +283,6 @@ export default function Canvas() {
     addStoryboard,
   ]);
 
-  // 批量生成所有缺失视频，利用多 GPU 并行
   const handleGenerateAllVideos = useCallback(async () => {
     if (globalLoading || !scriptData) return;
     const pending = scriptData.scenes
@@ -793,28 +349,45 @@ export default function Canvas() {
     addVideo,
   ]);
 
-  // 剧本/分镜/视频/配音/字幕/成片/质检数据变化时重建节点图
   useEffect(() => {
-    // ---- 一键生成处理函数（在 effect 内定义，保证闭包捕获最新数据） ----
-
-    // 创意输入 → 生成剧本
-    const handleGenerateScript = async (premise?: string, genre?: string) => {
+    const handleGenerateScript = async (options?: ScriptGenerateOptions) => {
       if (globalLoading) return;
-      const p = premise || "";
-      const g = genre || "都市悬疑";
-      if (!p.trim()) {
+      if (!options) {
+        setStatusInfo("生成参数缺失");
+        return;
+      }
+      const { premise, genre, episodes, scenes_per_episode, style, aspect_ratio } = options;
+      if (!premise.trim()) {
         setStatusInfo("请输入创意");
         return;
       }
+      if (!genre.trim()) {
+        setStatusInfo("请输入题材");
+        return;
+      }
+      if (episodes === "" || scenes_per_episode === "") {
+        setStatusInfo("请设置集数与每集分镜数");
+        return;
+      }
+      if (!style) {
+        setStatusInfo("请选择视觉风格");
+        return;
+      }
+      if (!aspect_ratio) {
+        setStatusInfo("请选择画幅比例");
+        return;
+      }
+      // 同步项目级风格与画幅到 store，供后续角色/分镜/视频生成使用
+      setProjectStyle(style);
       startGlobalLoading("正在生成剧本...");
       setLoading("start", "正在生成剧本...");
       setStatusInfo("正在生成剧本...");
       try {
         const resp = await generateScript({
-          premise: p,
-          genre: g,
-          episodes: 1,
-          scenes_per_episode: 3,
+          premise,
+          genre,
+          episodes: Math.max(1, Math.min(100, episodes)),
+          scenes_per_episode: Math.max(1, Math.min(30, scenes_per_episode)),
         });
         if (resp.success && resp.data) {
           setScriptData(resp.data);
@@ -832,22 +405,23 @@ export default function Canvas() {
       }
     };
 
-    // 角色 → 打开预览面板（默认流程）或直接生成（节点上自定义提示词重新生成）
+    const handleResetScript = () => {
+      setScriptData(null);
+      setStatusInfo("已重置，请输入新创意");
+    };
+
     const handleGenerateCharacter = (
       char: CharacterData,
       customPositive?: string,
       customNegative?: string
     ) => {
       if (customPositive && customPositive.trim()) {
-        // 节点上直接编辑提示词后重新生成：绕过预览，直接生成
         generateCharacterDirect(char, customPositive, customNegative || "");
         return;
       }
-      // 正常流程：打开预览面板，先 AI 调研，再用户确认生成
       setActivePreviewCharacterId(char.character_id);
     };
 
-    // 角色 → 直接生成定妆照（自定义提示词模式）
     const generateCharacterDirect = async (
       char: CharacterData,
       customPositive: string,
@@ -861,7 +435,7 @@ export default function Canvas() {
       try {
         const resp = await generateCharacter({
           character: char,
-          style: "写实电影感",
+          style: projectStyle,
           consistency_level: "L3",
           custom_positive_prompt: customPositive,
           custom_negative_prompt: customNegative,
@@ -880,12 +454,10 @@ export default function Canvas() {
       }
     };
 
-    // 应用角色生成结果到 store（持久化）
     const applyCharacterResult = (charId: string, data: CharacterCardData) => {
       addCharacterCard(data);
     };
 
-    // 场景 → 生成分镜
     const handleGenerateStoryboard = async (scene: SceneData) => {
       if (globalLoading) return;
       const nodeId = `scene-${scene.scene_id}`;
@@ -896,7 +468,7 @@ export default function Canvas() {
         const resp = await generateStoryboard({
           scene,
           characters: scriptData?.characters || [],
-          style: "写实电影感",
+          style: projectStyle,
         });
         if (resp.success && resp.data) {
           addStoryboard(resp.data);
@@ -912,7 +484,6 @@ export default function Canvas() {
       }
     };
 
-    // 分镜 → 生成视频（异步 + 轮询）
     const handleGenerateVideo = async (
       sceneId: number,
       imageUrl: string,
@@ -959,7 +530,6 @@ export default function Canvas() {
       }
     };
 
-    // 视频 → 生成配音（自动从场景台词提取对白）
     const handleGenerateVoice = async (scene: SceneData) => {
       if (globalLoading) return;
       const nodeId = `voice-${scene.scene_id}`;
@@ -1006,7 +576,6 @@ export default function Canvas() {
       }
     };
 
-    // 配音 → 生成字幕
     const handleGenerateSubtitle = async (
       sceneId: number,
       audioUrl: string
@@ -1038,7 +607,6 @@ export default function Canvas() {
       }
     };
 
-    // 合成成片
     const handleComposeVideo = async () => {
       if (globalLoading) return;
       const nodeId = "edit-final";
@@ -1089,7 +657,6 @@ export default function Canvas() {
       }
     };
 
-    // 一键质检
     const handleCheckQuality = async () => {
       if (globalLoading) return;
       const nodeId = "quality-final";
@@ -1124,7 +691,6 @@ export default function Canvas() {
       }
     };
 
-    // 视觉质检
     const handleCheckVisualQuality = async () => {
       if (globalLoading) return;
       const nodeId = "visual-quality-final";
@@ -1160,7 +726,6 @@ export default function Canvas() {
       }
     };
 
-    // ---- 构建节点 ----
     const loadingFor = (id: string) => loadingMap[id]?.loading || false;
     const loadingTextFor = (id: string) => loadingMap[id]?.text || "";
 
@@ -1169,26 +734,52 @@ export default function Canvas() {
         id: "start",
         type: "custom",
         position: { x: 100, y: 200 },
-        data: {
-          label: "创意输入",
-          type: "script",
-          detail: scriptData
-            ? `已生成: ${scriptData.title}`
-            : "输入一句话创意，一键生成剧本",
-          isScriptInput: true,
-          hasGenerated: !!scriptData,
-          generateLabel: scriptData ? "重新生成剧本" : "生成剧本",
-          loading: loadingFor("start"),
-          loadingText: loadingTextFor("start"),
-          onGenerate: handleGenerateScript,
-        },
+        data: scriptData
+          ? {
+              label: "重新创作",
+              type: "script",
+              detail: "点击重置并输入新的创意",
+              isEditInput: true,
+              hasGenerated: false,
+              generateLabel: "新建剧本",
+              loading: loadingFor("start"),
+              loadingText: loadingTextFor("start"),
+              onGenerate: handleResetScript,
+            }
+          : {
+              label: "创意输入",
+              type: "script",
+              detail: "输入一句话创意，一键生成剧本",
+              isScriptInput: true,
+              hasGenerated: false,
+              generateLabel: "生成剧本",
+              loading: loadingFor("start"),
+              loadingText: loadingTextFor("start"),
+              onGenerate: handleGenerateScript,
+            },
       },
     ];
 
     const newEdges: Edge[] = [];
 
+    const addEdgeWithAnim = (
+      id: string,
+      source: string,
+      target: string,
+      handles?: { sourceHandle?: string; targetHandle?: string }
+    ) => {
+      const isFlowing = loadingFor(target);
+      newEdges.push({
+        id,
+        source,
+        target,
+        ...handles,
+        animated: isFlowing,
+        type: "smoothstep",
+      });
+    };
+
     if (scriptData) {
-      // 剧本节点
       newNodes.push({
         id: "script",
         type: "custom",
@@ -1197,12 +788,26 @@ export default function Canvas() {
           label: `剧本: ${scriptData.title}`,
           type: "script",
           detail: `${scriptData.total_episodes} 集 | ${scriptData.scenes.length} 分镜 | ${scriptData.characters.length} 角色`,
+          preview: scriptData.genre
+            ? `题材：${scriptData.genre}。${scriptData.scenes[0]?.description || ""}`
+            : scriptData.scenes[0]?.description,
+          tags: [
+            scriptData.genre,
+            `${scriptData.total_episodes} 集`,
+            `${scriptData.scenes.length} 分镜`,
+            `${scriptData.characters.length} 角色`,
+          ].filter(Boolean) as string[],
+          meta: [
+            { label: "题材", value: scriptData.genre || "—" },
+            { label: "场景数", value: String(scriptData.scenes.length) },
+            { label: "角色数", value: String(scriptData.characters.length) },
+            { label: "集数", value: String(scriptData.total_episodes) },
+          ],
           hasGenerated: true,
         },
       });
-      newEdges.push({ id: "e-start-script", source: "start", target: "script" });
+      addEdgeWithAnim("e-start-script", "start", "script");
 
-      // 角色节点
       scriptData.characters.forEach((char) => {
         const charId = `char-${char.character_id}`;
         const img = characterCardImages[char.character_id];
@@ -1214,14 +819,23 @@ export default function Canvas() {
           data: {
             label: `角色: ${char.name}`,
             type: "character",
-            detail: `${char.role} | ${char.age || "?"}岁`,
+            detail: char.description || `${char.role} · ${char.age ? `${char.age}岁` : ""}`,
+            preview: char.personality
+              ? `${char.personality}。${char.description}`
+              : char.description,
+            tags: [char.role, char.age ? `${char.age}岁` : undefined].filter(Boolean) as string[],
+            meta: [
+              { label: "身份", value: char.role || "—" },
+              { label: "年龄", value: char.age ? `${char.age}岁` : "—" },
+              { label: "状态", value: img ? "定妆照已生成" : "待生成定妆照" },
+            ],
             imageUrl: img,
             hasGenerated: !!img,
+            statusText: img ? "定妆照已生成" : "待生成定妆照",
             generateLabel: img ? "重新生成定妆照" : "生成定妆照",
             loading: loadingFor(charId),
             loadingText: loadingTextFor(charId),
             onGenerate: () => handleGenerateCharacter(char),
-            // 已生成时提供提示词编辑能力
             ...(prompts
               ? {
                   editablePrompts: prompts,
@@ -1231,26 +845,25 @@ export default function Canvas() {
               : {}),
           },
         });
-        newEdges.push({
-          id: `e-script-${charId}`,
-          source: "script",
-          target: charId,
-        });
+        addEdgeWithAnim(`e-script-${charId}`, "script", charId);
       });
 
-      // 分镜/视频/配音/字幕节点
       const storyboardMap = new Map(storyboards.map((s) => [s.scene_id, s]));
       const videoMap = new Map(videos.map((v) => [v.scene_id, v]));
       const voiceMap = new Map(voices.map((v) => [v.scene_id, v]));
       const subtitleMap = new Map(subtitles.map((s) => [s.scene_id, s]));
 
-      // 流程控制：所有角色定妆照生成后才能生成分镜
       const allCharactersHaveImages = scriptData.characters.every(
         (c) => !!characterCardImages[c.character_id]
       );
 
-      scriptData.scenes.slice(0, 5).forEach((scene) => {
+      scriptData.scenes.slice(0, 3).forEach((scene) => {
         const sb = storyboardMap.get(scene.scene_id);
+        const vd = videoMap.get(scene.scene_id);
+        const vc = voiceMap.get(scene.scene_id);
+        const st = subtitleMap.get(scene.scene_id);
+        const hasVoiceAudio = !!(vc && vc.audio_urls.length > 0);
+
         const sceneId = `scene-${scene.scene_id}`;
         newNodes.push({
           id: sceneId,
@@ -1260,11 +873,23 @@ export default function Canvas() {
             label: `分镜 ${scene.scene_id}: ${scene.shot_type}`,
             type: "storyboard",
             detail:
-              scene.description.length > 40
-                ? scene.description.slice(0, 40) + "..."
+              scene.description.length > 60
+                ? scene.description.slice(0, 60) + "…"
                 : scene.description,
+            preview: scene.dialogue
+              ? `「${scene.dialogue}」${scene.character_actions ? ` · ${scene.character_actions}` : ""}`
+              : scene.character_actions
+              ? scene.character_actions
+              : scene.description,
+            tags: [
+              scene.shot_type,
+              scene.emotion,
+              scene.camera_movement,
+              `${scene.duration_seconds}s`,
+            ].filter(Boolean) as string[],
             imageUrl: sb?.image_url,
             hasGenerated: !!sb,
+            statusText: sb ? "分镜图已生成" : "待生成分镜图",
             generateLabel: sb ? "重新生成分镜" : "生成分镜",
             canGenerate: allCharactersHaveImages,
             lockReason: allCharactersHaveImages
@@ -1275,118 +900,139 @@ export default function Canvas() {
             onGenerate: () => handleGenerateStoryboard(scene),
           },
         });
-        newEdges.push({
-          id: `e-script-${sceneId}`,
-          source: "script",
-          target: sceneId,
+        addEdgeWithAnim(`e-script-${sceneId}`, "script", sceneId);
+
+        // 视频节点：始终展示，未生成时显示预览与锁定原因
+        const videoNodeId = `video-${scene.scene_id}`;
+        newNodes.push({
+          id: videoNodeId,
+          type: "custom",
+          position: { x: 1300, y: 100 },
+          data: {
+            label: `视频 ${scene.scene_id}`,
+            type: "video",
+            detail: vd
+              ? `已生成 (${vd.duration_seconds}s)`
+              : `Wan 2.2 I2V · ${scene.duration_seconds}s`,
+            preview: vd
+              ? `分辨率 1080x1920 · ${vd.duration_seconds || scene.duration_seconds}s`
+              : sb
+              ? `基于分镜图生成 ${scene.duration_seconds}s 视频：${(scene.description || "").slice(0, 60)}${(scene.description || "").length > 60 ? "…" : ""}`
+              : `基于分镜图生成 ${scene.duration_seconds}s 视频：${(scene.description || "").slice(0, 60)}${(scene.description || "").length > 60 ? "…" : ""}`,
+            tags: ["Wan 2.2 I2V", `${scene.duration_seconds || 3}s`].filter(Boolean) as string[],
+            meta: [
+              { label: "模型", value: "Wan 2.2 I2V" },
+              { label: "时长", value: `${vd?.duration_seconds || scene.duration_seconds || 0}s` },
+              { label: "分辨率", value: "1080x1920" },
+              { label: "状态", value: vd ? "已生成" : "待生成" },
+            ],
+            videoUrl: vd?.video_url,
+            hasGenerated: !!vd,
+            statusText: vd ? "视频已生成" : "待生成视频",
+            generateLabel: vd ? "重新生成视频" : "生成视频",
+            canGenerate: !!sb,
+            lockReason: sb ? undefined : "请先生成该场景分镜图",
+            loading: loadingFor(videoNodeId),
+            loadingText: loadingTextFor(videoNodeId),
+            onGenerate: sb
+              ? () =>
+                  handleGenerateVideo(
+                    scene.scene_id,
+                    sb.image_url,
+                    scene.prompt || sb.prompt_used,
+                    scene.negative_prompt
+                  )
+              : undefined,
+          },
         });
+        addEdgeWithAnim(`e-${sceneId}-${videoNodeId}`, sceneId, videoNodeId);
 
-        // 视频节点（分镜生成后出现）
-        if (sb) {
-          const vd = videoMap.get(scene.scene_id);
-          const videoNodeId = `video-${scene.scene_id}`;
-          newNodes.push({
-            id: videoNodeId,
-            type: "custom",
-            position: { x: 1300, y: 100 },
-            data: {
-              label: `视频 ${scene.scene_id}`,
-              type: "video",
-              detail: vd
-                ? `已生成 (${vd.duration_seconds}s)`
-                : `Wan 2.2 I2V · ${scene.duration_seconds}s`,
-              videoUrl: vd?.video_url,
-              hasGenerated: !!vd,
-              generateLabel: vd ? "重新生成视频" : "生成视频",
-              loading: loadingFor(videoNodeId),
-              loadingText: loadingTextFor(videoNodeId),
-              onGenerate: () =>
-                handleGenerateVideo(
-                  scene.scene_id,
-                  sb.image_url,
-                  scene.prompt || sb.prompt_used,
-                  scene.negative_prompt
-                ),
-            },
-          });
-          newEdges.push({
-            id: `e-${sceneId}-${videoNodeId}`,
-            source: sceneId,
-            target: videoNodeId,
-          });
+        // 配音节点：始终展示
+        const voiceNodeId = `voice-${scene.scene_id}`;
+        newNodes.push({
+          id: voiceNodeId,
+          type: "custom",
+          position: { x: 1300, y: 320 },
+          data: {
+            label: `配音 ${scene.scene_id}`,
+            type: "voice",
+            detail: vc
+              ? `edge-tts · ${vc.total_lines} 条`
+              : "edge-tts 自动提取对白",
+            preview: vc
+              ? `已生成 ${vc.total_lines} 条语音。${scene.dialogue ? `对白：${scene.dialogue.length > 60 ? scene.dialogue.slice(0, 60) + "…" : scene.dialogue}` : ""}`
+              : scene.dialogue
+              ? `待生成配音 · 对白：${scene.dialogue.length > 80 ? scene.dialogue.slice(0, 80) + "…" : scene.dialogue}`
+              : "待生成后展示对白摘要",
+            tags: ["edge-tts", vc ? `${vc.total_lines} 条` : undefined].filter(Boolean) as string[],
+            meta: [
+              { label: "引擎", value: "edge-tts" },
+              { label: "台词数", value: vc ? `${vc.total_lines} 条` : "—" },
+              { label: "状态", value: vc ? "已生成" : "待生成" },
+            ],
+            audioUrl: vc?.audio_urls[0]?.audio_url,
+            hasGenerated: !!vc,
+            statusText: vc ? "配音已生成" : "待生成配音",
+            generateLabel: vc ? "重新生成配音" : "生成配音",
+            canGenerate: !!vd,
+            lockReason: vd ? undefined : "请先生成该场景视频",
+            loading: loadingFor(voiceNodeId),
+            loadingText: loadingTextFor(voiceNodeId),
+            onGenerate: () => handleGenerateVoice(scene),
+          },
+        });
+        addEdgeWithAnim(`e-${videoNodeId}-${voiceNodeId}`, videoNodeId, voiceNodeId);
 
-          // 配音节点（视频生成后出现）
-          if (vd) {
-            const vc = voiceMap.get(scene.scene_id);
-            const voiceNodeId = `voice-${scene.scene_id}`;
-            newNodes.push({
-              id: voiceNodeId,
-              type: "custom",
-              position: { x: 1300, y: 320 },
-              data: {
-                label: `配音 ${scene.scene_id}`,
-                type: "voice",
-                detail: vc
-                  ? `edge-tts · ${vc.total_lines} 条`
-                  : "edge-tts 自动提取对白",
-                audioUrl: vc?.audio_urls[0]?.audio_url,
-                hasGenerated: !!vc,
-                generateLabel: vc ? "重新生成配音" : "生成配音",
-                loading: loadingFor(voiceNodeId),
-                loadingText: loadingTextFor(voiceNodeId),
-                onGenerate: () => handleGenerateVoice(scene),
-              },
-            });
-            newEdges.push({
-              id: `e-${videoNodeId}-${voiceNodeId}`,
-              source: videoNodeId,
-              target: voiceNodeId,
-            });
-
-            // 字幕节点（配音生成后出现）
-            if (vc && vc.audio_urls.length > 0) {
-              const st = subtitleMap.get(scene.scene_id);
-              const subtitleNodeId = `subtitle-${scene.scene_id}`;
-              const subtitlePreview = st
-                ? st.segments
-                    .slice(0, 3)
-                    .map((seg) => seg.text)
-                    .join(" / ")
-                : "";
-              newNodes.push({
-                id: subtitleNodeId,
-                type: "custom",
-                position: { x: 1600, y: 320 },
-                data: {
-                  label: `字幕 ${scene.scene_id}`,
-                  type: "subtitle",
-                  detail: st
-                    ? `faster-whisper (${st.language}) · ${st.segments.length} 段`
-                    : "faster-whisper ASR",
-                  subtitleText: subtitlePreview,
-                  hasGenerated: !!st,
-                  generateLabel: st ? "重新生成字幕" : "生成字幕",
-                  loading: loadingFor(subtitleNodeId),
-                  loadingText: loadingTextFor(subtitleNodeId),
-                  onGenerate: () =>
-                    handleGenerateSubtitle(
-                      scene.scene_id,
-                      vc.audio_urls[0].audio_url
-                    ),
-                },
-              });
-              newEdges.push({
-                id: `e-${voiceNodeId}-${subtitleNodeId}`,
-                source: voiceNodeId,
-                target: subtitleNodeId,
-              });
-            }
-          }
-        }
+        // 字幕节点：始终展示
+        const subtitleNodeId = `subtitle-${scene.scene_id}`;
+        const subtitlePreview = st
+          ? st.segments
+              .slice(0, 3)
+              .map((seg) => seg.text)
+              .join(" / ")
+          : scene.dialogue
+          ? scene.dialogue.length > 80
+            ? scene.dialogue.slice(0, 80) + "…"
+            : scene.dialogue
+          : "";
+        newNodes.push({
+          id: subtitleNodeId,
+          type: "custom",
+          position: { x: 1600, y: 320 },
+          data: {
+            label: `字幕 ${scene.scene_id}`,
+            type: "subtitle",
+            detail: st
+              ? `faster-whisper (${st.language}) · ${st.segments.length} 段`
+              : "faster-whisper ASR",
+            preview: subtitlePreview || "待生成后展示字幕片段",
+            tags: ["faster-whisper", st ? `${st.segments.length} 段` : undefined, st?.language].filter(Boolean) as string[],
+            meta: [
+              { label: "引擎", value: "faster-whisper" },
+              { label: "语言", value: st?.language || "—" },
+              { label: "段数", value: st ? `${st.segments.length} 段` : "—" },
+              { label: "状态", value: st ? "已生成" : "待生成" },
+            ],
+            subtitleText: subtitlePreview,
+            hasGenerated: !!st,
+            statusText: st ? "字幕已生成" : "待生成字幕",
+            generateLabel: st ? "重新生成字幕" : "生成字幕",
+            canGenerate: hasVoiceAudio,
+            lockReason: hasVoiceAudio ? undefined : "请先生成该场景配音",
+            loading: loadingFor(subtitleNodeId),
+            loadingText: loadingTextFor(subtitleNodeId),
+            onGenerate: hasVoiceAudio
+              ? () =>
+                  handleGenerateSubtitle(
+                    scene.scene_id,
+                    vc.audio_urls[0].audio_url
+                  )
+              : undefined,
+          },
+        });
+        addEdgeWithAnim(`e-${voiceNodeId}-${subtitleNodeId}`, voiceNodeId, subtitleNodeId);
       });
 
-      // 成片节点（有完整素材时出现）
-      // 流程控制：所有场景的视频+配音+字幕都完成才能合成成片
       const allScenesReady = scriptData.scenes.every((s) => {
         const v = videoMap.get(s.scene_id);
         const voice = voiceMap.get(s.scene_id);
@@ -1395,12 +1041,8 @@ export default function Canvas() {
           !!v && !!voice && voice.audio_urls.length > 0 && !!sub
         );
       });
-      const hasReadyScenes = videos.some((v) => {
-        const voice = voices.find((vo) => vo.scene_id === v.scene_id);
-        const subtitle = subtitles.find((s) => s.scene_id === v.scene_id);
-        return voice && voice.audio_urls.length > 0 && subtitle;
-      });
-      if (hasReadyScenes) {
+      const hasAnyVideo = videos.length > 0;
+      if (hasAnyVideo || editData) {
         newNodes.push({
           id: "edit-final",
           type: "custom",
@@ -1411,8 +1053,23 @@ export default function Canvas() {
             detail: editData
               ? `${editData.segments_count} 场景 | ${editData.duration_seconds.toFixed(1)}s`
               : "合成视频+配音+字幕",
+            tags: editData
+              ? ["成片", `${editData.segments_count} 场景`, `${editData.duration_seconds.toFixed(1)}s`]
+              : ["待合成"],
+            meta: editData
+              ? [
+                  { label: "场景数", value: `${editData.segments_count}` },
+                  { label: "总时长", value: `${editData.duration_seconds.toFixed(1)}s` },
+                  { label: "分辨率", value: "1080x1920" },
+                  { label: "状态", value: "已合成" },
+                ]
+              : [
+                  { label: "输入", value: "视频+配音+字幕" },
+                  { label: "状态", value: "待合成" },
+                ],
             videoUrl: editData?.final_video_url,
             hasGenerated: !!editData,
+            statusText: editData ? "成片已合成" : "待合成成片",
             generateLabel: editData ? "重新合成成片" : "合成成片",
             canGenerate: allScenesReady,
             lockReason: allScenesReady
@@ -1423,56 +1080,70 @@ export default function Canvas() {
             onGenerate: handleComposeVideo,
           },
         });
-        // 从字幕节点连向成片
-        subtitles.forEach((sub) => {
-          newEdges.push({
-            id: `e-subtitle-${sub.scene_id}-edit`,
-            source: `subtitle-${sub.scene_id}`,
-            target: "edit-final",
-          });
+        scriptData.scenes.slice(0, 3).forEach((s) => {
+          addEdgeWithAnim(
+            `e-subtitle-${s.scene_id}-edit`,
+            `subtitle-${s.scene_id}`,
+            "edit-final"
+          );
         });
       }
 
-      // 质检节点（流程控制：成片合成后才能质检）
-      const qualitySummary = qualityData
-        ? `质量分 ${qualityData.score} | ${qualityData.issues.length} 问题`
-        : "台词一致性 / 剧情逻辑 / 敏感词";
-      const qualityIssuesPreview = qualityData
-        ? qualityData.issues
-            .slice(0, 3)
-            .map(
-              (i) => `[${i.severity}] ${i.message}`
-            )
-            .join("\n")
-        : "";
-      newNodes.push({
-        id: "quality-final",
-        type: "custom",
-        position: { x: 400, y: 500 },
-        data: {
-          label: qualityData ? `质检: ${qualityData.title}` : "剧本质检",
-          type: "quality",
-          detail: qualityData
-            ? `已检查 | 质量分 ${qualityData.score}`
-            : "一键质检",
-          qualitySummary,
-          qualityIssues: qualityIssuesPreview,
-          hasGenerated: !!qualityData,
-          generateLabel: qualityData ? "重新质检" : "一键质检",
-          canGenerate: !!editData,
-          lockReason: editData ? undefined : "请先合成成片",
-          loading: loadingFor("quality-final"),
-          loadingText: loadingTextFor("quality-final"),
-          onGenerate: handleCheckQuality,
-        },
-      });
-      newEdges.push({
-        id: "e-script-quality",
-        source: "script",
-        target: "quality-final",
-      });
+      // 质检节点：仅在已合成成片或已有质检结果时显示，避免空节点过度扩张画布
+      if (editData || qualityData) {
+        const qualitySummary = qualityData
+          ? `质量分 ${qualityData.score} | ${qualityData.issues.length} 问题`
+          : "台词一致性 / 剧情逻辑 / 敏感词";
+        const qualityIssuesPreview = qualityData
+          ? qualityData.issues
+              .slice(0, 3)
+              .map(
+                (i) => `[${i.severity}] ${i.message}`
+              )
+              .join("\n")
+          : "";
+        newNodes.push({
+          id: "quality-final",
+          type: "custom",
+          position: { x: 400, y: 500 },
+          data: {
+            label: qualityData ? `质检: ${qualityData.title}` : "剧本质检",
+            type: "quality",
+            detail: qualityData
+              ? `已检查 | 质量分 ${qualityData.score}`
+              : "一键质检",
+            tags: qualityData
+              ? [`质量分 ${qualityData.score}`, `${qualityData.issues.length} 问题`]
+              : ["剧本 / 字幕"],
+            meta: qualityData
+              ? [
+                  { label: "质量分", value: `${qualityData.score}` },
+                  { label: "问题数", value: `${qualityData.issues.length}` },
+                  { label: "严重", value: `${qualityData.issues.filter((i) => i.severity === "critical").length}` },
+                  { label: "状态", value: "已检查" },
+                ]
+              : [
+                  { label: "检查项", value: "台词 / 逻辑 / 敏感词" },
+                  { label: "状态", value: "待检查" },
+                ],
+            qualitySummary,
+            qualityIssues: qualityIssuesPreview,
+            hasGenerated: !!qualityData,
+            statusText: qualityData ? "质检完成" : "待质检",
+            generateLabel: qualityData ? "重新质检" : "一键质检",
+            canGenerate: !!editData,
+            lockReason: editData ? undefined : "请先合成成片",
+            loading: loadingFor("quality-final"),
+            loadingText: loadingTextFor("quality-final"),
+            onGenerate: handleCheckQuality,
+          },
+        });
+        addEdgeWithAnim("e-script-quality", "script", "quality-final", {
+          sourceHandle: "source-bottom",
+          targetHandle: "target-top",
+        });
+      }
 
-      // 视觉质检节点（有视频时出现）
       if (videos.length > 0) {
         const vqSummary = visualQualityData
           ? `质量分 ${visualQualityData.score} | 场景 ${visualQualityData.scene_id}`
@@ -1495,25 +1166,38 @@ export default function Canvas() {
             detail: visualQualityData
               ? `已检查 | 质量分 ${visualQualityData.score}`
               : "视频画面质检",
+            tags: visualQualityData
+              ? [`质量分 ${visualQualityData.score}`, `场景 ${visualQualityData.scene_id}`]
+              : ["画面 / 一致性"],
+            meta: visualQualityData
+              ? [
+                  { label: "场景", value: `场景 ${visualQualityData.scene_id}` },
+                  { label: "质量分", value: `${visualQualityData.score}` },
+                  { label: "问题数", value: `${visualQualityData.issues.length}` },
+                  { label: "状态", value: "已检查" },
+                ]
+              : [
+                  { label: "检查项", value: "角色 / 连贯性" },
+                  { label: "状态", value: "待检查" },
+                ],
             qualitySummary: vqSummary,
             qualityIssues: vqIssuesPreview,
             hasGenerated: !!visualQualityData,
+            statusText: visualQualityData ? "视觉质检完成" : "待视觉质检",
             generateLabel: visualQualityData ? "重新视觉质检" : "视觉质检",
             loading: loadingFor("visual-quality-final"),
             loadingText: loadingTextFor("visual-quality-final"),
             onGenerate: handleCheckVisualQuality,
           },
         });
-        // 从第一个视频节点连向视觉质检
-        newEdges.push({
-          id: "e-video-visual-quality",
-          source: `video-${videos[0].scene_id}`,
-          target: "visual-quality-final",
-        });
+        addEdgeWithAnim(
+          "e-video-visual-quality",
+          `video-${videos[0].scene_id}`,
+          "visual-quality-final"
+        );
       }
     }
 
-    // 全局生成状态锁定：任一 Agent 生成中时，所有带 generateLabel 的节点禁止触发
     const lockedNodes = newNodes.map((node) => {
       if (!globalLoading || !node.data.generateLabel) return node;
       return {
@@ -1544,6 +1228,8 @@ export default function Canvas() {
     loadingMap,
     characterCards,
     addCharacterCard,
+    projectStyle,
+    setProjectStyle,
     globalLoading,
     setScriptData,
     addStoryboard,
@@ -1560,6 +1246,8 @@ export default function Canvas() {
     stopGlobalLoading,
   ]);
 
+  const nodesKey = useMemo(() => nodes.map((n) => n.id).join(","), [nodes]);
+
   return (
     <>
       {activePreviewCharacterId && (
@@ -1572,124 +1260,69 @@ export default function Canvas() {
         <NodeDetailPanel
           nodeId={activeDetailNode.id}
           type={activeDetailNode.type}
+          data={nodes.find((n) => n.id === activeDetailNode.id)?.data}
           onGenerate={activeDetailNode.onGenerate}
           onClose={() => setActiveDetailNode(null)}
         />
       )}
-      <div className="sidebar">
-        <div className="sidebar-title">节点面板</div>
-        <div className="node-palette">
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-script)" }}></span>
-            剧本节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-character)" }}></span>
-            角色节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-storyboard)" }}></span>
-            分镜节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-video)" }}></span>
-            视频节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-voice)" }}></span>
-            配音节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-subtitle)" }}></span>
-            字幕节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-edit)" }}></span>
-            成片节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-quality)" }}></span>
-            质检节点
-          </div>
-          <div className="node-palette-item">
-            <span className="node-dot" style={{ background: "var(--node-visual-quality)" }}></span>
-            视觉质检节点
-          </div>
+
+      <div
+        className="canvas-container"
+        ref={canvasContainerRef}
+        onMouseMove={handleCanvasMouseMove}
+      >
+        <div className="canvas-spotlight" />
+        <div className="react-flow-wrapper">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={handleNodeClick}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.06, maxZoom: 0.85, minZoom: 0.35, duration: 600 }}
+            maxZoom={1.2}
+            minZoom={0.35}
+            defaultEdgeOptions={{
+              style: { stroke: "var(--border-medium)", strokeWidth: 2 },
+              type: "smoothstep",
+              animated: false,
+            }}
+            proOptions={{ hideAttribution: false }}
+          >
+            <Background
+              variant={BackgroundVariant.Dots}
+              color="#c8bca7"
+              gap={24}
+              size={1.5}
+            />
+            <Controls showInteractive={false} position="bottom-left" />
+            <NodeInternalsUpdater nodesKey={nodesKey} />
+          </ReactFlow>
         </div>
 
-        <div className="sidebar-title" style={{ marginTop: "16px" }}>
-          批量生成
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <button
-            style={{
-              ...btnStyle,
-              fontSize: "12px",
-              ...(globalLoading ? { opacity: 0.4, cursor: "not-allowed", background: "#333" } : {}),
-            }}
-            disabled={globalLoading}
-            onClick={handleGenerateAllStoryboards}
-            className="nodrag"
-          >
-            生成全部分镜（多 GPU）
-          </button>
-          <button
-            style={{
-              ...btnStyle,
-              fontSize: "12px",
-              ...(globalLoading ? { opacity: 0.4, cursor: "not-allowed", background: "#333" } : {}),
-            }}
-            disabled={globalLoading}
-            onClick={handleGenerateAllVideos}
-            className="nodrag"
-          >
-            生成全部视频（多 GPU）
-          </button>
-        </div>
       </div>
 
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onNodeClick={(_, node) => {
-          if (node.data.type === "character" && node.id.startsWith("char-")) {
-            setActivePreviewCharacterId(node.id.replace("char-", ""));
-            return;
-          }
-          setActiveDetailNode({
-            id: node.id,
-            type: node.data.type,
-            onGenerate: node.data.onGenerate,
-          });
-        }}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.2 }}
-      >
-        <Background color="#2a2a2a" gap={20} />
-        <Controls />
-        <MiniMap
-          nodeColor={(node) => {
-            const type = (node.data as DramaNodeData)?.type;
-            const map: Record<string, string> = {
-              script: "#4a6fa5",
-              character: "#a54a6f",
-              storyboard: "#4aa57a",
-              video: "#a57a4a",
-              voice: "#6b4aa5",
-              subtitle: "#4aa5a5",
-              edit: "#a54a4a",
-              quality: "#a5a54a",
-              visual_quality: "#7a4aa5",
-            };
-            return map[type] || "#8a6b4a";
-          }}
-          maskColor="rgba(26,26,26,0.8)"
-        />
-      </ReactFlow>
+      <div className="floating-actions">
+        <button
+          className="floating-btn"
+          disabled={globalLoading || !scriptData}
+          onClick={handleGenerateAllStoryboards}
+        >
+          <ImageIcon size={13} strokeWidth={2.2} />
+          批量生成分镜
+        </button>
+        <button
+          className="floating-btn"
+          disabled={globalLoading || storyboards.length === 0}
+          onClick={handleGenerateAllVideos}
+        >
+          <Film size={13} strokeWidth={2.2} />
+          批量生成视频
+        </button>
+      </div>
     </>
   );
 }

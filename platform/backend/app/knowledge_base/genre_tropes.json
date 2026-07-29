@@ -1,0 +1,366 @@
+{
+  "version": "1.0.0",
+  "description": "短剧/影视剧类型片叙事镜头模板与套路库",
+  "entries": [
+    {
+      "id": "trope_boss_romance_confrontation",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "霸总对峙/壁咚",
+      "content": "CEO romance confrontation: tall male lead in tailored suit, intense eye contact, cornering the female lead against a wall or floor-to-ceiling window, city night lights behind them, low angle on male, high contrast Rembrandt lighting, power imbalance, tension, cinematic close-up to medium shot.",
+      "tags": ["霸总", "对峙", "壁咚", "总裁", "权力", "紧张"],
+      "negative_terms": ["casual", "poor", "rural", "cartoon", "bright", "cheerful"],
+      "recommended_loras": [
+        {
+          "style_key": "realistic_film",
+          "filename": "Cinematic_Photography_style_v1.safetensors",
+          "trigger_words": ["Cinematic Photography style"],
+          "weight": 0.75
+        }
+      ],
+      "style_intensity": 0.75,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_sweet_cafe_date",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "甜宠咖啡馆约会",
+      "content": "sweet romance cafe date: young couple sitting across a small table, afternoon golden hour light through windows, soft bokeh, gentle smiles, close-up with shallow depth of field, warm pastel tones, heartwarming atmosphere, natural skin tones.",
+      "tags": ["甜宠", "约会", "咖啡馆", "暖光", "情侣", "温馨"],
+      "negative_terms": ["dark", "violent", "sad", "horror", "gloomy"],
+      "style_intensity": 0.55,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_campus_confession_rooftop",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "校园天台告白",
+      "content": "campus rooftop confession: two students standing by the railing, wind gently blowing hair, cherry blossom petals drifting, backlight silhouette turning to close-up, soft morning light, pastel blue-white color palette, youthful romance, gentle bokeh.",
+      "tags": ["校园", "天台", "告白", "青春", "樱花", "逆光"],
+      "negative_terms": ["horror", "dark", "violent", "gore", "cyberpunk"],
+      "recommended_loras": [
+        {
+          "style_key": "campus_youth",
+          "filename": "Youthful_Campus_Style.safetensors",
+          "trigger_words": ["DK_style"],
+          "weight": 0.75
+        }
+      ],
+      "style_intensity": 0.55,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_wuxia_bamboo_forest_duel",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "古风仙侠竹林对决",
+      "content": "wuxia bamboo forest duel: two swordsmen in flowing robes clashing mid-air, bamboo leaves flying, sword energy trails, lateral tracking shot, misty atmosphere, desaturated teal-green grading, dynamic poses, ethereal martial arts, cinematic composition.",
+      "tags": ["古风", "仙侠", "竹林", "对决", "武侠", "飘逸"],
+      "negative_terms": ["modern", "urban", "cyberpunk", "sci-fi", "western", "cartoon"],
+      "style_intensity": 0.8,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_palace_power_struggle",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "宫廷权谋对峙",
+      "content": "palace power struggle: figures in elaborate hanfu standing in a grand candle-lit hall, long table between them, court officials in background, static long take, golden-red palette, flickering candlelight, tense atmosphere, low-key dramatic lighting.",
+      "tags": ["宫廷", "权谋", "古装", "汉服", "对峙", "烛光"],
+      "negative_terms": ["modern", "western", "casual", "cartoon", "sci-fi"],
+      "style_intensity": 0.75,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_urban_suspense_chase",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "都市悬疑雨夜追凶",
+      "content": "urban suspense night chase: protagonist running through rainy neon-lit streets, reflections on wet pavement, handheld camera with subtle shake, medium tracking shot, dark suspense thriller, desaturated teal-orange grading, flickering street lamps, tension.",
+      "tags": ["都市悬疑", "雨夜", "追逐", "霓虹", "手持", "惊悚"],
+      "negative_terms": ["bright", "sunny", "cheerful", "cartoon", "anime"],
+      "style_intensity": 0.85,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_noir_detective_office",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "黑色电影侦探办公室",
+      "content": "film noir detective office: rainy night, venetian blind shadows slicing the room, private detective sitting in deep shadow, scattered papers and cigarette butts on desk, slow dolly in, black and white high contrast, 1940s urban, dramatic shadows.",
+      "tags": ["黑色电影", "侦探", "办公室", "百叶窗", "推镜", "雨夜"],
+      "negative_terms": ["color", "bright", "sunny", "cartoon", "anime", "pastel"],
+      "style_intensity": 0.85,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_cyberpunk_street_chase",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "赛博朋克街头追逐",
+      "content": "cyberpunk street chase: protagonist sprinting through a neon-lit alley at night, heavy rain, FPV drone shot, blue and purple neon reflections on wet pavement, fast motion, volumetric fog, high contrast, Blade Runner aesthetic, dynamic camera.",
+      "tags": ["赛博朋克", "追逐", "雨夜", "霓虹", "FPV", "未来"],
+      "negative_terms": ["natural daylight", "countryside", "medieval", "pastel", "soft light"],
+      "style_intensity": 0.9,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_horror_jumpscare_corridor",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "恐怖 jump scare 走廊",
+      "content": "horror jumpscare corridor: abandoned hallway, flickering fluorescent lights, wheelchair or debris in corner, distant blurry white figure slowly appearing, handheld camera pushing forward, low-key lighting, desaturated high contrast, ominous shadows, tense color grading.",
+      "tags": ["恐怖", "jump scare", "走廊", "医院", "手持", "惊悚"],
+      "negative_terms": ["bright", "cheerful", "colorful", "sunny", "cartoon", "anime"],
+      "style_intensity": 0.85,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_comedy_slapstick_entrance",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "喜剧夸张登场",
+      "content": "comedy slapstick entrance: character bursting through a door with exaggerated expression, bright saturated colors, sunny daylight, sitcom lighting, high-key, wide medium shot, comedic timing pose, props flying, cheerful atmosphere.",
+      "tags": ["喜剧", "夸张", "登场", "情景喜剧", "明快", "搞笑"],
+      "negative_terms": ["dark", "horror", "gloomy", "desaturated", "violent"],
+      "style_intensity": 0.6,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_family_emotional_reunion",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "家庭伦理情感重逢",
+      "content": "family emotional reunion: warm interior, natural window light, two family members facing each other, subtle emotional expressions, handheld documentary feel, neutral color grading, everyday life details, tender but restrained atmosphere.",
+      "tags": ["家庭", "伦理", "重逢", "情感", "自然光", "纪录片感"],
+      "negative_terms": ["fantasy", "sci-fi", "horror", "cartoon"],
+      "recommended_loras": [
+        {
+          "style_key": "documentary",
+          "filename": "Black_White_Documentary_Photo.safetensors",
+          "trigger_words": ["documentary", "black and white photography"],
+          "weight": 0.6
+        },
+        {
+          "style_key": "realistic_film",
+          "filename": "Cinematic_Photography_style_v1.safetensors",
+          "trigger_words": ["Cinematic Photography style"],
+          "weight": 0.55
+        }
+      ],
+      "style_intensity": 0.5,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_historical_war_battlefield",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "古装战场/千军万马",
+      "content": "historical war battlefield: ancient armies clashing on an open plain, dust rising, banners waving, wide aerial shot, horses galloping, armor and spears, overcast sky, epic cinematic scale, muted earth tones, dramatic atmosphere.",
+      "tags": ["古装", "战场", "战争", "千军万马", "航拍", "史诗"],
+      "negative_terms": ["modern", "urban", "sci-fi", "cartoon", "anime"],
+      "recommended_loras": [
+        {
+          "style_key": "palace_hanfu",
+          "filename": "Tangfeng_Netidol_Face_Hanfu.safetensors",
+          "trigger_words": ["chinese palace", "Hanfu dress"],
+          "weight": 0.75
+        },
+        {
+          "style_key": "ancient_fantasy",
+          "filename": "xianxia_ancient_chinese.safetensors",
+          "trigger_words": ["xianxia", "Hanfu dress"],
+          "weight": 0.7
+        }
+      ],
+      "style_intensity": 0.8,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_supernatural_ghost_reveal",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "灵异现身/鬼影浮现",
+      "content": "supernatural ghost reveal: dimly lit room, mirror or window reflecting a pale figure, slow push-in, foggy atmosphere, desaturated blue-green tint, ominous shadows, sudden reflection change, horror thriller mood.",
+      "tags": ["灵异", "鬼影", "镜子", "浮现", "恐怖", "惊悚"],
+      "negative_terms": ["bright", "sunny", "cheerful", "cartoon", "anime"],
+      "recommended_loras": [
+        {
+          "style_key": "horror",
+          "filename": "Silent_Hill_Horror_Style.safetensors",
+          "trigger_words": ["horror style"],
+          "weight": 0.85
+        },
+        {
+          "style_key": "film_noir",
+          "filename": "Film_Noir_1940s_Style.safetensors",
+          "trigger_words": ["Film Noir", "1940's"],
+          "weight": 0.6
+        }
+      ],
+      "style_intensity": 0.85,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_workplace_power_play",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "职场权谋/办公室博弈",
+      "content": "workplace power play: modern glass office, executives in sharp suits around a conference table, intense stares, low angle shot, cold blue-white lighting, reflections on glass walls, tension, professional hierarchy.",
+      "tags": ["职场", "权谋", "办公室", "西装", "博弈", "现代"],
+      "negative_terms": ["casual", "rural", "cartoon", "pastel", "medieval"],
+      "recommended_loras": [
+        {
+          "style_key": "realistic_film",
+          "filename": "Cinematic_Photography_style_v1.safetensors",
+          "trigger_words": ["Cinematic Photography style"],
+          "weight": 0.75
+        }
+      ],
+      "style_intensity": 0.7,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_immortal_tribulation",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "仙侠渡劫/天雷",
+      "content": "xianxia heavenly tribulation: cultivator in white robes floating in stormy sky, lightning bolts striking down, swirling clouds, magical aura, wide dramatic shot, purple and gold light effects, ethereal fantasy atmosphere, cinematic scale.",
+      "tags": ["仙侠", "渡劫", "天雷", "修仙", "特效", "奇幻"],
+      "negative_terms": ["modern", "urban", "sci-fi", "western", "cartoon"],
+      "recommended_loras": [
+        {
+          "style_key": "ancient_fantasy",
+          "filename": "xianxia_ancient_chinese.safetensors",
+          "trigger_words": ["xianxia", "Hanfu dress"],
+          "weight": 0.9
+        }
+      ],
+      "style_intensity": 0.9,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_revenge_face_slap",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "复仇打脸/身份揭露",
+      "content": "revenge face-slap reveal: protagonist walking into a lavish banquet room, crowd turning in shock, slow-motion entrance, spotlight on protagonist, arrogant antagonist in foreground, dramatic music-visual mood, confident posture, high contrast lighting.",
+      "tags": ["复仇", "打脸", "身份揭露", "宴会", "慢动作", "爽剧"],
+      "negative_terms": ["casual", "poor", "rural", "cartoon", "anime"],
+      "recommended_loras": [
+        {
+          "style_key": "retro_hongkong",
+          "filename": "Hong_Kong_Action_Cinema_Style.safetensors",
+          "trigger_words": ["Hong Kong action cinema style"],
+          "weight": 0.75
+        },
+        {
+          "style_key": "realistic_film",
+          "filename": "Cinematic_Photography_style_v1.safetensors",
+          "trigger_words": ["Cinematic Photography style"],
+          "weight": 0.65
+        }
+      ],
+      "style_intensity": 0.75,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_medical_emergency",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "医疗急救/手术室外",
+      "content": "medical emergency scene: hospital corridor, doctors and nurses rushing with gurney, flashing emergency lights, frantic family members, handheld chaotic camera, cool sterile lighting, tense atmosphere, shallow depth of field on faces.",
+      "tags": ["医疗", "急救", "医院", "紧张", " handheld", "现代"],
+      "negative_terms": ["cartoon", "anime", "medieval", "pastel", "cheerful"],
+      "recommended_loras": [
+        {
+          "style_key": "realistic_film",
+          "filename": "Cinematic_Photography_style_v1.safetensors",
+          "trigger_words": ["Cinematic Photography style"],
+          "weight": 0.75
+        }
+      ],
+      "style_intensity": 0.7,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_apocalyptic_survivor",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "末日废土幸存者",
+      "content": "post-apocalyptic survivor: lone figure in tattered coat walking through ruined city, dust storms, overcast sky, earth tones, rust and debris, wide desolate shot, gritty texture, survival mood, cinematic atmosphere.",
+      "tags": ["末日", "废土", "幸存者", "废墟", "沙尘", "荒凉"],
+      "negative_terms": ["clean", "modern city", "bright", "cheerful", "cartoon"],
+      "recommended_loras": [
+        {
+          "style_key": "post_apocalyptic",
+          "filename": "Vast_Post_Apocalyptic_Wasteland.safetensors",
+          "trigger_words": ["VPAW", "a vast post-apocalyptic wasteland"],
+          "weight": 0.85
+        }
+      ],
+      "style_intensity": 0.8,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_historical_flower_bath_romance",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "古风沐浴/花瓣浴调情",
+      "content": "historical bath romance: steamy wooden bath chamber, flower petals floating on water, silk robes half-draped, warm candlelight, intimate atmosphere, close-up on hands or shoulders, soft focus, romantic tension.",
+      "tags": ["古风", "沐浴", "花瓣", "浪漫", "烛光", "亲密"],
+      "negative_terms": ["modern", "western", "sci-fi", "cartoon", "nsfw"],
+      "recommended_loras": [
+        {
+          "style_key": "palace_hanfu",
+          "filename": "Tangfeng_Netidol_Face_Hanfu.safetensors",
+          "trigger_words": ["chinese palace", "Hanfu dress"],
+          "weight": 0.75
+        }
+      ],
+      "style_intensity": 0.65,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    },
+    {
+      "id": "trope_school_bully_retaliation",
+      "category": "genre_trope",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "校园霸凌反击",
+      "content": "school bully retaliation: classroom or corridor confrontation, protagonist standing up to bullies, crowd of students in background, low angle on protagonist, determined expression, soft natural daylight, tense but hopeful atmosphere.",
+      "tags": ["校园", "霸凌", "反击", "青春", "对峙", "励志"],
+      "negative_terms": ["horror", "gore", "dark", "violent", "cyberpunk"],
+      "recommended_loras": [
+        {
+          "style_key": "campus_youth",
+          "filename": "Youthful_Campus_Style.safetensors",
+          "trigger_words": ["DK_style"],
+          "weight": 0.8
+        }
+      ],
+      "style_intensity": 0.6,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan"]
+    }
+  ]
+}

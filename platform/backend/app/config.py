@@ -73,23 +73,27 @@ class Settings(BaseSettings):
     llm_l4_temperature: float = 0.9
     llm_l4_timeout: float = 180.0  # 90s/300 token，3000 token 约 9 分钟
 
-    # 向后兼容字段（保留给老代码引用，指向 L1）
+    # 向后兼容字段（保留给老代码引用，剧本/角色/分镜等交互 Agent 走 L1 初稿层）
+    # 2026-07-27 修正：workstation :8000 已切换为 Nemotron-3-Nano-Omni-30B（vLLM），
+    # 仅服务 qwen3.6-uncensored（~63tok/s）；GLM-5.2 在 EXO 实测 ~7tok/s 交互不可用，
+    # GLM-5.2/Kimi-K2.7 精修走 llm_l2/l3 配置（EXO 109:52415）
     exo_base_url: str = "http://192.168.71.127:8000/v1"
     exo_api_key: str = "not-needed"
-    exo_model_glm52: str = "mlx-community/GLM-5.2-fp8"
-    exo_model_kimi: str = "mlx-community/Kimi-K2.7-Code-4bit"
+    exo_model_glm52: str = "qwen3.6-uncensored"
+    exo_model_kimi: str = "qwen3.6-uncensored"
 
     # ====================================================================
-    # 视觉质检模型（已部署到 workstation GPU3）
-    # 2026-07-24 部署：vllm BF16，served-model-name=qwen3-vl-30b-thinking，占 83.5GB
+    # 视觉质检模型
+    # 2026-07-27 修正：GPU3 已切换为 Nemotron-3-Nano-Omni-30B（全模态 vLLM :8000），
+    # 原 qwen3-vl-30b-thinking :8200 服务已下线，视觉质检改走 Nemotron alias
     # ====================================================================
-    visual_model_url: str = "http://192.168.71.127:8200/v1"
-    visual_model_name: str = "qwen3-vl-30b-thinking"
+    visual_model_url: str = "http://192.168.71.127:8000/v1"
+    visual_model_name: str = "qwen3.6-uncensored"
 
     # ====================================================================
-    # ComfyUI 集群（LB 入口 8188, 6 个后端轮询）
+    # ComfyUI 集群（LB 入口 8188）
+    # 5 后端轮询：本地 GPU0/1/2 (8189-8191) + pc01(:8188 v0.28.0) + pc02(:8193)；GPU3 已让给 Nemotron-3-Nano-Omni-30B
     # AGENTS.md 硬规则: 禁止直连单卡 8189-8192
-    # 后端: 本地 GPU0-3 (8189-8192 v0.27) + pc01 (8188 v0.25) + pc02 (8193)
     # ====================================================================
     comfyui_image_hq: str = "http://192.168.71.127:8188"
     comfyui_image_fast: str = "http://192.168.71.127:8188"
@@ -101,12 +105,13 @@ class Settings(BaseSettings):
 
     # ====================================================================
     # TTS 配音（ToIV 项目 IndexTTS2 共用）
-    # 2026-07-24 管家确认：workstation:9200, GPU3, 与 LLM 不冲突
+    # workstation:9200, GPU0 (cuda:0), systemd 托管（2026-07-27 变更）
     # 备注: root 路径返回 404 正常, 需查实际 API 路径
     # ====================================================================
     tts_backend: str = "indextts"  # 'indextts' (ToIV 共用) / 'cosyvoice' / 'edge'
-    # IndexTTS-2 服务（workstation:9200, ToIV 共用, GPU3）
-    indextts_endpoint: str = "http://192.168.71.127:9200/v1"
+    # IndexTTS-2 服务（workstation:9200, ToIV 共用）
+    # 2026-07-27 修正：真实契约为 POST /tts (multipart) 返回 WAV，非 OpenAI /v1/audio/speech
+    indextts_endpoint: str = "http://192.168.71.127:9200"
     indextts_model: str = "IndexTTS-2"
     indextts_timeout: float = 60.0
     # 备选: CosyVoice 2-0.5B zero-shot 克隆（待部署到独立端口）
@@ -158,7 +163,7 @@ class Settings(BaseSettings):
     xdit_steps: int = 20
     xdit_cfg: float = 6.0
     xdit_seed: int = 0
-    xdit_request_timeout: float = 600.0
+    xdit_request_timeout: float = 1800.0
     xdit_poll_interval: float = 3.0
 
     # ====================================================================
@@ -235,10 +240,17 @@ class Settings(BaseSettings):
     # AICG-DownLoader 配置路径（相对于项目根目录）
     downloader_config_path: str = "config.json"
 
+    # ====================================================================
+    # 内置 RAG 提示词优化
+    # ====================================================================
+    rag_optimize_enabled: bool = True
+    rag_embed_model: str = "BAAI/bge-small-zh-v1.5"
+    rag_top_k: int = 5
+
     # 后端服务
     backend_host: str = "0.0.0.0"
     backend_port: int = 8100
-    cors_origins: str = "http://localhost:8085,http://localhost:5173,http://localhost:1420"
+    cors_origins: str = "http://localhost:3501,http://localhost:3508,http://localhost:3509,http://localhost:8085,http://localhost:5173,http://localhost:1420"
 
     # 运行时填充
     downloader_config: DownloaderConfig | None = None

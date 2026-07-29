@@ -1,14 +1,18 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
 import { useDramaStore } from "./store/useDramaStore";
 import type { ScriptData } from "./api/client";
 
 // 限定查询到 topbar，避免与 Canvas 节点面板的同名按钮冲突
 const getTopbar = () => {
-  const title = screen.getByText("AI 短剧工作台 — M4 原型");
+  const title = screen.getByText("AI 短剧工作台");
   return title.closest(".topbar") as HTMLElement;
 };
-const topbarBtn = (text: string) => within(getTopbar()).getByText(text);
+/** 展开"流程"下拉菜单并返回菜单容器（顶栏按钮已收纳进下拉） */
+const openFlowMenu = () => {
+  fireEvent.click(within(getTopbar()).getByText("操作流程"));
+  return getTopbar().querySelector(".dropdown-menu") as HTMLElement;
+};
 
 const sampleScript: ScriptData = {
   project_id: "p1",
@@ -27,29 +31,31 @@ describe("App", () => {
 
   it("renders topbar and initial status", () => {
     render(<App />);
-    expect(screen.getByText("AI 短剧工作台 — M4 原型")).toBeInTheDocument();
+    expect(screen.getByText("AI 短剧工作台")).toBeInTheDocument();
     expect(screen.getByText("就绪")).toBeInTheDocument();
   });
 
   it("disables downstream buttons before script generation", () => {
     render(<App />);
-    expect(topbarBtn("生成角色")).toBeDisabled();
-    expect(topbarBtn("生成分镜")).toBeDisabled();
-    expect(topbarBtn("生成视频")).toBeDisabled();
-    expect(topbarBtn("生成配音")).toBeDisabled();
-    expect(topbarBtn("生成字幕")).toBeDisabled();
-    expect(topbarBtn("质检")).toBeDisabled();
-    expect(topbarBtn("视觉质检")).toBeDisabled();
-    expect(topbarBtn("合成成片")).toBeDisabled();
-    expect(topbarBtn("生成剧本")).not.toBeDisabled();
+    const menu = openFlowMenu();
+    expect(within(menu).getByText("生成角色")).toBeDisabled();
+    expect(within(menu).getByText("生成分镜")).toBeDisabled();
+    expect(within(menu).getByText("生成视频")).toBeDisabled();
+    expect(within(menu).getByText("生成配音")).toBeDisabled();
+    expect(within(menu).getByText("生成字幕")).toBeDisabled();
+    expect(within(menu).getByText("剧本质检")).toBeDisabled();
+    expect(within(menu).getByText("视觉质检")).toBeDisabled();
+    expect(within(menu).getByText("合成成片")).toBeDisabled();
+    expect(within(getTopbar()).getByText("新建剧本")).not.toBeDisabled();
   });
 
   it("enables character/storyboard/voice/quality buttons after script is set", () => {
     useDramaStore.getState().setScriptData(sampleScript);
     render(<App />);
-    expect(topbarBtn("生成角色")).not.toBeDisabled();
-    expect(topbarBtn("生成分镜")).not.toBeDisabled();
-    expect(topbarBtn("生成配音")).not.toBeDisabled();
-    expect(topbarBtn("质检")).not.toBeDisabled();
+    const menu = openFlowMenu();
+    expect(within(menu).getByText("生成角色")).not.toBeDisabled();
+    expect(within(menu).getByText("生成分镜")).not.toBeDisabled();
+    expect(within(menu).getByText("生成配音")).not.toBeDisabled();
+    expect(within(menu).getByText("剧本质检")).not.toBeDisabled();
   });
 });

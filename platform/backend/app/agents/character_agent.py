@@ -41,6 +41,7 @@ from app.models.schemas import (
     CharacterRequest,
 )
 from app.services.image_service import FluxPuLIDService, HunyuanImageService
+from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
 
@@ -63,22 +64,24 @@ PROMPT_SYSTEM = """你是角色设计专家。根据中文角色描述，生成�
 - 三视图保持角色一致性（同一个人不同角度）
 - **每个提示词必须以 "1girl, solo, single person, only one person" 或 "1boy, solo, single person, only one person" 开头**（根据角色性别选择），确保画面中只有一个人
 - 不要在提示词中加入 "multiple views", "2girls", "3girls", "group" 等多人相关词汇
-- 反向提示词必须具体且充实，包含：multiple people, group, crowd, low quality, worst quality, deformed, ugly, blurry, bad anatomy, bad hands, missing fingers, extra digits, text, watermark, signature
+- 背景强制使用中性摄影棚背景："simple neutral gray studio background, soft rim lighting"，禁止户外/街道/店铺等具体场景，避免与剧情分镜背景冲突
+- 反向提示词必须具体且充实，包含：multiple people, group, crowd, low quality, worst quality, deformed, ugly, blurry, bad anatomy, bad hands, missing fingers, extra digits, text, watermark, signature, outdoor, street, shop interior, complex background
 - JSON 字符串值中的双引号必须用 \" 转义，不要使用未转义的英文双引号
 - 如果需要引用文字，请用中文引号「」或单引号
 - 直接输出纯 JSON，不要用 markdown 代码块包裹
 """
 
-# 强制追加的正面提示词（确保单人和高质量）
-POSITIVE_SUFFIX = ", solo, single person, only one person, portrait, looking at viewer, best quality, masterpiece, highly detailed skin, detailed facial features, sharp focus, professional photography, cinematic lighting, depth of field"
+# 强制追加的正面提示词（确保单人和高质量 + 中性摄影棚背景）
+POSITIVE_SUFFIX = ", solo, single person, only one person, portrait, looking at viewer, simple neutral gray studio background, soft rim lighting, best quality, masterpiece, highly detailed skin, detailed facial features, sharp focus, professional photography, cinematic lighting, depth of field"
 
-# 强制追加的负面提示词（排除多人和低质量）
-NEGATIVE_SUFFIX = ", multiple people, group, crowd, 2girls, 3girls, 4girls, multiple views, split screen, text, watermark, signature, low quality, worst quality, deformed, ugly, blurry, bad anatomy, bad hands, missing fingers, extra digits, cropped, out of frame, duplicate, clone"
+# 强制追加的负面提示词（排除多人和低质量 + 排除复杂背景）
+NEGATIVE_SUFFIX = ", multiple people, group, crowd, 2girls, 3girls, 4girls, multiple views, split screen, text, watermark, signature, outdoor, street, shop interior, complex background, cluttered background, low quality, worst quality, deformed, ugly, blurry, bad anatomy, bad hands, missing fingers, extra digits, cropped, out of frame, duplicate, clone"
 
 # 默认反向提示词（当 LLM 未返回或返回空时使用）
 DEFAULT_NEGATIVE_PROMPT = (
     "multiple people, group, crowd, 2girls, 3girls, 4girls, multiple views, split screen, "
-    "text, watermark, signature, low quality, worst quality, deformed, ugly, blurry, "
+    "text, watermark, signature, outdoor, street, shop interior, complex background, "
+    "low quality, worst quality, deformed, ugly, blurry, "
     "bad anatomy, bad hands, missing fingers, extra digits, cropped, out of frame, "
     "duplicate, clone, bad proportions, malformed limbs"
 )
@@ -424,12 +427,56 @@ class CharacterAgent(BaseAgent):
         negative = data.get("negative_prompt", "")
         if not negative or not negative.strip():
             negative = DEFAULT_NEGATIVE_PROMPT
-        return {
+
+        prompts = {
             "front_view_prompt": front,
             "side_view_prompt": data.get("side_view_prompt") or front,
             "closeup_prompt": data.get("closeup_prompt") or front,
             "negative_prompt": negative,
         }
+
+        # RAG 增强：基于角色设计知识库优化三视图提示词
+        if settings.rag_optimize_enabled:
+            prompts = await self._rag_optimize_prompts(prompts, style)
+
+        return prompts
+
+    async def _rag_optimize_prompts(
+        self,
+        prompts: dict[str, str],
+        style: str,
+    ) -> dict[str, str]:
+        """使用 RAG 优化角色三视图提示词，保持单人约束。"""
+        views = [
+            ("front_view_prompt", "front view character portrait"),
+            ("side_view_prompt", "side profile character portrait"),
+            ("closeup_prompt", "close-up face portrait"),
+        ]
+        optimized_negative = ""
+        result = dict(prompts)
+
+        for key, view_hint in views:
+            positive = prompts.get(key, "").strip()
+            if not positive:
+                continue
+            try:
+                opt = await rag_service.optimize_prompt(
+                    user_prompt=positive,
+                    domain="image",
+                    style_hint=style or None,
+                    extra_instruction=f"{view_hint}, keep solo single person only one person, photorealistic character",
+                )
+                if opt.get("optimized_positive"):
+                    result[key] = opt["optimized_positive"]
+                if not optimized_negative and opt.get("optimized_negative"):
+                    optimized_negative = opt["optimized_negative"]
+            except Exception as e:
+                logger.warning("角色 %s RAG 优化失败，保留原提示词: %s", key, e)
+
+        if optimized_negative:
+            result["negative_prompt"] = optimized_negative
+
+        return result
 
     async def _generate_image_via_service(
         self,

@@ -80,6 +80,9 @@ interface DramaState {
   postprocesses: PostprocessData[];
   statusInfo: string;
 
+  /** 项目级全局视觉风格，影响角色、分镜、视频生成 */
+  projectStyle: string;
+
   /** 全局生成状态：任一 Agent 生成中为 true，禁用所有生成按钮 */
   globalLoading: boolean;
   globalLoadingText: string;
@@ -110,6 +113,9 @@ interface DramaState {
   addLipSync: (data: LipSyncData) => void;
   addPostprocess: (data: PostprocessData) => void;
   setStatusInfo: (info: string) => void;
+
+  /** 项目级全局视觉风格 */
+  setProjectStyle: (style: string) => void;
 
   /** 全局生成状态 */
   startGlobalLoading: (text: string) => void;
@@ -157,6 +163,7 @@ const initialState = {
   lipSyncs: [],
   postprocesses: [],
   statusInfo: "就绪",
+  projectStyle: "写实电影感",
   globalLoading: false,
   globalLoadingText: "",
   characterPreviews: {},
@@ -273,6 +280,8 @@ export const useDramaStore = create<DramaState>()(
         })),
 
       setStatusInfo: (info) => set({ statusInfo: info }),
+
+      setProjectStyle: (style) => set({ projectStyle: style }),
 
       startGlobalLoading: (text) =>
         set({ globalLoading: true, globalLoadingText: text }),

@@ -49,6 +49,7 @@ from app.models.schemas import (
 )
 from app.services.image_service import FluxPuLIDService, HunyuanImageService
 from app.services.ltx_video_service import LTXVideoService
+from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
 
@@ -59,27 +60,39 @@ PROMPT_SYSTEM = """你是分镜设计专家。根据中文场景描述，生成�
 
 输出 JSON：
 {
-  "prompt": "英文正面提示词（含画质关键词、场景、光线、构图、角色动作）",
+  "prompt": "英文正面提示词（含画质关键词、场景、光线、构图、角色外观、角色动作）",
   "negative_prompt": "英文反向提示词"
 }
 
 要求：
-- 提示词要包含：场景环境、光线氛围、角色位置与动作、镜头语言（特写/近景/中景/远景）
+- 提示词必须完整覆盖中文 description 中的所有视觉要素：场景环境、关键道具、光线氛围、出场角色外观（发色/服装/表情）、角色动作、镜头语言
+- 若输入中包含 characters 角色描述，必须将出场角色的核心外观特征（服装、发型、气质）翻译并嵌入 prompt，确保跨场景角色一致
 - 画质关键词：cinematic, 8k UHD, photorealistic, professional photography, film still
-- 竖屏 9:16 构图
+- 彩色画面：默认生成彩色，明确写入 "full color, vivid color grading"，禁止黑白/单色
+- 镜头语言：shot_type 对应的英文（close-up / medium shot / wide shot / over-the-shoulder shot）
+- 竖屏 9:16 构图，主体置于画面下 2/3 区域
+- 禁止出现可读文字：场景中可能出现招牌/屏幕文字时，写 "blurred illegible signage, no readable text" 并在 negative_prompt 加入 "legible text, letters, alphabet, signage with text"
 - JSON 字符串值中的双引号必须用 \\" 转义
 - 直接输出纯 JSON，不要用 markdown 代码块包裹
+
+反例（过于简略，禁止）：
+"cinematic 8k detailed convenience store interior high contrast"
+
+正例（细节完整）：
+"cinematic medium shot, late-night convenience store interior, dim yellow fluorescent lighting, young Chinese female clerk with shoulder-length black wavy hair in white t-shirt and blue denim jacket standing behind checkout counter, staring at surveillance monitor, eerie tension, full color, photorealistic, 8k UHD, blurred illegible signage, no readable text"
 """
 
-# 强制追加的正面提示词（确保高质量）
-POSITIVE_SUFFIX = ", cinematic, 8k UHD, photorealistic, professional photography, film still, best quality, masterpiece, highly detailed, sharp focus, depth of field"
+# 强制追加的正面提示词（确保高质量与彩色风格）
+POSITIVE_SUFFIX = ", cinematic, 8k UHD, photorealistic, professional photography, film still, best quality, masterpiece, highly detailed, sharp focus, depth of field, full color, vivid color grading"
 
 # 强制追加的负面提示词
-NEGATIVE_SUFFIX = ", text, watermark, signature, low quality, worst quality, deformed, ugly, blurry, bad anatomy, bad hands, missing fingers, extra digits, cropped, out of frame, duplicate, clone"
+NEGATIVE_SUFFIX = ", text, watermark, signature, logo, legible text, letters, alphabet, black and white, monochrome, grayscale, low quality, worst quality, deformed, ugly, blurry, bad anatomy, bad hands, missing fingers, extra digits, cropped, out of frame, duplicate, clone"
 
 # 默认反向提示词（当 LLM 未返回或返回空时使用）
 DEFAULT_NEGATIVE_PROMPT = (
-    "text, watermark, signature, low quality, worst quality, deformed, ugly, blurry, "
+    "text, watermark, signature, logo, legible text, letters, alphabet, "
+    "black and white, monochrome, grayscale, "
+    "low quality, worst quality, deformed, ugly, blurry, "
     "bad anatomy, bad hands, missing fingers, extra digits, cropped, out of frame, "
     "duplicate, clone, bad proportions, malformed limbs"
 )
@@ -202,16 +215,22 @@ class StoryboardAgent(BaseAgent):
             if reference:
                 logger.info("分镜 Agent 搜索到参考资料: %d 字符", len(reference))
 
-            # Step 2: 确定英文提示词
-            if scene.prompt:
-                positive = scene.prompt
-                negative = scene.negative_prompt or DEFAULT_NEGATIVE_PROMPT
-            else:
-                prompts = await self._generate_prompts(scene, request.characters, request.style, reference)
-                positive = prompts.get("prompt", "")
-                negative = prompts.get("negative_prompt", DEFAULT_NEGATIVE_PROMPT)
-                if not positive:
-                    raise RuntimeError("LLM 未返回分镜提示词")
+            # Step 2: 始终通过 LLM 重写英文提示词
+            # 原因：剧本 LLM 生成的 scene.prompt 通常过于简略（只有画质关键词），
+            # 缺少场景细节与角色外观，直接喂给图像模型会丢失剧情要素。
+            # 这里强制融合 scene.description + characters + scene.prompt 重新构造，
+            # 确保分镜图与剧本描述一致。
+            prompts = await self._generate_prompts(
+                scene, request.characters, request.style, reference
+            )
+            positive = prompts.get("prompt") or scene.prompt or ""
+            negative = (
+                prompts.get("negative_prompt")
+                or scene.negative_prompt
+                or DEFAULT_NEGATIVE_PROMPT
+            )
+            if not positive:
+                raise RuntimeError("LLM 未返回分镜提示词")
 
             # Step 3: 按后端派发图像生成
             image_url = await self._dispatch_image_generation(
@@ -471,8 +490,10 @@ class StoryboardAgent(BaseAgent):
             f"时长：{scene.duration_seconds}秒\n"
             f"画风要求：{style}\n"
         )
+        if scene.prompt:
+            user_msg += f"\n剧本 LLM 已给出的英文 prompt（仅供参考，请在此基础上补全场景细节与角色外观，不要直接复用）：\n{scene.prompt}\n"
         if char_info:
-            user_msg += f"\n相关角色：\n{char_info}\n"
+            user_msg += f"\n相关角色（必须将出场角色的外观特征嵌入 prompt）：\n{char_info}\n"
         if reference:
             user_msg += f"\n参考资料（联网搜索，供借鉴镜头语言和构图技巧）：\n{reference}\n"
 
@@ -494,7 +515,39 @@ class StoryboardAgent(BaseAgent):
             data = json_repair.loads(content)
         if not isinstance(data, dict):
             data = {}
+
+        # RAG 增强：基于影视分镜知识库优化提示词
+        if settings.rag_optimize_enabled:
+            data = await self._rag_optimize_storyboard_prompts(data, style)
+
         return data
+
+    async def _rag_optimize_storyboard_prompts(
+        self,
+        prompts: dict[str, str],
+        style: str,
+    ) -> dict[str, str]:
+        """使用 RAG 优化分镜英文提示词，失败则保留原结果。"""
+        positive = prompts.get("prompt", "").strip()
+        if not positive:
+            return prompts
+
+        try:
+            result = await rag_service.optimize_prompt(
+                user_prompt=positive,
+                domain="image",
+                style_hint=style or None,
+                extra_instruction="cinematic storyboard keyframe, keep vertical 9:16 composition",
+            )
+            optimized = dict(prompts)
+            if result.get("optimized_positive"):
+                optimized["prompt"] = result["optimized_positive"]
+            if result.get("optimized_negative"):
+                optimized["negative_prompt"] = result["optimized_negative"]
+            return optimized
+        except Exception as e:
+            logger.warning("分镜 RAG 优化失败，保留原提示词: %s", e)
+            return prompts
 
 
 storyboard_agent = StoryboardAgent()

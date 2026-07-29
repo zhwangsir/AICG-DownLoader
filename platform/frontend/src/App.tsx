@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import Canvas from "./components/Canvas";
 import {
   ScriptModal,
@@ -11,10 +12,9 @@ import {
   VisualQualityModal,
   LipSyncModal,
   PostprocessModal,
-} from "./components/Modals";
-import { ParticleField } from "./components/ui/ParticleField";
-import { ThemeSwitcher } from "./components/ui/ThemeSwitcher";
+} from "./components/modals";
 import { useDramaStore } from "./store/useDramaStore";
+import { ChevronDown, Clapperboard, Plus, Workflow } from "lucide-react";
 
 export default function App() {
   const store = useDramaStore();
@@ -44,6 +44,40 @@ export default function App() {
     addPostprocess,
     setStatusInfo,
   } = store;
+
+  const [showAdvancedMenu, setShowAdvancedMenu] = useState(false);
+
+  const steps = useMemo(
+    () => [
+      { key: "script", label: "剧本", done: !!scriptData },
+      { key: "character", label: "角色", done: characterCards.length > 0 },
+      { key: "storyboard", label: "分镜", done: storyboards.length > 0 },
+      { key: "video", label: "视频", done: videos.length > 0 },
+      { key: "voice", label: "配音", done: voices.length > 0 },
+      { key: "subtitle", label: "字幕", done: subtitles.length > 0 },
+      { key: "edit", label: "合成", done: !!editData },
+      { key: "quality", label: "质检", done: !!qualityData },
+    ],
+    [scriptData, characterCards, storyboards, videos, voices, subtitles, editData, qualityData]
+  );
+
+  const activeStepIndex = useMemo(() => {
+    const idx = steps.findIndex((s) => !s.done);
+    return idx === -1 ? steps.length - 1 : idx;
+  }, [steps]);
+
+  const advancedActions = [
+    { key: "character", label: "生成角色", disabled: !scriptData || globalLoading },
+    { key: "storyboard", label: "生成分镜", disabled: !scriptData || globalLoading },
+    { key: "video", label: "生成视频", disabled: storyboards.length === 0 || globalLoading },
+    { key: "voice", label: "生成配音", disabled: !scriptData || globalLoading },
+    { key: "subtitle", label: "生成字幕", disabled: voices.length === 0 || globalLoading },
+    { key: "quality", label: "剧本质检", disabled: !scriptData || globalLoading },
+    { key: "visualQuality", label: "视觉质检", disabled: videos.length === 0 || globalLoading },
+    { key: "lipSync", label: "唇形同步", disabled: videos.length === 0 || voices.length === 0 || globalLoading },
+    { key: "postprocess", label: "后处理", disabled: videos.length === 0 || globalLoading },
+    { key: "edit", label: "合成成片", disabled: videos.length === 0 || voices.length === 0 || subtitles.length === 0 || globalLoading },
+  ];
 
   const handleScriptGenerated = (data: NonNullable<typeof scriptData>) => {
     setScriptData(data);
@@ -120,49 +154,72 @@ export default function App() {
   };
 
   return (
-    <>
-      <ParticleField />
-      <div className="app-layout">
+    <div className="app-container">
       <div className="topbar">
-        <div className="topbar-title">AI 短剧工作台 — M4 原型</div>
+        <div className="topbar-brand">
+          <div className="topbar-logo">
+            <Clapperboard size={17} strokeWidth={2.2} />
+          </div>
+          <div className="topbar-title-group">
+            <span className="topbar-kicker">Atelier</span>
+            <span className="topbar-title">AI 短剧工作台</span>
+          </div>
+        </div>
+
+        <div className="topbar-progress">
+          {steps.map((s, i) => (
+            <span key={s.key}>
+              {i > 0 && <span className="topbar-step-sep" />}
+              <div
+                className={
+                  "topbar-step" +
+                  (s.done ? " done" : "") +
+                  (!s.done && i === activeStepIndex ? " active" : "")
+                }
+              >
+                <span className="topbar-step-dot" />
+                <span className="topbar-step-label">{s.label}</span>
+              </div>
+            </span>
+          ))}
+        </div>
+
         <div className="topbar-actions">
-          <ThemeSwitcher />
-          <button className="topbar-btn" onClick={() => setModal("character", true)} disabled={!scriptData || globalLoading}>
-            生成角色
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("storyboard", true)} disabled={!scriptData || globalLoading}>
-            生成分镜
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("video", true)} disabled={storyboards.length === 0 || globalLoading}>
-            生成视频
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("voice", true)} disabled={!scriptData || globalLoading}>
-            生成配音
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("subtitle", true)} disabled={voices.length === 0 || globalLoading}>
-            生成字幕
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("quality", true)} disabled={!scriptData || globalLoading}>
-            质检
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("visualQuality", true)} disabled={videos.length === 0 || globalLoading}>
-            视觉质检
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("lipSync", true)} disabled={videos.length === 0 || voices.length === 0 || globalLoading}>
-            唇形同步
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("postprocess", true)} disabled={videos.length === 0 || globalLoading}>
-            后处理
-          </button>
-          <button className="topbar-btn" onClick={() => setModal("edit", true)} disabled={videos.length === 0 || voices.length === 0 || subtitles.length === 0 || globalLoading}>
-            合成成片
-          </button>
+          <div className="dropdown-wrapper">
+            <button
+              className="topbar-btn"
+              onClick={() => setShowAdvancedMenu(!showAdvancedMenu)}
+              disabled={globalLoading}
+            >
+              <Workflow size={13} />
+              操作流程
+              <ChevronDown size={13} style={{ marginLeft: 2 }} />
+            </button>
+            {showAdvancedMenu && (
+              <div className="dropdown-menu">
+                {advancedActions.map((action) => (
+                  <button
+                    key={action.key}
+                    className="dropdown-item"
+                    disabled={action.disabled}
+                    onClick={() => {
+                      setModal(action.key as any, true);
+                      setShowAdvancedMenu(false);
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             className="topbar-btn topbar-btn-primary"
             onClick={() => setModal("script", true)}
             disabled={globalLoading}
           >
-            生成剧本
+            <Plus size={14} strokeWidth={2.5} />
+            新建剧本
           </button>
         </div>
       </div>
@@ -173,24 +230,15 @@ export default function App() {
 
       <div className="status-bar">
         <div className="status-item">
-          <span className="status-dot"></span>
-          <span>LM Studio Qwen3.6-35B-A3B</span>
+          <span
+            className={
+              "status-dot" +
+              (globalLoading ? " loading" : statusInfo.includes("失败") || statusInfo.includes("错误") ? " error" : "")
+            }
+          />
+          <span>{statusInfo || "就绪"}</span>
         </div>
-        <div className="status-item">
-          <span className="status-dot"></span>
-          <span>ComfyUI 4×RTX PRO 6000</span>
-        </div>
-        <div className="status-item">
-          <span className="status-dot"></span>
-          <span>Qwen3-VL + CosyVoice 2 + Qwen3-ASR</span>
-        </div>
-        <div className="status-item">
-          <span className="status-dot"></span>
-          <span>LatentSync + RealBasicVSR/RIFE + DeepFilterNet3</span>
-        </div>
-        <div className="status-item">
-          <span style={{ marginLeft: "auto" }}>{statusInfo}</span>
-        </div>
+        <div className="status-item status-version">v0.12.0 · Film Atelier</div>
       </div>
 
       {modals.script && (
@@ -294,7 +342,6 @@ export default function App() {
           onSuccess={handlePostprocessGenerated}
         />
       )}
-      </div>
-    </>
+    </div>
   );
 }

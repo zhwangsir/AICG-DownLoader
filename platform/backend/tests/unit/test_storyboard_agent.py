@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -24,11 +24,18 @@ class TestStoryboardAgentExecute:
         self,
         agent,
         sample_scene,
+        mock_call_llm,
         mock_call_comfyui,
         mock_get_comfyui_result,
     ):
         sample_scene.prompt = "existing prompt"
         sample_scene.negative_prompt = "existing negative"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
         mock_get_comfyui_result.return_value = {
             "7": {
                 "images": [
@@ -42,7 +49,8 @@ class TestStoryboardAgentExecute:
 
         assert response.success is True
         assert response.data["scene_id"] == 1
-        assert response.data["prompt_used"] == "existing prompt"
+        # 提示词现在总是经 LLM 重写
+        assert response.data["prompt_used"] == "rewritten prompt"
         # 默认 LTX 关闭 → preview_video_url 为空字符串
         assert response.data["preview_video_url"] == ""
 
@@ -113,7 +121,7 @@ class TestStoryboardDualBackend:
         return mock_svc
 
     async def test_hunyuanimage_backend_success(
-        self, agent, sample_scene, monkeypatch, tmp_path
+        self, agent, sample_scene, mock_call_llm, monkeypatch, tmp_path
     ):
         """image_backend='hunyuanimage' → 走 HunyuanImage 主路径，保存到本地。"""
         monkeypatch.setattr(settings, "image_backend", "hunyuanimage")
@@ -123,6 +131,12 @@ class TestStoryboardDualBackend:
         )
         sample_scene.prompt = "existing prompt"
         sample_scene.negative_prompt = "existing negative"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -130,7 +144,8 @@ class TestStoryboardDualBackend:
         assert response.success is True
         assert response.data["scene_id"] == 1
         assert "/static/storyboard/" in response.data["image_url"]
-        assert response.data["prompt_used"] == "existing prompt"
+        # 提示词现在总是经 LLM 重写
+        assert response.data["prompt_used"] == "rewritten prompt"
         # HunyuanImage 被调用 1 次
         assert mock_svc.generate_one.await_count == 1
         # 校验 prompt 注入了 POSITIVE_SUFFIX
@@ -139,7 +154,7 @@ class TestStoryboardDualBackend:
         assert "low quality" in call_kwargs["negative_prompt"]
 
     async def test_flux_pulid_backend_success(
-        self, agent, sample_scene, monkeypatch, tmp_path
+        self, agent, sample_scene, mock_call_llm, monkeypatch, tmp_path
     ):
         """image_backend='flux_pulid' → 走 FLUX+PuLID 主路径。"""
         monkeypatch.setattr(settings, "image_backend", "flux_pulid")
@@ -149,6 +164,12 @@ class TestStoryboardDualBackend:
         )
         sample_scene.prompt = "test prompt"
         sample_scene.negative_prompt = "test negative"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -161,6 +182,7 @@ class TestStoryboardDualBackend:
         self,
         agent,
         sample_scene,
+        mock_call_llm,
         mock_call_comfyui,
         mock_get_comfyui_result,
         monkeypatch,
@@ -179,6 +201,12 @@ class TestStoryboardDualBackend:
         }
         sample_scene.prompt = "test prompt"
         sample_scene.negative_prompt = "test negative"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -191,6 +219,7 @@ class TestStoryboardDualBackend:
         self,
         agent,
         sample_scene,
+        mock_call_llm,
         mock_call_comfyui,
         mock_get_comfyui_result,
         monkeypatch,
@@ -208,6 +237,12 @@ class TestStoryboardDualBackend:
         mock_get_comfyui_result.return_value = {"7": {}}
         sample_scene.prompt = "test prompt"
         sample_scene.negative_prompt = "test negative"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -216,7 +251,7 @@ class TestStoryboardDualBackend:
         assert "SDXL 回退也失败" in response.error or "未找到生成的图片" in response.error
 
     async def test_sdxl_backend_skips_service(
-        self, agent, sample_scene, mock_call_comfyui,
+        self, agent, sample_scene, mock_call_llm, mock_call_comfyui,
         mock_get_comfyui_result, monkeypatch
     ):
         """image_backend='sdxl'（conftest 默认）→ 不调用 HunyuanImage/FLUX+PuLID。"""
@@ -227,6 +262,12 @@ class TestStoryboardDualBackend:
         }
         sample_scene.prompt = "test"
         sample_scene.negative_prompt = "neg"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -261,6 +302,7 @@ class TestStoryboardLTXPreview:
         self,
         agent,
         sample_scene,
+        mock_call_llm,
         mock_call_comfyui,
         mock_get_comfyui_result,
         monkeypatch,
@@ -275,6 +317,12 @@ class TestStoryboardLTXPreview:
         }
         sample_scene.prompt = "test"
         sample_scene.negative_prompt = "neg"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -291,6 +339,7 @@ class TestStoryboardLTXPreview:
         self,
         agent,
         sample_scene,
+        mock_call_llm,
         mock_call_comfyui,
         mock_get_comfyui_result,
         monkeypatch,
@@ -303,6 +352,12 @@ class TestStoryboardLTXPreview:
         }
         sample_scene.prompt = "test"
         sample_scene.negative_prompt = "neg"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -316,6 +371,7 @@ class TestStoryboardLTXPreview:
         self,
         agent,
         sample_scene,
+        mock_call_llm,
         mock_call_comfyui,
         mock_get_comfyui_result,
         monkeypatch,
@@ -331,6 +387,12 @@ class TestStoryboardLTXPreview:
         }
         sample_scene.prompt = "test"
         sample_scene.negative_prompt = "neg"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
 
         request = StoryboardRequest(scene=sample_scene)
         response = await agent.execute(request)
@@ -338,3 +400,72 @@ class TestStoryboardLTXPreview:
         assert response.success is True
         assert response.data["preview_video_url"] == ""
         assert mock_ltx.generate_preview.await_count == 0
+
+
+class TestStoryboardAgentRAGEnhance:
+    async def test_rag_enhances_prompt(
+        self,
+        agent,
+        sample_scene,
+        mock_call_llm,
+        mock_call_comfyui,
+        mock_get_comfyui_result,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "rag_optimize_enabled", True)
+        sample_scene.prompt = "test prompt"
+        sample_scene.negative_prompt = "test negative"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
+        mock_get_comfyui_result.return_value = {
+            "7": {"images": [{"filename": "sb.png", "subfolder": "", "type": "output"}]}
+        }
+
+        with patch(
+            "app.agents.storyboard_agent.rag_service.optimize_prompt",
+            new_callable=AsyncMock,
+            return_value={
+                "optimized_positive": "rag positive",
+                "optimized_negative": "rag negative",
+            },
+        ):
+            response = await agent.execute(StoryboardRequest(scene=sample_scene))
+
+        assert response.success is True
+        assert response.data["prompt_used"] == "rag positive"
+
+    async def test_rag_failure_keeps_llm_prompt(
+        self,
+        agent,
+        sample_scene,
+        mock_call_llm,
+        mock_call_comfyui,
+        mock_get_comfyui_result,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "rag_optimize_enabled", True)
+        sample_scene.prompt = "test prompt"
+        sample_scene.negative_prompt = "test negative"
+        mock_call_llm.return_value = json.dumps(
+            {
+                "prompt": "rewritten prompt",
+                "negative_prompt": "rewritten negative",
+            }
+        )
+        mock_get_comfyui_result.return_value = {
+            "7": {"images": [{"filename": "sb.png", "subfolder": "", "type": "output"}]}
+        }
+
+        with patch(
+            "app.agents.storyboard_agent.rag_service.optimize_prompt",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("RAG 失败"),
+        ):
+            response = await agent.execute(StoryboardRequest(scene=sample_scene))
+
+        assert response.success is True
+        assert response.data["prompt_used"] == "rewritten prompt"

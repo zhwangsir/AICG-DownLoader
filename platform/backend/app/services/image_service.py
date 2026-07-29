@@ -13,6 +13,7 @@ P4.3 设计目标：
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Any
@@ -67,6 +68,11 @@ class HunyuanImageService:
     ) -> list[bytes]:
         """生成图像，返回 PNG 字节列表。
 
+        HunyuanImage 服务采用异步任务契约：
+        - POST /v1/images/generations  返回 {task_id, status: "pending"}
+        - GET  /v1/tasks/{task_id}     succeeded 时含 result（b64/url/files）
+        - GET  /v1/files/{name}        下载服务端文件
+
         参数：
             prompt: 正面提示词（支持中文，HunyuanImage 2.1 原生中文 prompt 最强）
             negative_prompt: 负面提示词
@@ -89,17 +95,58 @@ class HunyuanImageService:
         if seed is not None:
             payload["seed"] = seed
 
+        # Step 1: 提交任务
         resp = await self.http.post(
-            f"{self.endpoint}/images/generations", json=payload
+            f"{self.endpoint}/v1/images/generations", json=payload
         )
         resp.raise_for_status()
-        data = resp.json()
-        items = data.get("data", [])
+        submit = resp.json()
+        task_id = submit.get("task_id")
+        if not task_id:
+            raise ImageServiceError(f"HunyuanImage 未返回 task_id: {submit}")
+
+        # Step 2: 轮询任务直到完成
+        # 原生 2K FP8 首张图典型耗时 25-60s（含模型懒加载），后续 15-30s
+        deadline = 240.0
+        poll_interval = 3.0
+        elapsed = 0.0
+        final: dict[str, Any] | None = None
+        while elapsed < deadline:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            st_resp = await self.http.get(f"{self.endpoint}/v1/tasks/{task_id}")
+            st_resp.raise_for_status()
+            final = st_resp.json()
+            status = final.get("status")
+            if status == "succeeded":
+                break
+            if status == "failed":
+                err = final.get("error") or {}
+                msg = err.get("message") if isinstance(err, dict) else str(err)
+                raise ImageServiceError(f"HunyuanImage 推理失败: {msg}")
+        else:
+            raise ImageServiceError(
+                f"HunyuanImage 任务超时 ({deadline:.0f}s): task_id={task_id}"
+            )
+
+        # Step 3: 解析结果 — 服务端可能返回 b64_json / url / files 三种形式
+        result = (final or {}).get("result") or {}
+        items = result.get("data") or result.get("images") or []
+        if isinstance(result, dict) and not items and result.get("files"):
+            # files 形式：[{"name": "xxx.png"}]，需经 /v1/files/{name} 下载
+            items = [
+                {"url": f"{self.endpoint}/v1/files/{f.get('name')}"}
+                for f in result["files"]
+                if isinstance(f, dict) and f.get("name")
+            ]
+
         if not items:
-            raise ImageServiceError(f"HunyuanImage 返回空 data: {data}")
+            raise ImageServiceError(f"HunyuanImage 返回空 data: {final}")
 
         images: list[bytes] = []
         for item in items:
+            if not isinstance(item, dict):
+                continue
             # 优先 b64_json，回退 url 下载
             b64 = item.get("b64_json")
             if b64:
@@ -111,8 +158,11 @@ class HunyuanImageService:
                 img_resp.raise_for_status()
                 images.append(img_resp.content)
         if not images:
-            raise ImageServiceError(f"HunyuanImage 返回无图像数据: {data}")
-        logger.info("HunyuanImage 生成 %d 张图像: prompt=%s", len(images), prompt[:50])
+            raise ImageServiceError(f"HunyuanImage 返回无图像数据: {final}")
+        logger.info(
+            "HunyuanImage 生成 %d 张图像 (%.1fs): prompt=%s",
+            len(images), elapsed, prompt[:50],
+        )
         return images
 
     async def generate_one(

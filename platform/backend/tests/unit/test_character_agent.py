@@ -266,3 +266,85 @@ class TestCharacterAgentDualBackend:
         # SDXL 路径不调用图像服务
         assert mock_h.generate_one.await_count == 0
         assert mock_f.generate_one.await_count == 0
+
+
+class TestCharacterAgentRAGEnhance:
+    async def test_rag_enhances_view_prompts(
+        self,
+        agent,
+        sample_character,
+        mock_call_llm,
+        mock_call_comfyui,
+        mock_get_comfyui_result,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "rag_optimize_enabled", True)
+        mock_call_llm.return_value = json.dumps(
+            {
+                "front_view_prompt": "front",
+                "side_view_prompt": "side",
+                "closeup_prompt": "closeup",
+                "negative_prompt": "blurry",
+            }
+        )
+        mock_get_comfyui_result.return_value = {
+            "7": {"images": [{"filename": "x.png", "subfolder": "", "type": "output"}]}
+        }
+
+        with patch(
+            "app.agents.character_agent.rag_service.optimize_prompt",
+            new_callable=AsyncMock,
+            return_value={
+                "optimized_positive": "rag positive",
+                "optimized_negative": "rag negative",
+            },
+        ) as mock_opt, patch.object(
+            agent,
+            "_generate_image_via_sdxl",
+            new_callable=AsyncMock,
+            return_value="http://mock/char.png",
+        ) as mock_gen:
+            response = await agent.execute(CharacterRequest(character=sample_character))
+
+        assert response.success is True
+        # RAG 优化每个视图正面提示词，至少调用 3 次
+        assert mock_opt.await_count == 3
+        # 图像生成实际调用的是 RAG 优化后的提示词（_generate_image_via_sdxl 使用位置参数）
+        prompts = [call.args[1] for call in mock_gen.call_args_list]
+        assert all("rag positive" in p for p in prompts)
+
+    async def test_rag_failure_keeps_llm_prompts(
+        self,
+        agent,
+        sample_character,
+        mock_call_llm,
+        mock_call_comfyui,
+        mock_get_comfyui_result,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(settings, "rag_optimize_enabled", True)
+        mock_call_llm.return_value = json.dumps(
+            {
+                "front_view_prompt": "front",
+                "side_view_prompt": "side",
+                "closeup_prompt": "closeup",
+                "negative_prompt": "blurry",
+            }
+        )
+        mock_get_comfyui_result.return_value = {
+            "7": {"images": [{"filename": "x.png", "subfolder": "", "type": "output"}]}
+        }
+
+        with patch(
+            "app.agents.character_agent.rag_service.optimize_prompt",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("RAG 失败"),
+        ), patch.object(
+            agent,
+            "_generate_image_via_sdxl",
+            new_callable=AsyncMock,
+            return_value="http://mock/char.png",
+        ):
+            response = await agent.execute(CharacterRequest(character=sample_character))
+
+        assert response.success is True

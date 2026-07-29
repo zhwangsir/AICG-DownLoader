@@ -2,6 +2,501 @@
 
 > 本文件按时间倒序记录每次回归验证的命令、结果与关键代码片段。
 
+## 2026-07-29 M6.7 LoRA 搭配、批量下载与 RAG 推荐集成
+
+### 变更摘要
+
+- **NAS LoRA 检查**：扫描 `~/NAS/Windows/ComfyUI/ComfyUIModel/models/loras`，现有模型以视频生成类（Wan2.2 系列等）为主，缺乏与 RAG 风格库匹配的 Flux.1 D 风格化 LoRA，决定批量补充。
+- **LoRA 清单设计**：新建 `platform/backend/scripts/lora_manifest.json`，按 `realistic_film/suspense_dark/cyberpunk/ancient_fantasy/chinese_anime/japanese_anime/cartoon_3d/horror/sci_fi_space/post_apocalyptic/film_noir/retro_hongkong/palace_hanfu/campus_youth/comedy_bright/documentary/modern_action` 等 20 个风格 key 组织，包含 `model_id/version_id/filename/size_kb/sha256/trigger_words/download_url`。
+- **双源批量下载**：新建 `platform/backend/scripts/download_loras.py`，支持：
+  - Civitai API Token 认证（自动读取 `~/Library/Application Support/comfy-downloader/config.json`）。
+  - 断点续传（`.part` + `Range`）。
+  - 主源 `civitai.com` 失败时自动切换到 `civitai.red`。
+  - 下载完成后 SHA256 校验，失败则删除重试。
+  - 结果：20 个 LoRA 中 17 成功下载、3 个已存在且校验通过跳过、0 失败。
+- **RAG 知识库接入推荐**：
+  - `genre_tropes.json` 为 20 条类型片模板新增 `recommended_loras` 字段，绑定 `style_key/filename/trigger_words/weight`。
+  - `rag_service.py` 新增 `_collect_lora_recommendations` 去重收集推荐 LoRA；`_build_system_prompt` 注入 `[推荐 LoRA]` 章节；`optimize_prompt` 与 `_fallback_output` 均返回 LoRA 推荐。
+  - `schemas.py` 的 `RAGOptimizeResponse` 新增 `lora_recommendations` 字段。
+- **测试增强**：`tests/unit/test_rag_service.py` 新增/更新 4 个用例，覆盖 LoRA 去重、系统提示词包含 LoRA 章节、`optimize_prompt` 返回 LoRA 推荐、兜底输出保留 LoRA 推荐。
+
+### 关键代码片段
+
+#### 1. LoRA 批量下载双源切换（`platform/backend/scripts/download_loras.py`）
+
+```python
+def try_download(item: dict, dest_dir: Path, token: str, hosts: list[str]) -> bool:
+    filename = item["filename"]
+    final_path = dest_dir / filename
+    part_path = dest_dir / (filename + ".part")
+    expected_sha = item["sha256"].upper()
+
+    if final_path.exists() and sha256_file(final_path) == expected_sha:
+        print(f"[SKIP] {filename} 已存在且校验通过")
+        return True
+
+    if final_path.exists():
+        print(f"[WARN] {filename} 校验失败，删除重下")
+        final_path.unlink()
+
+    primary_url = item["download_url"]
+    urls = [primary_url]
+    parsed = urlparse(primary_url)
+    for host in hosts:
+        if host != parsed.netloc:
+            alt = primary_url.replace(parsed.netloc, host, 1)
+            urls.append(alt)
+
+    for idx, url in enumerate(urls, start=1):
+        host = urlparse(url).netloc
+        print(f"[DOWN {idx}/{len(urls)}] {filename} <- {host}")
+        if part_path.exists():
+            part_path.unlink()
+        if download_with_curl(url, part_path, token):
+            print(f"[HASH] {filename} 校验中...")
+            actual_sha = sha256_file(part_path)
+            if actual_sha == expected_sha:
+                shutil.move(str(part_path), str(final_path))
+                print(f"[OK] {filename} 下载完成 ({actual_sha[:16]}...)")
+                return True
+            print(f"[HASH FAIL] {filename} SHA256 不匹配")
+            part_path.unlink(missing_ok=True)
+        time.sleep(1)
+
+    print(f"[FAIL] {filename} 所有源均失败")
+    return False
+```
+
+#### 2. LoRA 推荐去重收集（`platform/backend/app/services/rag_service.py`）
+
+```python
+@staticmethod
+def _collect_lora_recommendations(retrieved: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in retrieved:
+        for lora in item.get("recommended_loras", []):
+            filename = lora.get("filename", "")
+            if not filename or filename in seen:
+                continue
+            seen.add(filename)
+            recommendations.append({
+                "filename": filename,
+                "style_key": lora.get("style_key", ""),
+                "trigger_words": lora.get("trigger_words", []),
+                "weight": lora.get("weight", 0.7),
+            })
+    return recommendations
+```
+
+#### 3. 系统提示词注入 LoRA 章节（`platform/backend/app/services/rag_service.py`）
+
+```python
+lora_blocks = []
+for rec in lora_recommendations:
+    trigger = ", ".join(rec.get("trigger_words", []))
+    lora_blocks.append(
+        f"- {rec['filename']} (weight={rec['weight']})"
+        + (f", trigger words: {trigger}" if trigger else "")
+    )
+if lora_blocks:
+    sections.append("\n[推荐 LoRA]\n" + "\n".join(dict.fromkeys(lora_blocks)))
+```
+
+### 回归验证
+
+- **后端全量**：`pytest tests/ -q --tb=short` → **356 passed / 0 failed**，覆盖率 **85.47%**（≥80% 达标）
+- **RAG 专项**：`test_rag_service.py` 16/16 通过；`tests/integration/test_rag.py` 5/5 通过
+- **前端**：`pnpm test --run` → **36/36** 通过；`pnpm tsc --noEmit` → 0 错误；`pnpm build` → 成功
+- **LoRA 下载**：20 个目标，17 成功下载，3 已存在跳过，0 失败，全部 SHA256 校验通过
+
+### 修改文件清单
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `platform/backend/scripts/lora_manifest.json` | 新增 | 20 个 Flux.1 D 风格 LoRA 下载清单 |
+| `platform/backend/scripts/download_loras.py` | 新增 | 双源批量下载、断点续传、SHA256 校验脚本 |
+| `platform/backend/app/knowledge_base/genre_tropes.json` | 修改 | 20 条类型片模板新增 `recommended_loras` |
+| `platform/backend/app/services/rag_service.py` | 修改 | LoRA 推荐收集、系统提示词章节、兜底输出 |
+| `platform/backend/app/models/schemas.py` | 修改 | `RAGOptimizeResponse` 新增 `lora_recommendations` |
+| `platform/backend/tests/unit/test_rag_service.py` | 修改 | 新增/更新 4 个 LoRA 推荐相关单元测试 |
+| `STATE.json` | 修改 | 新增 M6.7 子任务与 L5 任务，更新测试计数 |
+| `TEST_LOG.md` | 修改 | 追加 M6.7 时序条目 |
+
+---
+
+## 2026-07-29 M6.6 类型片叙事镜头模板知识库增强
+
+### 变更摘要
+
+- **新增 `genre_tropes.json`**：20 条短剧/影视剧类型片叙事镜头模板，覆盖高频短剧场景：
+  - 霸总对峙/壁咚、甜宠咖啡馆约会、校园天台告白、古风仙侠竹林对决、宫廷权谋对峙、都市悬疑雨夜追凶、黑色电影侦探办公室、赛博朋克街头追逐、恐怖 jump scare 走廊、喜剧夸张登场、家庭伦理情感重逢、古装战场千军万马、灵异现身/鬼影浮现、职场权谋办公室博弈、仙侠渡劫天雷、复仇打脸身份揭露、医疗急救手术室外、末日废土幸存者、古风沐浴花瓣浴调情、校园霸凌反击。
+  - 统一 schema：`id/category/domain/lang/title/content/tags/negative_terms/style_intensity/model_target`，与现有五类知识库保持一致。
+- **RAGService 接入 genre_trope**：
+  - `optimize_prompt` 多路检索新增 `category="genre_trope"`，与风格/镜头/示例/负面/方法并列融合。
+  - `_build_system_prompt` 新增 `[类型片叙事镜头模板]` 章节，将检索到的类型片模板注入 LLM 上下文。
+  - `_fallback_output` 兼容 genre_trope，合并其 `content` 到正向提示词、`negative_terms` 到负向提示词、`tags` 到标签、`title` 到风格说明。
+- **测试增强**：`tests/unit/test_rag_service.py` 新增 4 个单元测试，覆盖 genre_trope 的 metadata 过滤检索、系统提示词章节生成、`optimize_prompt` 调用融合、LLM 失败兜底输出。
+
+### 关键代码片段
+
+#### 1. 类型片叙事模板检索接入（`platform/backend/app/services/rag_service.py`）
+
+```python
+# 多路检索：风格 + 镜头 + 示例 + 负面 + 方法 + 类型片叙事模板
+style_results = self.search(query, category="style", domain=domain, style=style_hint, top_k=2)
+shot_results = self.search(query, category="shot", domain=domain, top_k=2)
+example_results = self.search(query, category="example", domain=domain, style=style_hint, top_k=2)
+negative_results = self.search(query, category="negative", domain=domain, top_k=2)
+method_results = self.search(query, category="method", domain=domain, top_k=2)
+trope_results = self.search(query, category="genre_trope", domain=domain, style=style_hint, top_k=2)
+```
+
+#### 2. 系统提示词新增类型片模板章节（`platform/backend/app/services/rag_service.py`）
+
+```python
+if trope_blocks:
+    sections.append("\n[类型片叙事镜头模板]\n" + "\n\n".join(trope_blocks))
+```
+
+#### 3. 兜底输出兼容 genre_trope（`platform/backend/app/services/rag_service.py`）
+
+```python
+elif item["category"] == "genre_trope":
+    positives.append(item["content"])
+    style_notes.append(item["title"])
+    tags.extend(item.get("tags", []))
+    if item.get("negative_terms"):
+        negatives.extend(item["negative_terms"])
+```
+
+### 回归验证
+
+- **后端全量**：`pytest tests/ -q --tb=short` → **354 passed / 0 failed**，覆盖率 **85.36%**（≥80% 达标）
+- **RAG 专项**：`test_rag_service.py` 12/12 通过；`tests/integration/test_rag.py` 5/5 通过
+- **前端**：本次未改动前端，保持 M5 基线 36/36、tsc 0 错误、build 成功
+
+### 修改文件清单
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `platform/backend/app/knowledge_base/genre_tropes.json` | 新增 | 20 条类型片叙事镜头模板库 |
+| `platform/backend/app/services/rag_service.py` | 修改 | 多路检索、系统提示词、兜底输出接入 genre_trope |
+| `platform/backend/tests/unit/test_rag_service.py` | 修改 | 新增 4 个 genre_trope 单元测试 |
+| `STATE.json` | 修改 | 新增 M6.6 子任务，更新测试计数与覆盖率 |
+| `TEST_LOG.md` | 修改 | 追加 M6.6 时序条目 |
+
+---
+
+## 2026-07-29 M6 RAG 提示词优化知识库
+
+### 变更摘要
+
+- **M6.1 RAG 架构与影视生成提示词方法深度调研**：将影视剧、电影、动漫、短剧等领域的生成提示词优化方法整理为五类结构化知识库：
+  - `styles.json`：28 种视觉风格，包括写实电影感、都市情感、悬疑暗调、赛博朋克、古风仙侠、国漫、日漫、卡通 3D、恐怖惊悚、科幻太空、末日废土、黑色电影、复古港风、宫廷古装、校园青春、家庭伦理现实主义、喜剧明快、纪录片纪实、韩剧浪漫、现代动作、定格动画黏土、像素艺术 8-bit、蒸汽波、西方奇幻等，含 style_intensity/negative_terms/model_target 等元数据。
+  - `shots.json`：43 种影视镜头语言、运镜、光影与构图技法，包括特写、中景、广角 establishing、低角度仰拍、荷兰角、过肩、跟随、推镜、手持、航拍、极特写、POV、变焦、摇臂、斯坦尼康、长镜头、分屏、匹配剪辑、微距、慢动作、延时、柔光箱、烛光、月光、暖辉光、高调、单色、三分法、对称构图、雨、雪、雾等。
+  - `negatives.json`：14 组负面提示词，包括通用画质、人体结构、视频运动、风格污染、写实专用、人像特写、通用安全、动漫卡通专用、2D/手绘专用、视频时序一致性、构图与透视、手部、面部、建筑与户外等。
+  - `examples.json`：11 条高质量示例，包括都市悬疑雨夜追凶、豪门霸总办公室、古风仙侠竹林对决、甜宠咖啡馆约会、赛博朋克街头追逐、恐怖医院走廊、科幻太空站对接、黑色电影侦探办公室、宫廷夜宴对峙、校园天台告白、现代都市追车等，含中文描述、优化后英文正/负提示词、风格标签。
+  - `methods.json`：8 条提示词优化方法论，包括视频/图像提示词核心结构、Seedance 2.0 九模块公式、CogVideoX 四步法、HunyuanVideo/Wan/CogVideoX/SDXL 等模型适配技巧、负面提示词组合策略、角色一致性描述方法、分镜拆解法、LLM-as-optimizer 迭代优化法。
+  - 统一 schema：`id/category/domain/lang/title/content/tags/model_target`，示例扩展 `optimized_positive/optimized_negative/style`，方法论扩展 `style_intensity/negative_terms`。
+- **M6.2 RAGService 核心实现**：`app/services/rag_service.py` 加载五类知识库，使用 `fastembed` 生成 embedding 并本地缓存，支持按 `domain`/`style` 元数据预过滤、Top-K 向量检索、检索结果融合（风格+镜头+示例+负面+方法论）；随后调用本地 OpenAI 兼容 LLM 将用户中文描述重写为高质量英文正向/负向生成提示词，失败时返回兜底结果。`config.py` 新增 `rag_optimize_enabled`/`rag_embed_model`/`rag_top_k`；`schemas.py` 新增 `RAGOptimizeRequest`/`RAGOptimizeResponse`；`pyproject.toml` 添加 `fastembed`/`numpy` 依赖。
+- **M6.3 API 路由暴露**：`app/routers/drama.py` 新增 `POST /api/drama/rag/optimize`（返回优化后正/负提示词、风格说明、标签、检索数量等）与 `GET /api/drama/rag/styles`（返回内置风格列表供前端下拉选择）。
+- **M6.4 Agent 集成 RAG 优化**：
+  - `script_agent.py`：剧本生成后遍历每幕场景，对 `description` 调用 RAG 优化为英文视频生成提示词，写入 `prompt`/`negative_prompt`。
+  - `character_agent.py`：对三视图（front_view/side_view/closeup）英文提示词按 `style` 优化，并强制注入 `solo single person only one person` 约束。
+  - `storyboard_agent.py`：对分镜英文提示词优化，并注入 `cinematic storyboard keyframe, keep vertical 9:16 composition`。
+  - 三者均在 RAG 失败时保留原提示词，不阻断主流程。
+- **M6.5 测试修复与回归**：RAGService 8 个单元测试覆盖知识库加载、向量检索、提示词优化、失败兜底；`tests/integration/test_rag.py` 5 个接口测试；同步修复 `script_agent`/`character_agent`/`storyboard_agent` 测试中的 mock 与断言。关键修复：
+  - `AsyncOpenAI` 从 `optimize_prompt` 内部导入移至模块顶部，确保可 mock。
+  - 测试 mock `embed` 方法使用 `side_effect=lambda _texts: iter([...])`，避免迭代器在多次检索时耗尽。
+  - 角色 Agent 图像生成调用参数从 `kwargs["positive"]` 改为 `args[1]`，匹配 `_generate_image_via_sdxl` 位置参数。
+
+### 关键代码片段
+
+#### 1. RAGService 检索 + LLM 重写 pipeline（`platform/backend/app/services/rag_service.py`）
+
+```python
+async def optimize_prompt(
+    self,
+    user_prompt: str,
+    domain: str = "video",
+    style_hint: str | None = None,
+    extra_instruction: str | None = None,
+) -> dict[str, Any]:
+    # 1. 元数据过滤 + Top-K 向量检索
+    retrieved = await self.search(
+        query=user_prompt,
+        domain=domain,
+        style_hint=style_hint,
+        top_k=settings.rag_top_k,
+    )
+    # 2. 融合检索结果构建系统提示词
+    system_prompt = self._build_system_prompt(
+        retrieved, domain, style_hint, extra_instruction
+    )
+    # 3. 调用本地 LLM 重写为结构化英文提示词
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"原始描述：{user_prompt}"},
+    ]
+    response = await client.chat.completions.create(
+        model=settings.llm_model,
+        messages=messages,
+        temperature=0.5,
+        max_tokens=800,
+    )
+    return self._parse_llm_response(response.choices[0].message.content, user_prompt)
+```
+
+#### 2. 剧本 Agent 场景提示词 RAG 增强（`platform/backend/app/agents/script_agent.py`）
+
+```python
+async def _rag_enhance_scenes(self, scenes: list[dict[str, Any]], genre: str) -> None:
+    for scene in scenes:
+        description = scene.get("description", "").strip()
+        if not description:
+            continue
+        result = await rag_service.optimize_prompt(
+            user_prompt=description,
+            domain="video",
+            style_hint=genre or None,
+            extra_instruction="根据短剧场景描述生成高质量英文图像/视频生成提示词",
+        )
+        if result.get("optimized_positive"):
+            scene["prompt"] = result["optimized_positive"]
+        if result.get("optimized_negative"):
+            scene["negative_prompt"] = result["optimized_negative"]
+```
+
+#### 3. 角色 Agent 三视图 RAG 优化（`platform/backend/app/agents/character_agent.py`）
+
+```python
+async def _rag_optimize_prompts(self, prompts: dict[str, str], style: str) -> dict[str, str]:
+    views = [
+        ("front_view_prompt", "front view character portrait"),
+        ("side_view_prompt", "side profile character portrait"),
+        ("closeup_prompt", "close-up face portrait"),
+    ]
+    result = dict(prompts)
+    for key, view_hint in views:
+        positive = prompts.get(key, "").strip()
+        if not positive:
+            continue
+        opt = await rag_service.optimize_prompt(
+            user_prompt=positive,
+            domain="image",
+            style_hint=style or None,
+            extra_instruction=f"{view_hint}, keep solo single person only one person, photorealistic character",
+        )
+        if opt.get("optimized_positive"):
+            result[key] = opt["optimized_positive"]
+    return result
+```
+
+### 回归验证
+
+- **后端全量**：`pytest tests/ -q --tb=short` → **350 passed / 0 failed**，覆盖率 **85.13%**（≥80% 达标）
+- **RAG 专项**：`test_rag_service.py` 8/8 通过；`tests/integration/test_rag.py` 5/5 通过
+- **前端**：本次未改动前端，保持 M5 基线 36/36、tsc 0 错误、build 成功
+
+### 修改文件清单
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `platform/backend/app/knowledge_base/styles.json` | 新增 | 影视/短剧/动漫视觉风格库 |
+| `platform/backend/app/knowledge_base/shots.json` | 新增 | 镜头语言与运镜技法库 |
+| `platform/backend/app/knowledge_base/negatives.json` | 新增 | 分组负面提示词库 |
+| `platform/backend/app/knowledge_base/examples.json` | 新增 | 高质量生成示例 Prompt 库 |
+| `platform/backend/app/knowledge_base/methods.json` | 新增 | 提示词优化方法论库 |
+| `platform/backend/app/services/rag_service.py` | 新增 | RAG 提示词优化服务核心实现 |
+| `platform/backend/app/routers/drama.py` | 修改 | 新增 `/rag/optimize` 与 `/rag/styles` 路由 |
+| `platform/backend/app/config.py` | 修改 | 新增 RAG 开关与模型/Top-K 配置 |
+| `platform/backend/app/models/schemas.py` | 修改 | 新增 RAGOptimizeRequest/Response 模型 |
+| `platform/backend/app/agents/script_agent.py` | 修改 | 场景描述 RAG 增强 |
+| `platform/backend/app/agents/character_agent.py` | 修改 | 三视图提示词 RAG 优化 |
+| `platform/backend/app/agents/storyboard_agent.py` | 修改 | 分镜提示词 RAG 优化 |
+| `platform/backend/pyproject.toml` | 修改 | 添加 fastembed/numpy 依赖 |
+| `platform/backend/tests/unit/test_rag_service.py` | 新增 | RAGService 单元测试 |
+| `platform/backend/tests/integration/test_rag.py` | 新增 | RAG 接口集成测试 |
+| `platform/backend/tests/unit/test_script_agent.py` | 修改 | 补 RAG 集成 mock 与断言 |
+| `platform/backend/tests/unit/test_character_agent.py` | 修改 | 修复图像生成参数获取 + RAG 断言 |
+| `platform/backend/tests/unit/test_storyboard_agent.py` | 修改 | 新增 `agent` fixture + RAG 断言 |
+| `platform/backend/tests/conftest.py` | 修改 | 新增 `storyboard_agent`/`mock_web_search` fixtures |
+| `STATE.json` | 修改 | v0.13.0，新增 M6 里程碑与当前会话记录 |
+| `TEST_LOG.md` | 修改 | 追加 M6 时序条目 |
+
+---
+
+## 2026-07-27 M5 系统性优化（回归修复 + 资源/安全/结构/性能）
+
+### 变更摘要
+
+- **M5.0 测试回归修复（P0）**：会话开始时发现后端 15 failed / 316 passed（与 STATE 记录的 328/328 不符）。根因一：`HunyuanImageService.generate()` 已改为异步任务契约（POST 提交 → 轮询 `/v1/tasks/{task_id}` → 解析 result），但**文件缺少 `import asyncio`**（轮询路径 `await asyncio.sleep` 生产环境必 NameError），且 6 个单测仍按旧同步契约 mock。根因二：`storyboard_agent.execute()` 改为无条件经 LLM 重写英文提示词，9 个测试未 mock `call_llm`，真实请求打到 conftest 占位地址报 Connection error。修复：补 `import asyncio`；6 用例改 mock 新契约并打桩 `asyncio.sleep`；9 用例补 `mock_call_llm`（`prompt_used` 断言同步为 LLM 重写结果）。
+- **M5.1 后端资源/日志/安全**：`main.py` lifespan 16 行 `print` 全部改 `logger.info`（AGENTS.md 合规）；删除与模块级重复的 6 行 `mkdir`；版本号 0.3.0→0.11.0 同步；CORS 从 `allow_methods=["*"]/allow_headers=["*"]` 收敛为显式白名单（GET/POST/PUT/DELETE/OPTIONS + Content-Type/Authorization/X-NSFW/Accept）。`BaseAgent` 新增 `aclose()`，lifespan shutdown 阶段逐个关闭 11 个 agent 单例的 httpx 连接池（此前永不关闭）。`config.py` 过期注释同步（ComfyUI 5 后端、TTS GPU0 systemd 托管）。
+- **M5.2 前端结构拆分**：`Modals.tsx`（2397 行 / 11 个 Modal 组件）纯结构性拆分为 `components/modals/` 目录 13 个文件（11 组件 + shared.tsx 共享层 + index.ts barrel），最大文件 339 行；行为/props/样式零变化，`App.tsx` import 路径同步。
+- **M5.3 前端性能优化**：`Canvas.tsx` 1455→1167 行。核心：自定义节点 `DramaNode` 用 `memo` 包裹且比较器仅比较 `data` 引用（React Flow v11 会把 xPos/yPos/dragging/selected 逐帧传入，默认浅比较拖拽时失效）——拖拽/选中不再重渲染含 video/audio/img 的重型子树；dagre 布局与节点尺寸预置逻辑抽取 `canvas/layout.ts`（P0 边渲染修复机制原样保留）；`onNodeClick` useCallback 化、`characterCardImages/characterPrompts` useMemo 化消除内联对象重建。
+
+### 关键代码片段
+
+#### 1. BaseAgent 连接池生命周期（`platform/backend/app/agents/base.py`）
+
+```python
+async def aclose(self) -> None:
+    """关闭底层 httpx 连接池（应用关闭时调用）。"""
+    await self.http.aclose()
+```
+
+lifespan shutdown 中对 11 个 agent 单例逐个 `await a.aclose()`，异常仅 `logger.warning` 不中断。
+
+#### 2. DramaNode memo 比较器（`platform/frontend/src/components/canvas/DramaNode.tsx`）
+
+```typescript
+// React Flow v11 逐帧传 xPos/yPos/dragging/selected，默认浅比较拖拽时失效；
+// 节点渲染只读 data，故仅比较 data 引用，位移由外层 wrapper transform 呈现
+export default memo(DramaNode, (prev, next) => prev.data === next.data);
+```
+
+#### 3. HunyuanImage 异步任务契约 mock（`tests/unit/test_image_service.py`）
+
+```python
+# POST /v1/images/generations → {"task_id": "mock-task-1", "status": "pending"}
+# GET  /v1/tasks/mock-task-1  → {"status": "succeeded", "result": {"data": [...]}}
+# autouse fixture 打桩轮询间隔，避免拖慢测试
+monkeypatch.setattr("app.services.image_service.asyncio.sleep", AsyncMock())
+```
+
+### 回归验证
+
+- **后端全量**：`pytest tests/ -q` → **331 passed / 0 failed**，覆盖率 86.97%（≥80% 达标）
+- **前端**：`tsc --noEmit` 0 错误；`vitest run` **36/36** 通过；`pnpm build` 成功（473KB gzip 151KB）
+- **基线对比**：修复前 316 passed / 15 failed → 修复后 331 passed / 0 failed
+
+### 修改文件清单
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `platform/backend/app/services/image_service.py` | 修改 | 补 `import asyncio`（生产 bug） |
+| `platform/backend/tests/unit/test_image_service.py` | 修改 | 6 用例改异步任务契约 mock + sleep 打桩 |
+| `platform/backend/tests/unit/test_storyboard_agent.py` | 修改 | 9 用例补 mock_call_llm + 断言同步 |
+| `platform/backend/app/main.py` | 修改 | print→logging、CORS 收敛、版本 0.11.0、去重 mkdir、shutdown 关闭 agent |
+| `platform/backend/app/agents/base.py` | 修改 | 新增 `aclose()` |
+| `platform/backend/app/config.py` | 修改 | 过期注释同步（仅注释） |
+| `platform/frontend/src/components/modals/` | 新增 13 文件 | Modals.tsx 拆分（shared + 11 组件 + barrel） |
+| `platform/frontend/src/components/Modals.tsx` | 删除 | 已拆分为 modals/ 目录 |
+| `platform/frontend/src/App.tsx` | 修改 | Modal import 路径同步 |
+| `platform/frontend/src/components/Canvas.tsx` | 修改 | memo/useCallback/useMemo 优化，1455→1167 行 |
+| `platform/frontend/src/components/canvas/DramaNode.tsx` | 新增 | memo 化自定义节点 |
+| `platform/frontend/src/components/canvas/layout.ts` | 新增 | dagre 布局 + 节点尺寸预置（P0 机制保留） |
+| `STATE.json` | 修改 | v0.12.0，新增 M5 里程碑（M5.0-M5.3），test_summary 更新 |
+
+---
+
+## 2026-07-27 端到端重跑 + 最新设备清单核对（17 台）
+
+### 变更摘要
+
+- **设备清单核对**：核对 2026-07-27 最新清单（17 台，新增 core 监控中心）。关键变更：Workstation LLM 切换为本机 vLLM Nemotron-3-Nano-Omni-30B（GPU3）；ComfyUI-LB 5 后端轮询（GPU3 让给 Nemotron）；ToIV IndexTTS 迁移至 GPU0 并由 systemd 托管；pc01 ComfyUI 0.28.0 + mihomo 恢复；pc02 在线；NAS SMB 服务端正常（仅 pc01 挂载异常）。
+- **核心服务验证（11 项全在线）**：Nemotron :8000 / IndexTTS :9200(cuda:0) / ComfyUI-LB :8188 / xDiT :8288 / ASR :9880 / LatentSync :8289 / PostProcess :8290(全权重) / DeepFilterNet :8301 / EXO :52415 / NAS(43Ti,10%)。
+- **TTS 契约修复**：IndexTTS 真实契约为 `POST /tts multipart/form-data → WAV`（非 OpenAI `/v1/audio/speech`）。httpx `data=dict` 实际发送 `application/x-www-form-urlencoded`，改用 `files={k:(None,v)}` 发送真 multipart；新增 `_looks_like_audio` 魔数校验（RIFF/WAVE/ID3）防止占位文本落盘；新增 `_wav_to_mp3` ffmpeg 转码。`config.py` 端点移除错误 `/v1` 后缀。
+- **E2E 阶段二重跑**：配音 indextts 后端产出 28478B 有效 MP3（4.01s，ID3 头）；剪辑合成 PASS 0.44s；成片 `final_471e3228.mp4` 283KB h264 1080x1920+aac 2.06s。
+- **边界与异常回归**：A2/A3/A4/B1/B2/D1/D2 PASS；A1 空 premise 30s 超时（已知：未前置校验直接进 LLM，非回归）。
+- **NAS 专项 6/6**：smbfs 挂载、20MB 写读 md5 一致、读回一致、200MB 写入 66MB/s、中文文件名、SMB mode 位忽略（预期）。历史遗留测试文件（`.e2e_test/` 等）已全部清理。
+
+### 关键代码片段
+
+#### 1. IndexTTS multipart 契约修复（`platform/backend/app/services/tts_service.py`）
+
+```python
+# httpx data=dict 会发 application/x-www-form-urlencoded；
+# 真实契约为 multipart/form-data，用 files={k: (None, v)} 发送纯表单字段
+multipart = {k: (None, v) for k, v in form.items()}
+resp = await self.http.post(f"{self.endpoint}/tts", files=multipart)
+resp.raise_for_status()
+audio_bytes = resp.content
+if not _looks_like_audio(audio_bytes):
+    raise TTSServiceError(f"IndexTTS返回非音频内容 ({len(audio_bytes)}字节)")
+if audio_bytes[:4] == b"RIFF":
+    audio_bytes = await _wav_to_mp3(audio_bytes)
+```
+
+#### 2. 音频魔数校验
+
+```python
+def _looks_like_audio(data: bytes) -> bool:
+    if len(data) < 12:
+        return False
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":  # WAV
+        return True
+    if data[:3] == b"ID3" or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):  # MP3
+        return True
+    return False
+```
+
+### 回归验证
+
+- **单元测试**：TTS 19/19 通过（含 multipart Content-Type 断言、非音频内容抛错用例）；全量 329 项通过。
+- **macOS 后台进程修复**：`nohup uvicorn ... &` 被 `suspended (tty output)` 挂起，改用 `nohup uvicorn ... </dev/null >/tmp/log 2>&1 & disown` 彻底脱离终端。
+- **NAS 终验**（`/private/tmp/e2e_nas_final.sh`）：写入 md5 = 源 md5 = 读回 md5，`FINAL_C2C3_PASS`。
+
+### 修改文件清单
+
+| 文件 | 类型 | 说明 |
+|---|---|---|
+| `platform/backend/app/services/tts_service.py` | 修改 | IndexTTS multipart 契约 + 魔数校验 + WAV→MP3 转码 |
+| `platform/backend/app/config.py` | 修改 | indextts_endpoint 移除 `/v1` 后缀 |
+| `platform/backend/tests/unit/test_tts_service.py` | 修改 | 重写 IndexTTS 测试匹配新契约 |
+| `platform/backend/tests/conftest.py` | 修改 | 测试环境端点同步为 :9200 |
+| `STATE.json` | 修改 | 记录 session 2026-07-27-e2e-rerun-device-check（R1-R5 全部 completed） |
+
+---
+
+## 2026-07-25 P5 UI/UX 评估 + 模拟用户点击测试 + 真实用户测试方案
+
+### 变更摘要
+
+- **UI 主题重构**：移除粒子特效与主题切换，落地简洁浅色单一主题（白底 + 蓝色强调），CSS 变量统一管理颜色/边框/阴影；`index.css` 新增 768/1024 响应式断点（侧面板、模态框、浮动按钮适配）。
+- **模拟用户点击测试**：Agent 驱动真实 Chromium 浏览器执行 5 条关键任务路径，全部通过，0 操作错误。
+- **产出**：`docs/USER_CLICK_TEST_REPORT.md`（行为数据 + 问题清单 + 优化建议 + 真实用户招募测试方案）。
+
+### 任务路径结果
+
+| 任务 | 路径 | 结果 |
+|---|---|---|
+| T2 | 创意输入 → 生成剧本（8 节点 + 7 边渲染） | ✅ |
+| T3 | 新建剧本模态框：改标题「铁心：最后守护·修订版」→ 保存 → 画布同步 | ✅ |
+| T4 | 流程菜单展开/收起 + 禁用态 + 「生成角色」点击 | ✅ |
+| T5 | 画布 zoom in/out + 拖拽 scene-1 (680,440)→(1537,1255) + fit view | ✅ |
+| T6 | 节点详情面板：题材「科幻未来」→「科幻悬疑」→ 保存 → 重开验证同步 | ✅ |
+
+**核心指标**：任务完成率 100% ｜ 纯交互任务平均 ≈11s ｜ 操作错误率 0% ｜ 缺陷 4 个全部修复
+
+### 关键缺陷修复（点击测试中发现）
+
+**P0 连接边缺失**：剧本生成后节点渲染但 React Flow SVG edges 为空。根因：React Flow v11 依赖 ResizeObserver 完成节点/handle 测量才渲染边，rAF 被节流的环境（后台标签页/自动化浏览器）中测量永不完成。修复：预置节点尺寸 + `NodeInternalsUpdater` 主动同步测量：
+
+```typescript
+// Canvas.tsx — 布局时预置尺寸，让节点立即被视为已测量
+width: NODE_WIDTH,
+height: nodeHeight(node),
+
+// NodeInternalsUpdater — 节点集合变化后主动写入 handleBounds（不依赖 rAF）
+if (updates.length) updateNodeDimensions(updates);
+if (prevCountRef.current !== null && prevCountRef.current !== ids.length) {
+  instance.fitView({ padding: 0.2, maxZoom: 1, duration: 0 });
+}
+```
+
+**P1 生成无超时**：剧本生成后端 >4.5min 无响应时前端永久 loading。修复：`api/client.ts` 新增 `fetchWithTimeout`，`generateScript` 300s 超时 + 中文友好错误提示。
+
+**P2 体验**：画布背景深色残留 `#2a2a2a` → `#cbd5e1`；fitView 过度放大 → `fitViewOptions={{padding:0.2,maxZoom:1}}` + `maxZoom=1.5`。
+
+### 回归验证
+
+- 前端 dev 3501 / 后端 8100 健康检查 200；修复后 T2 路径复测边渲染通过（7 边全渲染）。
+- 报告：`docs/USER_CLICK_TEST_REPORT.md` 第五章含真实用户测试方案（3 类画像 10 人、R1-R10 任务、完成率/时间/错误率/SUS 指标）。
+
+---
+
 ## 2026-07-25 P4.4.10 前端补齐：唇形同步 + 后处理模态框
 
 ### 变更摘要
@@ -2152,3 +2647,137 @@ cd platform/frontend && pnpm test
 **初版结果**：10/13 passed，App.test.tsx 2/3 failed（`getByText("生成剧本")` 多元素冲突）
 
 **最终结果**（within 修复后）：13/13 passed
+
+## 2026-07-26 P5.1 API 超时保护全覆盖 + pollVideoTask 截止期限
+
+### 变更摘要
+
+P5 复盘发现 F2（generateScript 无超时）同类风险仍然普遍存在：
+
+1. **13 个长耗时端点无超时保护**：character/storyboard/storyboardBatch/video/videoBatch/videoAsync/voice/subtitle/compose/quality/visualQuality/lipSync/postprocess 均使用裸 `fetch`，后端阻塞时前端永久等待。
+2. **pollVideoTask 无限轮询**：定义在 Canvas.tsx 组件层（违反 API 分层规范），`while(true)` 无截止期限，任务卡死时前端永久轮询。
+
+### 修复内容
+
+**[client.ts](platform/frontend/src/api/client.ts)**：
+
+- 新增 `API_TIMEOUTS` 分级超时常量（15 档）：
+
+```typescript
+export const API_TIMEOUTS = {
+  script: 300_000, character: 180_000, storyboard: 240_000,
+  storyboardBatch: 600_000, video: 600_000, videoBatch: 1_800_000,
+  taskCreate: 30_000, voice: 120_000, subtitle: 120_000,
+  compose: 900_000, quality: 300_000, visualQuality: 600_000,
+  lipSync: 600_000, postprocess: 1_800_000, pollInterval: 3_000,
+} as const;
+```
+
+- 13 个端点全部从裸 `fetch` 切换为 `fetchWithTimeout(url, opts, API_TIMEOUTS.x)`。
+- `pollVideoTask` 从 Canvas.tsx 移入 client.ts，增加双层保护：
+
+```typescript
+export async function pollVideoTask(
+  pollUrl: string,
+  maxWaitMs: number = API_TIMEOUTS.video
+): Promise<ProgressEvent> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, API_TIMEOUTS.pollInterval));
+    const resp = await fetchWithTimeout(pollUrl, {}, API_TIMEOUTS.taskCreate);
+    if (!resp.ok) throw new Error(`轮询失败: ${resp.status}`);
+    const evt: ProgressEvent = await resp.json();
+    if (evt.status === "completed" || evt.status === "failed") return evt;
+  }
+  throw new Error(`轮询超时（${Math.round(maxWaitMs / 1000)}秒）。任务仍在运行，请稍后重试。`);
+}
+```
+
+**[Canvas.tsx](platform/frontend/src/components/Canvas.tsx)**：删除本地 `pollVideoTask` 与不再使用的 `ProgressEvent` 导入，改为从 `../api/client` 导入。
+
+### 前端测试
+
+新增 **[client.test.ts](platform/frontend/src/api/client.test.ts)** 19 条用例（TDD 先红后绿）：
+
+- 14 条端点超时：mock 永不响应的 fetch（仅响应 abort），用 fake timers 推进到各端点预期超时毫秒，断言抛出 `/请求超时/` 而非永久等待。
+- 5 条轮询行为：完成返回 / 失败返回 / 长期 running 超过 maxWaitMs 抛 `/轮询超时/` / 错误状态码抛 `/轮询失败: 404/` / 单次请求阻塞在 pollInterval + taskCreate 内中止。
+
+顺带修复 UI 重构后过期的 **App.test.tsx** 3 条用例（属历史欠账，非本次变更引入）：
+
+- 顶栏标题 `AI 短剧工作台 — M4 原型` → `AI 短剧工作台`。
+- 流程按钮已收纳进"流程"下拉菜单：测试改为 `fireEvent.click(getByText("流程"))` 后在 `.dropdown-menu` 内断言。
+- `生成剧本` → `新建剧本`；`质检` → `剧本质检`。
+
+```bash
+cd platform/frontend && pnpm vitest run && pnpm build
+```
+
+**结果**：36/36 passed（useDramaStore 14 + ThemeSwitcher 8 + App 3 + client 19）；tsc + vite build success（dist/index.js 473.12KB / gzip 149.73KB）
+
+## 2026-07-26 P5.2 NAS 挂载 + 真实环境端到端测试
+
+### 背景
+
+完成绿联 DXP8800 NAS（`192.168.71.7:445`，smbfs，43Ti 总量 / 4.1Ti 已用）挂载配置后，执行覆盖"界面 → 后端 → 存储 → 网络"全链路的真实环境 E2E 测试。
+
+### E2E 阶段一（此前已通过）
+
+剧本生成 → 角色卡 → 分镜 → 配音 → 字幕，5/5 PASS。
+
+### E2E 阶段二（本次）：视频生成 → 剪辑合成
+
+发现并修复两个 P0 级缺陷：
+
+**缺陷 1：xDiT 容器 OpenCV ImportError（导出阶段失败）**
+
+推理 4009.8s 完成后 `export_to_video` 抛 `ImportError: export_to_video requires the OpenCV library`。但 `docker exec ... python -c 'import cv2'` 正常。根因：opencv-python-headless 是在服务进程（PID 1）启动**之后**才 pip install 的，diffusers `export_utils` 在模块加载时缓存了可用性检测结果，进程不重启永远不会重新检测。修复：
+
+```bash
+docker exec xdit-hunyuanvideo pip install imageio imageio-ffmpeg  # diffusers 推荐后端，双保险
+docker restart xdit-hunyuanvideo
+```
+
+**缺陷 2：后端 --reload 模式二次热重载丢任务**
+
+视频推理中途（~15:15）uvicorn worker 从 PID 6027 变为 48337，内存任务表清空，轮询返回 `{"detail":"任务 video-xxx 不存在或已过期"}`。修复：改为无 `--reload` 生产模式启动（`nohup .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8100`）。
+
+**配置调整**：[config.py](platform/backend/app/config.py) `xdit_request_timeout` 600s → 1800s（720p/8s/193帧实测推理 4009.8s 超旧超时；本次验证用 2s/49帧，实测 355s）。
+
+### 测试结果
+
+```text
+视频生成   PASS  355s（xDiT 侧推理 353.2s，49帧 720p）
+剪辑合成   PASS  0.73s
+成片验证   PASS  HTTP 200, 267597 字节, MP4 h264 1080x1920 + aac 音频轨, 2.06s
+```
+
+### 边界与异常测试
+
+| 组 | 项目 | 结果 |
+|---|---|---|
+| A1 | 空 premise | PASS（被拒绝） |
+| A2 | 超长 premise（10万字） | PASS（HTTP200 不崩溃） |
+| A3 | episodes=0 / 999 | PASS（边界处理不崩溃） |
+| A4 | 非法 JSON | PASS（HTTP422） |
+| B1 | 不存在的进度任务 | PASS（HTTP404 + 友好提示） |
+| B2 | 不存在的静态文件 | PASS（HTTP404） |
+| C1 | NAS 挂载有效性 | PASS（smbfs） |
+| C2/C3/C5 | NAS 写读一致性/只读权限/读回 | 未完整验证（trae-sandbox 拦截 NAS 路径 cp/rm/chmod；dd/echo/cat 可写） |
+| C4 | 500MB 大文件写入 | PASS（524288000 字节落盘；首次挂载实测 11MB/s） |
+| C6 | 中文目录/文件名读写 | PASS |
+| D1 | 并发 10 健康检查 | PASS（10/10） |
+| D2 | 视频推理期间后端响应 | PASS（HTTP200） |
+
+**汇总**：A 4/4 + B 2/2 + D 2/2 + C 3/6。
+
+### 性能基线
+
+- xDiT 720p/8s（193帧）推理：4009.8s（重启前实测）
+- xDiT 720p/2s（49帧）推理：355s
+- 剪辑合成（单段 2s）：0.73s
+- NAS SMB 写速：11MB/s（首次挂载 500MB 实测）
+
+### 遗留事项
+
+- NAS 上残留 5 个测试文件（`.e2e_big.bin` 500MB、`.e2e_test_rw.bin`、`.e2e_ro.txt`、`.e2e_dir/`、`.e2e_test/`），trae-sandbox 拦截 rm 无法自动清理，需手动删除。
+- xdit_request_timeout=1800s 对 720p/8s（约 67 分钟）仍不足，长视频场景需调至 5400s 或拆段生成。

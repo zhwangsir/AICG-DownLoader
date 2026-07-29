@@ -499,6 +499,9 @@ class VisualQualityAgent(BaseAgent):
                 })
 
             # 4. 调用 VLM（使用独立的 VLM 客户端，指向 workstation Qwen3-VL 服务）
+            # Nemotron 推理模型对多帧画面会产生超长思考链（>8000 token 仍被截断），
+            # 通过 chat_template_kwargs.enable_thinking=False 关闭推理模式，
+            # 直接输出 JSON（实测 8000 token 耗尽 → 81 token 完成）。
             client = self._get_vlm_client()
             resp = await client.chat.completions.create(
                 model=settings.visual_model_name,
@@ -506,8 +509,22 @@ class VisualQualityAgent(BaseAgent):
                 temperature=0.3,
                 max_tokens=2000,
                 stream=False,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
             raw = resp.choices[0].message.content or ""
+            if not raw:
+                raw = getattr(resp.choices[0].message, "reasoning_content", "") or ""
+
+            # 剥离推理标记（与 BaseAgent.call_llm 相同的容错逻辑，
+            # 保留以兼容不支持 enable_thinking 的 VLM 服务）
+            if "</think>" in raw:
+                raw = raw.split("</think>", 1)[1]
+            raw = raw.replace("<think>", "").strip()
+            if raw.startswith("```"):
+                lines = raw.split("\n")[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                raw = "\n".join(lines).strip()
 
             try:
                 data = json.loads(raw)

@@ -16,6 +16,8 @@ dependencies = [
     "json-repair>=0.30.0",
     "edge-tts>=7.0.0",
     "faster-whisper>=1.0.0",
+    "fastembed>=0.4.0",
+    "numpy>=1.26.0",
 ]
 
 [project.optional-dependencies]

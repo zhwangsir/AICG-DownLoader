@@ -1,2 +1,3 @@
 allowBuilds:
+  '0': esbuild
   esbuild: set this to true or false

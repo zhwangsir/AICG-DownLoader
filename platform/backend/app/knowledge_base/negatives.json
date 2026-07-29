@@ -1,0 +1,146 @@
+{
+  "version": "1.0.0",
+  "description": "按主题分组的负面提示词库",
+  "entries": [
+    {
+      "id": "negative_quality",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "通用画质负面词",
+      "content": " blurry, out of focus, low resolution, low quality, compressed, jpeg artifacts, noise, grainy, oversaturated, underexposed, overexposed, distorted, deformed, ugly, duplicate, watermark, signature, text, logo, cropped, out of frame.",
+      "tags": ["画质", "低质量", "模糊", "水印"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "negative_anatomy",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "人体结构负面词",
+      "content": " bad anatomy, extra limbs, missing limbs, malformed hands, fused fingers, too many fingers, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, ugly, bad proportions, cross-eyed, blurry eyes.",
+      "tags": ["人体", "畸形", "手指", "五官"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_video_motion",
+      "category": "negative",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "视频运动负面词",
+      "content": " shaky camera, jittery motion, flickering, stuttering, inconsistent motion, morphing, shape shifting, objects floating, physics error, unnatural movement, frozen frame, duplicated frames, sudden cuts.",
+      "tags": ["视频", "抖动", "闪烁", "变形"],
+      "model_target": ["Sora-like", "ComfyUI"]
+    },
+    {
+      "id": "negative_style",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "风格污染负面词",
+      "content": " cartoon, anime, 3d render, cgi, illustration, painting, drawing, sketch, comic, western cartoon, plastic skin, doll, toy, miniature, model.",
+      "tags": ["风格", "卡通", "动漫", "3D"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_realistic",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "写实风格专用负面词",
+      "content": " anime, cartoon, illustration, painting, 3d render, cgi, unrealistic, dreamy, fantasy, oversaturated, plastic skin, porcelain doll, perfect skin, smooth skin.",
+      "tags": ["写实", "电影感", "风格污染"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_portrait",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "人像特写负面词",
+      "content": " acne, blemishes, wrinkles, scars, makeup smudge, red eyes, lazy eye, crooked teeth, double chin, bad teeth, unkempt hair, oily skin, shiny skin, sunburn.",
+      "tags": ["人像", "面部", "瑕疵"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_text_safe",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "通用安全负面词",
+      "content": " nsfw, nude, naked, violence, blood, gore, weapon, gun, knife, injury, death, corpse, horror, scary, disturbing, explicit, sexual.",
+      "tags": ["安全", "NSFW", "暴力"],
+      "model_target": ["SDXL", "ComfyUI", "Sora-like"]
+    },
+    {
+      "id": "negative_anime_style",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "动漫卡通专用负面词",
+      "content": "realistic, photorealistic, 3d render, western cartoon, live action, bad anatomy",
+      "tags": ["动漫", "卡通", "写实", "3D"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_cgi_3d",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "2D/手绘专用负面词",
+      "content": "3d render, cgi, realistic, live action, smooth gradients, plastic",
+      "tags": ["2D", "手绘", "3D", "CGI"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_temporal",
+      "category": "negative",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "视频时序一致性负面词",
+      "content": "flickering, morphing, jittery motion, inconsistent lighting, color shift, frame tear, duplicated frames, objects floating",
+      "tags": ["视频", "闪烁", "变形", "时序一致性"],
+      "model_target": ["Sora-like", "ComfyUI", "HunyuanVideo", "Wan", "CogVideoX"]
+    },
+    {
+      "id": "negative_composition",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "构图与透视负面词",
+      "content": "bad anatomy, out of frame, cropped, tilted horizon, distorted perspective, cluttered background, bad proportions",
+      "tags": ["构图", "透视", "裁切", "地平线"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_hands",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "手部负面词",
+      "content": "extra fingers, fused fingers, missing fingers, malformed hands, poorly drawn hands, extra limbs",
+      "tags": ["手部", "手指", "畸形", "多肢体"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_face",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "面部负面词",
+      "content": "asymmetrical eyes, cross-eyed, bad teeth, distorted face, blank expression, makeup smudge",
+      "tags": ["面部", "五官", "不对称", "表情"],
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
+      "id": "negative_landscape",
+      "category": "negative",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "建筑与户外负面词",
+      "content": "distorted perspective, floating objects, mismatched scale, duplicate buildings, broken horizon, weird architecture",
+      "tags": ["建筑", "户外", "透视", "悬浮物"],
+      "model_target": ["SDXL", "ComfyUI"]
+    }
+  ]
+}

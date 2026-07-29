@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -29,6 +30,8 @@ from app.models.schemas import (
     PostprocessRequest,
     QualityCheckRequest,
     QualityVisualRequest,
+    RAGOptimizeRequest,
+    RAGOptimizeResponse,
     ScriptRequest,
     StoryboardBatchRequest,
     StoryboardRequest,
@@ -38,6 +41,7 @@ from app.models.schemas import (
     VideoRequest,
     VoiceRequest,
 )
+from app.services.rag_service import rag_service
 
 router = APIRouter(prefix="/api/drama", tags=["drama"])
 
@@ -81,6 +85,11 @@ async def health() -> dict:
             "indextts": {"endpoint": settings.indextts_endpoint, "enabled": settings.tts_backend == "indextts"},
             "qwen3_asr": {"endpoint": settings.qwen3_asr_endpoint, "enabled": settings.asr_backend == "qwen3_asr"},
         },
+        "rag": {
+            "enabled": settings.rag_optimize_enabled,
+            "embed_model": settings.rag_embed_model,
+            "top_k": settings.rag_top_k,
+        },
         "agents": [
             "script_agent",
             "character_agent",
@@ -96,6 +105,34 @@ async def health() -> dict:
         ],
         "downloader_config_loaded": settings.downloader_config is not None,
     }
+
+
+@router.post("/rag/optimize", response_model=RAGOptimizeResponse)
+async def rag_optimize(request: RAGOptimizeRequest) -> RAGOptimizeResponse:
+    """RAG 提示词优化：将用户描述转换为高质量英文生成提示词。"""
+    try:
+        result = await rag_service.optimize_prompt(
+            user_prompt=request.user_prompt,
+            domain=request.domain,
+            style_hint=request.style_hint or None,
+            extra_instruction=request.extra_instruction or None,
+        )
+        return RAGOptimizeResponse(**result)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("RAG 优化接口失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"RAG 优化失败: {e}") from e
+
+
+@router.get("/rag/styles")
+async def rag_styles() -> list[dict[str, Any]]:
+    """返回内置风格库列表，供前端下拉选择。"""
+    try:
+        return rag_service.get_styles()
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("RAG 风格列表失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"RAG 风格列表失败: {e}") from e
 
 
 @router.post("/script/generate", response_model=AgentResponse)

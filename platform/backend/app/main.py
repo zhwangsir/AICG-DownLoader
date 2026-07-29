@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,8 +10,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.agents.character_agent import character_agent
+from app.agents.edit_agent import edit_agent
+from app.agents.lip_sync_agent import lip_sync_agent
+from app.agents.postprocess_agent import postprocess_agent
+from app.agents.quality_agent import quality_agent, visual_quality_agent
+from app.agents.script_agent import script_agent
+from app.agents.storyboard_agent import storyboard_agent
+from app.agents.subtitle_agent import subtitle_agent
+from app.agents.video_agent import video_agent
+from app.agents.voice_agent import voice_agent
 from app.config import settings
 from app.routers import drama, progress
+
+logger = logging.getLogger(__name__)
 
 # 输出目录 —— 与 agents 的 OUTPUT_DIR 保持一致（platform/backend/output/）
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
@@ -32,37 +45,45 @@ POSTPROCESS_DIR.mkdir(parents=True, exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时打印配置摘要。"""
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    SUBTITLE_DIR.mkdir(parents=True, exist_ok=True)
-    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-    CHARACTER_DIR.mkdir(parents=True, exist_ok=True)
-    STORYBOARD_DIR.mkdir(parents=True, exist_ok=True)
-    POSTPROCESS_DIR.mkdir(parents=True, exist_ok=True)
+    """启动时输出配置摘要；关闭时释放所有 Agent 的 HTTP 连接池。"""
     dc = settings.downloader_config
-    print("=" * 60)
-    print("AI 短剧工作台后端启动")
-    print(f"  EXO LLM    : {settings.exo_base_url} ({settings.exo_model_glm52})")
-    print(f"  ComfyUI HQ : {settings.comfyui_image_hq}")
-    print(f"  ComfyUI Fast: {settings.comfyui_image_fast}")
-    print(f"  ComfyUI Video A: {settings.comfyui_video_a}")
-    print(f"  图像后端   : {settings.image_backend} (LTX 预览: {settings.ltx_video_enabled})")
-    print(f"  视频后端   : {settings.video_backend}")
-    print(f"  ASR/TTS    : {settings.asr_backend} / {settings.tts_backend}")
-    print(f"  唇形同步   : {settings.lip_sync_enabled} (LatentSync)")
-    print(f"  后处理     : {settings.postprocess_enabled} (RealBasicVSR+RIFE+ProPainter+DeepFilterNet3+H.265)")
+    lines = [
+        "=" * 60,
+        "AI 短剧工作台后端启动",
+        f"  EXO LLM    : {settings.exo_base_url} ({settings.exo_model_glm52})",
+        f"  ComfyUI HQ : {settings.comfyui_image_hq}",
+        f"  ComfyUI Fast: {settings.comfyui_image_fast}",
+        f"  ComfyUI Video A: {settings.comfyui_video_a}",
+        f"  图像后端   : {settings.image_backend} (LTX 预览: {settings.ltx_video_enabled})",
+        f"  视频后端   : {settings.video_backend}",
+        f"  ASR/TTS    : {settings.asr_backend} / {settings.tts_backend}",
+        f"  唇形同步   : {settings.lip_sync_enabled} (LatentSync)",
+        f"  后处理     : {settings.postprocess_enabled} (RealBasicVSR+RIFE+ProPainter+DeepFilterNet3+H.265)",
+    ]
     if dc:
-        print(f"  下载器配置  : comfy_root={dc.comfy_root}, torch={dc.torch_index}")
-    print(f"  静态资源   : /static/audio, /static/subtitle, /static/video, /static/character, /static/storyboard, /static/postprocess")
-    print(f"  CORS       : {settings.cors_origin_list}")
-    print("=" * 60)
+        lines.append(f"  下载器配置  : comfy_root={dc.comfy_root}, torch={dc.torch_index}")
+    lines.append("  静态资源   : /static/audio, /static/subtitle, /static/video, /static/character, /static/storyboard, /static/postprocess")
+    lines.append(f"  CORS       : {settings.cors_origin_list}")
+    lines.append("=" * 60)
+    logger.info("\n".join(lines))
     yield
+    # shutdown 阶段：关闭所有 Agent 单例的 httpx 连接池
+    agents = [
+        script_agent, character_agent, storyboard_agent, video_agent,
+        voice_agent, subtitle_agent, edit_agent, quality_agent,
+        visual_quality_agent, lip_sync_agent, postprocess_agent,
+    ]
+    for a in agents:
+        try:
+            await a.aclose()
+        except Exception:
+            logger.warning("关闭 Agent HTTP 客户端失败: %s", a.name, exc_info=True)
 
 
 app = FastAPI(
     title="AI 短剧一条龙工作台",
     description="剧本/角色/分镜/视频/配音/字幕 Agent 全流程",
-    version="0.3.0",
+    version="0.11.0",
     lifespan=lifespan,
 )
 
@@ -70,8 +91,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-NSFW", "Accept"],
 )
 
 # 静态文件服务：音频、字幕、视频成片、角色图、分镜图
@@ -92,8 +113,8 @@ app.include_router(progress.router)
 async def root() -> dict:
     return {
         "name": "AI 短剧一条龙工作台",
-        "version": "0.3.0",
-        "milestone": "M4 — 剪辑 Agent",
+        "version": "0.11.0",
+        "milestone": "M5 — 系统性优化",
         "docs": "/docs",
         "health": "/api/drama/health",
     }

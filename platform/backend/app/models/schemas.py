@@ -464,3 +464,27 @@ class AgentResponse(BaseModel):
     data: Any = None
     error: str | None = None
     elapsed_seconds: float = 0.0
+
+
+class RAGOptimizeRequest(BaseModel):
+    """RAG 提示词优化请求。"""
+
+    user_prompt: str = Field(..., description="用户原始中文/英文描述")
+    domain: str = Field("video", description="目标领域：image / video")
+    style_hint: str = Field("", description="风格提示，用于增强检索")
+    extra_instruction: str = Field("", description="额外优化指令")
+
+
+class RAGOptimizeResponse(BaseModel):
+    """RAG 提示词优化响应。"""
+
+    optimized_positive: str = Field("", description="优化后的英文正向提示词")
+    optimized_negative: str = Field("", description="优化后的英文负向提示词")
+    style_notes: str = Field("", description="中文风格/技法说明")
+    tags: list[str] = Field(default_factory=list, description="检索/分类标签")
+    lora_recommendations: list[dict[str, Any]] = Field(
+        default_factory=list, description="推荐 LoRA 列表（filename/style_key/trigger_words/weight）"
+    )
+    original_prompt: str = Field("", description="原始用户描述")
+    retrieved_count: int = Field(0, description="检索到的知识条目数")
+    fallback: bool = Field(False, description="是否使用了兜底结果")

@@ -1,7 +1,7 @@
 {
   "project": "AICG-DownLoader-main",
-  "version": "0.11.0",
-  "last_updated": "2026-07-25",
+  "version": "0.13.0",
+  "last_updated": "2026-07-29",
   "description": "ComfyUI 模型下载器 + AI 短剧生成平台。里程碑状态追踪文件，记录历史交付与当前会话优先级任务进度。",
   "milestones": {
     "M0": {
@@ -33,610 +33,234 @@
       "status": "delivered",
       "summary": "文本质检 + 视觉质检（Qwen3-VL）+ SSE 进度推送 + 指数退避重试 + Zustand 状态管理 + dagre 画布布局。E2E 通过（804s，成片 6.1s）",
       "subtasks": []
+    },
+    "M5": {
+      "name": "系统性优化（回归修复 + 资源/安全/结构/性能）",
+      "status": "delivered",
+      "summary": "修复 15 项测试回归（image_service 缺 import asyncio 生产 bug + 契约变更）；后端 print→logging、CORS 收敛、httpx 客户端生命周期管理；前端 Modals.tsx 2397 行拆分为 13 文件；Canvas.tsx memo 化与布局抽取。全量回归：后端 331/331（覆盖率 86.97%）、前端 36/36、tsc 0 错误、build 成功。",
+      "subtasks": [
+        {
+          "id": "M5.0",
+          "name": "测试回归修复（P0）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/image_service.py",
+            "platform/backend/tests/unit/test_image_service.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py"
+          ],
+          "notes": "image_service 补 import asyncio（轮询路径 NameError 生产 bug）；6 用例改异步任务契约 mock（submit→poll→result）+ sleep 打桩；storyboard 9 用例补 mock_call_llm，prompt_used 断言同步为 LLM 重写结果"
+        },
+        {
+          "id": "M5.1",
+          "name": "后端资源/日志/安全",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/main.py",
+            "platform/backend/app/agents/base.py",
+            "platform/backend/app/config.py"
+          ],
+          "notes": "lifespan print→logging（AGENTS.md 合规）；删除重复 mkdir；版本同步 0.11.0；CORS allow_methods/headers 显式收敛；BaseAgent 新增 aclose()，lifespan shutdown 关闭 11 个 agent 单例连接池；config.py 过期注释同步（ComfyUI 5 后端、TTS GPU0 systemd）"
+        },
+        {
+          "id": "M5.2",
+          "name": "前端 Modals.tsx 拆分",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/components/modals/ (13 个新文件)",
+            "platform/frontend/src/App.tsx",
+            "platform/frontend/src/components/Modals.tsx (已删除)"
+          ],
+          "notes": "2397 行/11 个 Modal 拆为 modals/ 目录单文件组件 + shared.tsx 共享层 + index.ts barrel；最大文件 339 行；行为/props/样式零变化"
+        },
+        {
+          "id": "M5.3",
+          "name": "前端 Canvas.tsx 性能优化",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/components/Canvas.tsx",
+            "platform/frontend/src/components/canvas/DramaNode.tsx",
+            "platform/frontend/src/components/canvas/layout.ts"
+          ],
+          "notes": "DramaNode memo 化（仅比较 data 引用，拖拽/选中不再重渲染重型子树）；布局算法抽取 layout.ts（P0 边渲染修复机制原样保留）；onNodeClick useCallback + characterCardImages/characterPrompts useMemo；Canvas 1455→1167 行"
+        }
+      ]
+    },
+    "M6": {
+      "name": "RAG 提示词优化知识库",
+      "status": "delivered",
+      "summary": "内置 AI 模型用于影视/短剧/动漫生成提示词优化。构建六类知识库（风格/镜头技法/负面提示词/示例 Prompt/提示词方法论/类型片叙事模板），实现 RAGService 检索+LLM 重写 pipeline，并集成到剧本/角色/分镜 Agent。新增 /api/drama/rag/optimize 与 /api/drama/rag/styles 接口。针对 28 种风格为类型片模板搭配 Civitai Flux.1 D LoRA，实现 20 个风格 LoRA 的批量下载、SHA256 校验与 RAG 推荐集成。覆盖 RAG 服务、LoRA 推荐、各 Agent 集成测试。全量回归：后端 356/356（覆盖率 85.47%），前端 36/36，tsc 0 错误，build 成功。",
+      "subtasks": [
+        {
+          "id": "M6.1",
+          "name": "RAG 架构与影视生成提示词方法深度调研",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/knowledge_base/styles.json",
+            "platform/backend/app/knowledge_base/shots.json",
+            "platform/backend/app/knowledge_base/negatives.json",
+            "platform/backend/app/knowledge_base/examples.json",
+            "platform/backend/app/knowledge_base/methods.json",
+            "platform/backend/app/knowledge_base/genre_tropes.json"
+          ],
+          "notes": "按风格(style)、镜头技法(shot)、负面提示词(negative)、示例(example)、提示词方法论(method)、类型片叙事模板(genre_trope)六类组织知识库；每条条目统一 schema：id/category/domain/lang/title/content/tags/model_target，示例额外包含 optimized_positive/optimized_negative/style；覆盖写实电影感/都市情感/悬疑暗调/赛博朋克/古风仙侠/国漫/日漫/卡通3D/恐怖惊悚/科幻太空/末日废土/黑色电影/复古港风/宫廷古装/校园青春/家庭伦理现实主义/喜剧明快/纪录片纪实/韩剧浪漫/现代动作/定格动画黏土/像素艺术8-bit/蒸汽波/西方奇幻等 28 种风格，特写/中景/广角/低角度/荷兰角/过肩/跟随/推镜/手持/航拍/极特写/POV/变焦/摇臂/斯坦尼康/长镜头/分屏/匹配剪辑/微距/慢动作/延时/柔光箱/烛光/月光/暖辉光/高调/单色/三分法/对称构图/雨/雪/雾等 43 种镜头语言，14 组负面提示词、11 条高质量示例、8 条提示词优化方法论、20 种类型片叙事镜头模板（霸总对峙/甜宠约会/校园天台告白/古风竹林对决/宫廷权谋/都市悬疑追凶/黑色电影侦探办公室/赛博朋克追逐/恐怖 jump scare/喜剧夸张登场/家庭情感重逢/古装战场/灵异现身/职场博弈/仙侠渡劫/复仇打脸/医疗急救/末日废土/古风沐浴/校园霸凌反击）"
+        },
+        {
+          "id": "M6.2",
+          "name": "RAGService 核心实现",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/rag_service.py",
+            "platform/backend/app/config.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/pyproject.toml"
+          ],
+          "notes": "RAGService 加载六类知识库 JSON、生成 fastembed 向量并本地缓存、按 domain/style 元数据过滤、Top-K 检索、结果融合（风格+镜头+示例+负面+方法论+类型片叙事模板）后调用本地 LLM（OpenAI 兼容接口）重写为高质量英文正/负提示词；系统提示词新增[类型片叙事镜头模板]章节；兜底输出兼容 genre_trope 的 content 与 negative_terms；config.py 新增 rag_optimize_enabled/rag_embed_model/rag_top_k；schemas.py 新增 RAGOptimizeRequest/Response；pyproject.toml 添加 fastembed/numpy 依赖"
+        },
+        {
+          "id": "M6.3",
+          "name": "API 路由暴露",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/routers/drama.py"
+          ],
+          "notes": "新增 POST /api/drama/rag/optimize（返回 optimized_positive/optimized_negative/style_notes/tags）与 GET /api/drama/rag/styles（返回内置风格列表供前端下拉选择）"
+        },
+        {
+          "id": "M6.4",
+          "name": "Agent 集成 RAG 优化",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/script_agent.py",
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/agents/storyboard_agent.py"
+          ],
+          "notes": "script_agent 在剧本生成后对每幕场景 description 调用 RAG 优化为英文视频生成提示词；character_agent 对三视图 front/side/closeup 提示词按 style 优化并保持 solo single person 约束；storyboard_agent 对分镜英文提示词优化并保持 9:16 竖屏构图；均支持 RAG 失败时保留原提示词不阻断流程"
+        },
+        {
+          "id": "M6.5",
+          "name": "单元/集成测试与回归",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_rag_service.py",
+            "platform/backend/tests/integration/test_rag.py",
+            "platform/backend/tests/unit/test_script_agent.py",
+            "platform/backend/tests/unit/test_character_agent.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py",
+            "platform/backend/tests/conftest.py"
+          ],
+          "notes": "RAGService 8 个单元测试覆盖加载/检索/优化/失败兜底；integration/test_rag.py 5 个接口测试；script/character/storyboard agent 测试补 mock 与断言验证 RAG 集成；修复 AsyncOpenAI 模块级导入、向量迭代器 side_effect、角色图像生成 args 参数获取等问题"
+        },
+        {
+          "id": "M6.6",
+          "name": "类型片叙事镜头模板知识库增强",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/knowledge_base/genre_tropes.json",
+            "platform/backend/app/services/rag_service.py",
+            "platform/backend/tests/unit/test_rag_service.py"
+          ],
+          "notes": "新增 20 条短剧/影视剧类型片叙事镜头模板（霸总对峙、甜宠约会、校园告白、古风对决、宫廷权谋、都市悬疑追凶、黑色电影侦探办公室、赛博朋克追逐、恐怖 jump scare、喜剧夸张登场、家庭情感重逢、古装战场、灵异现身、职场博弈、仙侠渡劫、复仇打脸、医疗急救、末日废土、古风沐浴、校园霸凌反击）；RAGService 多路检索与系统提示词新增 genre_trope 分支；兜底输出合并类型片 content 与 negative_terms；新增 4 个单元测试覆盖 genre_trope 检索/系统提示词/优化调用/兜底输出"
+        },
+        {
+          "id": "M6.7",
+          "name": "LoRA 搭配、批量下载与 RAG 推荐集成",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/knowledge_base/genre_tropes.json",
+            "platform/backend/app/services/rag_service.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/tests/unit/test_rag_service.py",
+            "platform/backend/scripts/lora_manifest.json",
+            "platform/backend/scripts/download_loras.py"
+          ],
+          "notes": "为 20 条类型片模板按 style_key 搭配推荐 LoRA（含 filename/trigger_words/weight）；检查 NAS 现有 LoRA 后以视频类为主、缺风格化 LoRA，于是从 civitai.com/civitai.red 批量下载 20 个 Flux.1 D 风格 LoRA，结果 17 成功、3 已存在跳过、0 失败，全部通过 SHA256 校验；RAGService 新增 _collect_lora_recommendations 与系统提示词 [推荐 LoRA] 章节；RAGOptimizeResponse 新增 lora_recommendations 字段；新增/更新 4 个单元测试覆盖 LoRA 去重、系统提示词、优化返回、兜底输出"
+        }
+      ]
     }
   },
   "current_session": {
-    "session_id": "2026-07-23-p0-p3",
-    "goal": "配置修正 + git 恢复 + lucide-react 统一图标 + 字幕闭环 + 里程碑产物",
+    "session_id": "2026-07-29-m6-rag-prompt-optimization",
+    "goal": "M6 RAG 提示词优化知识库：内置 AI 模型优化影视/短剧/动漫生成提示词",
+    "previous_session_archived": "2026-07-27-m5-systematic-optimization",
     "tasks": {
-      "P0-1": {
-        "name": "修正配置漂移（IPv6 + LB 入口）",
+      "R1": {
+        "name": "影视/动漫生成提示词优化方法与 RAG 架构深度调研",
+        "status": "completed",
+        "notes": "整理风格(style)、镜头技法(shot)、负面提示词(negative)、示例(example)、提示词方法论(method)五类知识；统一 JSON schema 与 metadata 过滤策略；覆盖 28 种视觉风格、43 种镜头/光影/构图/天气技法、14 组负面提示词、11 条高质量示例、8 条提示词优化方法论"
+      },
+      "R2": {
+        "name": "RAGService 与 API 路由实现",
         "status": "completed",
         "files": [
-          "platform/backend/.env",
-          "platform/backend/.env.example",
-          "platform/backend/app/config.py",
-          "platform/backend/app/agents/base.py"
-        ],
-        "summary": "所有服务地址从过时的 192.168.71.100 + Tailscale 切换到 IPv6 直连 + ComfyUI LB 入口 8188（禁止直连单卡 8189-8192）。spark01 vLLM qwen3.6-35b-a3b-awq 双机 TP2，workstation Qwen3-VL-72B BF16 TP2。"
-      },
-      "P0-2": {
-        "name": "恢复 git 仓库",
-        "status": "completed",
-        "files": [".gitignore"],
-        "summary": "git init -b main 完成，remote 已绑定 https://github.com/zhwangsir/AICG-DownLoader.git。.gitignore 补充 .venv/ .coverage .pytest_cache/ uv.lock __pycache__/ *.pyc .DS_Store .vscode/ .idea/"
-      },
-      "P1-1": {
-        "name": "引入 lucide-react 统一图标 + 修复 App.test.tsx",
-        "status": "completed",
-        "files": [
-          "platform/frontend/src/components/ui/Icon.tsx",
-          "platform/frontend/src/components/Canvas.tsx",
-          "platform/frontend/src/components/Modals.tsx",
-          "platform/frontend/package.json",
-          "platform/frontend/src/App.test.tsx"
-        ],
-        "summary": "创建 components/ui/Icon.tsx 统一图标入口（barrel export + 类型联合）。Canvas/Modals 中 emoji（✓/🔒）替换为 Lucide 组件。vitest 4.1.10 降级为 2.1.9（与 vite 5.4 兼容）。修复 App.test.tsx：用 within 把查询限定到 topbar，避免与 Canvas 节点面板同名按钮冲突。",
-        "tests": {
-          "frontend": "13/13 passed",
-          "build": "success"
-        }
-      },
-      "P1-2": {
-        "name": "字幕闭环：质检 issues 自动回写 SRT 修正 ASR 错别字",
-        "status": "completed",
-        "files": [
-          "platform/backend/app/models/schemas.py",
-          "platform/backend/app/agents/quality_agent.py",
+          "platform/backend/app/services/rag_service.py",
           "platform/backend/app/routers/drama.py",
-          "platform/backend/tests/unit/test_subtitle_fix.py",
-          "platform/frontend/src/api/client.ts",
-          "platform/frontend/src/components/ui/Icon.tsx",
-          "platform/frontend/src/components/Modals.tsx"
+          "platform/backend/app/config.py",
+          "platform/backend/app/models/schemas.py"
         ],
-        "summary": "后端：SubtitleFixRequest/Result schemas + apply_subtitle_fixes() 提取修正对（'X'应为'Y' 与 X→Y 双模式）+ 替换文本 + 重建 SRT + 回写文件 + /quality/apply_subtitle_fix 路由 + 15 个单元测试（复现 E2E 报告中 林声→林深/这辈→这杯/定上→盯上/林生→林深/指条→纸条 场景）。前端：applySubtitleFix API + SubtitleFixResult 类型 + QualityModal 一键修正按钮（Wand2 图标）+ 修正对可视化展示。",
-        "tests": {
-          "backend": "137/137 passed",
-          "backend_coverage": "83.74%",
-          "frontend": "13/13 passed",
-          "build": "success"
-        }
+        "notes": "fastembed 向量生成+本地缓存，domain/style 元数据过滤，Top-K 检索，LLM 重写英文正/负提示词；暴露 /api/drama/rag/optimize 与 /api/drama/rag/styles"
       },
-      "P2": {
-        "name": "建立 STATE.json + TEST_LOG.md 里程碑产物",
+      "R3": {
+        "name": "剧本/角色/分镜 Agent 集成 RAG",
         "status": "completed",
         "files": [
-          "STATE.json",
-          "TEST_LOG.md"
+          "platform/backend/app/agents/script_agent.py",
+          "platform/backend/app/agents/character_agent.py",
+          "platform/backend/app/agents/storyboard_agent.py"
         ],
-        "summary": "建立里程碑追踪与测试日志机制，对齐用户偏好（每里程碑产出代码+测试+全量回归+STATE.json 条目+TEST_LOG.md 时序条目）。"
+        "notes": "剧本场景 description→英文视频提示词；角色三视图按 style 优化并保持 solo single person；分镜提示词保持 9:16 竖屏构图；RAG 失败均兜底保留原提示词"
       },
-      "P3": {
-        "name": "视频并行化 + UI 落地 Film Atelier 设计方向",
+      "R4": {
+        "name": "后端全量回归测试",
         "status": "completed",
-        "summary": "视频生成 691s 瓶颈并行化（多 GPU 分发）+ UI 落地 Film Atelier 暗房/剪辑台隐喻 + 粒子聚集按钮 + 水波纹效果 + 多配色切换。",
-        "subtasks": [
-          {
-            "id": "P3.1",
-            "name": "视频并行化：Semaphore 限制并发度 + 进度聚合 + Worker 故障转移",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/video_agent.py",
-              "platform/backend/app/config.py",
-              "platform/backend/tests/unit/test_video_agent.py"
-            ],
-            "summary": "batch_execute 用 asyncio.Semaphore(video_max_concurrency=2) 限制并发，progress_callback 透传按场景聚合进度，_pick_alternate_worker 在 video_a != video_b 时换 worker 重试一次。新增 8 个单元测试覆盖 batch/failover/concurrency/alternate-worker。"
-          },
-          {
-            "id": "P3.2",
-            "name": "UI Film Atelier：暗房隐喻 CSS 变量体系 + 内容聚焦布局",
-            "status": "completed",
-            "files": [
-              "platform/frontend/src/index.css"
-            ],
-            "summary": "重构 index.css 建立六层暗房 token（darkroom-base/elevated/film-bed/developer/silver-text/frame）+ 三套主题（darkroom-amber 默认/silver-halide/cyanotype）通过 [data-theme] 切换。语义别名 --bg-primary 等保留让组件零改动。topbar/sidebar 半透明 + backdrop-filter blur(6px)，canvas-container::before 径向聚焦光，status-dot 呼吸光动画，modal 滑入，所有动效 cubic-bezier(0.4,0,0.2,1) 缓动，prefers-reduced-motion 尊重用户偏好。"
-          },
-          {
-            "id": "P3.3",
-            "name": "粒子交互：粒子场 + 鼠标跟随 + 水波纹 + 主题切换器",
-            "status": "completed",
-            "files": [
-              "platform/frontend/src/components/ui/ParticleField.tsx",
-              "platform/frontend/src/components/ui/ThemeSwitcher.tsx",
-              "platform/frontend/src/components/ui/ThemeSwitcher.test.tsx",
-              "platform/frontend/src/components/ui/Icon.tsx",
-              "platform/frontend/src/App.tsx",
-              "platform/frontend/src/index.css"
-            ],
-            "summary": "ParticleField 组件：200 粒子（≤240），速度 ≤0.9px/帧（≤1.2），单色从 CSS 变量 --developer 读取（MutationObserver 监听 data-theme 自动变色），分两层景深（45% 远层 0.45 opacity 小粒子 / 55% 近层 1.0 opacity 大粒子，远层不画连线保持景深），粒子连线极细半透明（lineWidth 0.4 alpha ≤0.12），fixed z-index:0 pointer-events:none 不覆盖文本，box-shadow inset vignetting 暗角。鼠标微弱吸引（force 0.012 近层/0.004 远层），水波纹从点击位置缓慢扩散（1.5px/帧，420px 范围），波纹环带推开粒子形成聚集-扩散视觉提示。ThemeSwitcher 组件：Palette 图标 + 下拉三主题色卡，data-theme 切换 + localStorage 持久化 + 外部点击关闭 + aria-checked。8 个单元测试覆盖切换/持久化/外部点击/无效值回退。lucide-react 1.25.0 兼容性修正：Palettes→Palette。"
-          }
-        ]
+        "notes": "pytest tests/ -q --tb=short → 354 passed / 0 failed，覆盖率 85.36%（≥80% 达标）；RAG 相关 test_rag_service 12/12 + integration/test_rag 5/5 全部通过"
       },
-      "P4_design": {
-        "name": "P4 质量升级方案设计：模型选型 + 设备清单更新",
+      "L5": {
+        "name": "LoRA 批量下载与 RAG 推荐集成回归",
         "status": "completed",
         "files": [
-          "/Users/wangzhenyu/Desktop/ALLProject/.设备说明.md",
-          "STATE.json",
-          "TEST_LOG.md"
+          "platform/backend/app/knowledge_base/genre_tropes.json",
+          "platform/backend/app/services/rag_service.py",
+          "platform/backend/app/models/schemas.py",
+          "platform/backend/tests/unit/test_rag_service.py",
+          "platform/backend/scripts/lora_manifest.json",
+          "platform/backend/scripts/download_loras.py"
         ],
-        "summary": "针对 P3 E2E 报告三大瓶颈（视频生成 691s / ASR CER 8-9% / 缺少唇形同步与后处理），完成 4 个方向调研（xDiT+HunyuanVideo 1.5 / FireRedASR+CosyVoice 2+IndexTTS-2 / HunyuanImage 2.1+FLUX+PuLID+LatentSync 1.6+LTX-Video / 后处理+Mac 集群承接），制定 11 Agent 升级管线（新增视频预览+唇形同步+后处理三个 Agent），同步更新 /Users/wangzhenyu/Desktop/ALLProject/.设备说明.md 第七章 AICG 短剧质量升级方案。预期效果：视频生成 691s→90-140s、ASR CER 8-9%→<1%、引入 4K/60fps/唇形同步/降噪。实施路线图分 P4.1-P4.5 五个阶段，每个阶段含 TDD+全量回归+STATE/TEST_LOG 更新。",
-        "roadmap": {
-          "P4.1": "视频生成升级：xDiT + HunyuanVideo 1.5 替换 Wan 2.2（目标 ≤70s/场景）",
-          "P4.2": "ASR/TTS 升级：FireRedASR + IndexTTS-2 + CosyVoice 2 三服务部署",
-          "P4.3": "图像生成升级：HunyuanImage 2.1 + FLUX+PuLID 替换 SDXL + LTX-Video 预览",
-          "P4.4": "唇形同步 + 后处理：LatentSync 1.6 + RealBasicVSR + RIFE + ProPainter + DeepFilterNet3 + Mac FFmpeg",
-          "P4.5": "LLM + 视觉质检升级：Qwen3-Next-80B-A3B + SGLang 替换 vLLM + Qwen3-VL-30B-A3B + MiniCPM-V 4.5 双轨"
-        }
-      },
-      "P4.1": {
-        "name": "视频生成升级：xDiT + HunyuanVideo 1.5 多卡并行替换 Wan 2.2",
-        "status": "completed",
-        "summary": "引入 xDiT 独立推理引擎作为视频生成主后端（HunyuanVideo 1.5 8.3B，4 卡并行 cfg=2+ulysses=2），ComfyUI/Wan 2.2 降级为回退路径。VideoAgent 双后端派发：settings.video_backend='xdit' 时优先走 xDiT，失败自动回退 ComfyUI；'comfyui' 时保持原路径。预期单场景视频生成从 691s/2场景 压缩到 45-70s/场景（5-8× 加速）。",
-        "subtasks": [
-          {
-            "id": "P4.1.2",
-            "name": "config.py + .env.example 新增 xDiT 配置参数",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/config.py",
-              "platform/backend/.env.example"
-            ],
-            "summary": "新增 xdit_endpoint/video_backend/xdit_model/xdit_num_frames/xdit_resolution/xdit_cfg_parallel/xdit_ulysses_degree/xdit_pipefusion_parallel/xdit_steps/xdit_cfg/xdit_seed/xdit_request_timeout/xdit_poll_interval 共 13 个配置项，默认 video_backend='xdit'，endpoint 指向 workstation IPv6:8288。"
-          },
-          {
-            "id": "P4.1.3",
-            "name": "xdit_service.py：xDiT FastAPI 客户端封装",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/services/__init__.py",
-              "platform/backend/app/services/xdit_service.py"
-            ],
-            "summary": "新建 services/ 包（按 AGENTS.md 规范业务逻辑入 services/）。XDiTService 类封装：upload_image（下载+上传图片）、submit_task（提交生成任务，自动按 duration 计算 num_frames 对齐 4k+1）、poll_status（轮询 pending→running→succeeded/failed，进度去重回调）、get_result（获取最终 video_url）、generate_video（端到端编排）。复用 BaseAgent 的 httpx.AsyncClient（trust_env=False 避免 macOS 代理拦截 IPv6）。所有外呼经 with_retry 装饰。"
-          },
-          {
-            "id": "P4.1.4",
-            "name": "video_agent.py 双后端派发：xDiT 为主 + ComfyUI 回退",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/video_agent.py",
-              "platform/backend/tests/conftest.py"
-            ],
-            "summary": "VideoAgent 重构：新增 xdit_service 懒加载 property（复用 self.http），execute() 按 settings.video_backend 派发到 _execute_via_xdit 或 _execute_via_comfyui。原 execute 主体逻辑重命名为 _execute_via_comfyui（保留 Wan 2.2 工作流模板作为回退）。xDiT 失败时自动回退 ComfyUI，双失败则 error 包含两侧异常信息。conftest._patch_settings 默认 video_backend='comfyui' 保持旧测试向后兼容。"
-          },
-          {
-            "id": "P4.1.5",
-            "name": "test_xdit_service.py + test_video_agent.py xDiT 路径扩展",
-            "status": "completed",
-            "files": [
-              "platform/backend/tests/unit/test_xdit_service.py",
-              "platform/backend/tests/unit/test_video_agent.py"
-            ],
-            "summary": "新增 test_xdit_service.py 13 个测试（httpx.MockTransport 模拟 xDiT 服务）：upload_image 3 + submit_task 3 + poll_status 3（succeeded/failed/timeout）+ get_result 2 + generate_video E2E 2。扩展 test_video_agent.py 新增 TestVideoAgentXDiT 类 5 个测试：xdit 成功 / xdit 失败回退 comfyui 成功 / 双失败 / comfyui backend 跳过 xdit / 进度回调透传。"
-          },
-          {
-            "id": "P4.1.6",
-            "name": "后端全量回归 + 前端测试 + 构建验证",
-            "status": "completed",
-            "summary": "后端 pytest 163/163 passed（含 13 xdit_service + 5 video_agent xdit 路径新增），覆盖率 86.44%（video_agent.py 97%、xdit_service.py 100%、services/__init__.py 100%），超过 80% 阈值。前端 vitest 21/21 passed。前端 vite build 成功（dist/index.js 478KB / gzip 152KB）。",
-            "tests": {
-              "backend": "163/163 passed",
-              "backend_coverage": "86.44%",
-              "frontend": "21/21 passed",
-              "build": "success"
-            }
-          }
-        ]
-      },
-      "P4.2": {
-        "name": "ASR/TTS 升级：FireRedASR + CosyVoice 2 + IndexTTS-2 三服务部署",
-        "status": "completed",
-        "summary": "引入三个新服务替换原 faster-whisper + edge-tts 回退组合：FireRedASR-AED-L 1.1B（CER <1%，替换 faster-whisper tiny CER 8-9%）为主 ASR，faster-whisper 为回退；CosyVoice 2-0.5B（zero-shot 克隆 + 150ms 流式）与 IndexTTS-2（情感/音色解耦，中文 WER 0.821 领先）为 TTS 双后端，edge-tts 为回退。SubtitleAgent 按 settings.asr_backend 派发，VoiceAgent 按 settings.tts_backend 派发。主后端失败时自动回退到 faster-whisper / edge-tts，保证可用性。新增 36 个单元测试（asr_service 7 + tts_service 17 + voice_agent 双后端 8 + subtitle_agent 双后端 6），总测试数从 163 提升到 207。",
-        "subtasks": [
-          {
-            "id": "P4.2.1",
-            "name": "config.py + .env.example 新增 ASR/TTS 配置参数",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/config.py",
-              "platform/backend/.env.example"
-            ],
-            "summary": "新增 asr_backend（'firered' 默认 / 'whisper' 回退）、firered_asr_endpoint（workstation IPv6:8300/v1）、firered_asr_model（FireRedTeam/FireRedASR-AED-L）、firered_asr_timeout、whisper_model、tts_backend（'cosyvoice' 默认 / 'indextts' / 'edge' 回退）、cosyvoice_endpoint（IPv6:8400/v1）、cosyvoice_model（CosyVoice2-0.5B）、cosyvoice_timeout、indextts_endpoint（IPv6:8500/v1）、indextts_model（IndexTTS-2）、indextts_timeout 共 11 个配置项。"
-          },
-          {
-            "id": "P4.2.2",
-            "name": "asr_service.py：FireRedASR 客户端封装",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/services/asr_service.py",
-              "platform/backend/app/services/__init__.py"
-            ],
-            "summary": "ASRService 类封装 FireRedASR 服务调用：transcribe(audio_bytes, filename, language) 上传 multipart/form-data 到 /v1/asr/transcribe 端点，返回 {text, segments, language, duration} 字典；transcribe_url(audio_url, language) 端到端编排（下载音频 + 调用 transcribe）。复用 BaseAgent 的 httpx.AsyncClient（trust_env=False 避免 macOS 代理拦截 IPv6）。带 with_retry 重试装饰，对 segments 字段做必要校验。"
-          },
-          {
-            "id": "P4.2.3",
-            "name": "tts_service.py：CosyVoice 2 + IndexTTS-2 双 TTS 客户端封装",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/services/tts_service.py",
-              "platform/backend/app/services/__init__.py"
-            ],
-            "summary": "CosyVoiceService（zero-shot 克隆，支持 reference_audio_url 参数）与 IndexTTSService（情感解耦，emotion 参数）两个客户端类。两者均采用 OpenAI 兼容的 /audio/speech 接口，POST JSON 请求体（model/input/voice/response_format/speed + cosyvoice 的 reference_audio / indextts 的 emotion）。返回 MP3 字节流，空字节抛 TTSServiceError。emotion_from_scene() 函数将剧本场景情感标签（tension/romantic 等）映射到 IndexTTS 支持的标签（angry/happy 等）。"
-          },
-          {
-            "id": "P4.2.4",
-            "name": "subtitle_agent.py 双后端派发：FireRedASR 为主 + faster-whisper 回退",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/subtitle_agent.py"
-            ],
-            "summary": "SubtitleAgent 重构：新增 asr_service 懒加载 property，execute() 按 settings.asr_backend 派发：'firered' 走 _transcribe_via_firered（读取音频字节 → 调用 ASRService.transcribe → 返回 dict segments）；'whisper' 走 _transcribe_via_whisper（原 faster-whisper 路径）。FireRedASR 失败时自动回退到 faster-whisper。_build_srt() 兼容 dict segments（FireRedASR 返回的 {'start','end','text'} 字典）与 Segment 对象（faster-whisper 返回的对象属性）两种数据结构。language='auto' 时自动转换为 'zh' 传给 FireRedASR（避免服务端处理 auto）。"
-          },
-          {
-            "id": "P4.2.5",
-            "name": "voice_agent.py 双后端派发：CosyVoice/IndexTTS 为主 + edge-tts 回退",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/voice_agent.py"
-            ],
-            "summary": "VoiceAgent 重构：新增 cosyvoice_service 与 indextts_service 两个懒加载 property。execute() 按 settings.tts_backend 派发到 _generate_one()：'cosyvoice' 调用 CosyVoiceService.synthesize（speed 参数透传，克隆模式透传 reference_audio）；'indextts' 调用 IndexTTSService.synthesize（emotion 来自 line.emotion 经 emotion_from_scene 映射）；'edge' 直接走 _generate_via_edge 原路径。cosyvoice/indextts 主后端失败时自动回退到 edge-tts。_parse_rate() 函数将 edge-tts 的 '+10%' 格式转换为 float 速度（0.5-2.0 钳制范围）。音频字节写入文件后返回带 backend 标记的字典。"
-          },
-          {
-            "id": "P4.2.6",
-            "name": "test_asr_service.py + test_tts_service.py + agent 双后端测试扩展",
-            "status": "completed",
-            "files": [
-              "platform/backend/tests/unit/test_asr_service.py",
-              "platform/backend/tests/unit/test_tts_service.py",
-              "platform/backend/tests/unit/test_subtitle_agent.py",
-              "platform/backend/tests/unit/test_voice_agent.py",
-              "platform/backend/tests/conftest.py"
-            ],
-            "summary": "新增 test_asr_service.py 7 个测试（httpx.MockTransport 模拟 FireRedASR）：transcribe 成功 / 字段缺失 / segments 格式错误 / HTTP 错误 + transcribe_url 端到端 / 下载失败传播 / URL 文件名推断。新增 test_tts_service.py 17 个测试：CosyVoiceService 6（成功 / speed 透传 / 克隆模式 / 空音频 / HTTP 错误重试 / 端点路径）+ IndexTTSService 6（成功 / emotion 默认 / emotion 透传 / 空音频 / HTTP 错误重试 / 端点路径）+ emotion_from_scene 3（已知映射 / 未知回退 / 完整性）+ 跨服务一致性 2。扩展 test_subtitle_agent.py 新增 TestSubtitleAgentDualBackend 类 6 个测试：firered 成功 / firered 失败回退 whisper / whisper 跳过 firered / 字典 segments 兼容 / auto language 转 zh / 空 segments。扩展 test_voice_agent.py 新增 TestParseRate 6 + TestVoiceAgentDualBackend 8 个测试：cosyvoice 成功 / indextts 成功 / 双 TTS 失败回退 edge / edge 跳过 TTS / 多台词并行 / 空音频回退 / rate→speed 转换。conftest._patch_settings 默认 asr_backend='whisper' tts_backend='edge' 保持旧测试向后兼容。",
-            "tests": {
-              "asr_service_unit": "7/7 passed",
-              "tts_service_unit": "17/17 passed",
-              "subtitle_agent_dual_backend": "6/6 passed",
-              "voice_agent_dual_backend": "14/14 passed"
-            }
-          },
-          {
-            "id": "P4.2.7",
-            "name": "后端全量回归 + 前端测试 + 构建验证",
-            "status": "completed",
-            "summary": "后端 pytest 207/207 passed（含 P4.2 新增 36 个测试：asr_service 7 + tts_service 17 + subtitle_agent 双后端 6 + voice_agent 双后端 14），覆盖率 87.40%（asr_service.py 100%、tts_service.py 100%、subtitle_agent.py 95%、voice_agent.py 98%），超过 80% 阈值。前端 vitest 21/21 passed。前端 vite build 成功（dist/index.js 478KB / gzip 152KB）。",
-            "tests": {
-              "backend": "207/207 passed",
-              "backend_coverage": "87.40%",
-              "frontend": "21/21 passed",
-              "build": "success"
-            }
-          }
-        ]
-      },
-      "P4.3": {
-        "name": "图像生成升级：HunyuanImage 2.1 + FLUX+PuLID 替换 SDXL + LTX-Video 预览",
-        "status": "completed",
-        "summary": "引入三个新图像/视频服务替换原 ComfyUI SDXL 单后端：HunyuanImage 2.1（17B FP8，原生 2K + 中文 prompt 最强）为图像生成主后端，FLUX.1-dev + PuLID-FLUX v0.9.1 为角色 ID 一致性专用后端，LTX-Video 2B（pc01 8GB 显存）为分镜预览加速服务。CharacterAgent 与 StoryboardAgent 双后端派发：settings.image_backend='hunyuanimage'/'flux_pulid' 时走主路径，'sdxl' 时走 ComfyUI 原路径。主后端失败时自动回退到 SDXL。LTX-Video 预览钩子：settings.ltx_video_enabled=True 时分镜生成成功后自动生成低分辨率预览视频（65 帧 ≈ 2.7s），预览失败不影响主流程。新增 39 个单元测试（image_service 15 + ltx_video_service 12 + character_agent 双后端 4 + storyboard_agent 双后端 + LTX 预览 8），总测试数从 207 提升到 246。",
-        "subtasks": [
-          {
-            "id": "P4.3.1",
-            "name": "config.py + .env.example 新增图像生成与 LTX-Video 预览配置参数",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/config.py",
-              "platform/backend/.env.example"
-            ],
-            "summary": "新增 image_backend（'hunyuanimage' 默认 / 'flux_pulid' / 'sdxl' 回退）、hunyuanimage_endpoint（workstation IPv6:8600/v1）、hunyuanimage_model（HunyuanImage-2.1）、hunyuanimage_timeout、hunyuanimage_default_resolution、hunyuanimage_default_num_images、flux_pulid_endpoint（IPv6:8601/v1）、flux_pulid_model（flux.1-dev-pulid）、flux_pulid_timeout、flux_pulid_default_resolution、ltx_video_enabled（默认 false）、ltx_video_endpoint（pc01 IPv6:8700/v1）、ltx_video_model（ltx-video-2b）、ltx_video_timeout、ltx_video_default_num_frames（65）、ltx_video_default_resolution（512x320）共 16 个配置项。"
-          },
-          {
-            "id": "P4.3.2",
-            "name": "image_service.py：HunyuanImage 2.1 + FLUX+PuLID 双图像客户端封装",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/services/image_service.py",
-              "platform/backend/app/services/__init__.py"
-            ],
-            "summary": "HunyuanImageService（原生 2K + 中文 prompt 最强）与 FluxPuLIDService（角色 ID 一致性专用，reference_image_url/bytes + id_weight 0.0-1.0 钳制）两个客户端类。两者均采用 OpenAI 兼容的 /images/generations 接口，POST JSON 请求体（model/prompt/n/size/response_format='b64_json' + 可选 negative_prompt/seed）。响应优先解析 b64_json 解码为字节，回退到 url 下载。空 data 或无图像数据抛 ImageServiceError。复用 BaseAgent 的 httpx.AsyncClient（trust_env=False 避免 macOS 代理拦截 IPv6）。所有外呼经 with_retry(max_attempts=3) 装饰。"
-          },
-          {
-            "id": "P4.3.3",
-            "name": "ltx_video_service.py：LTX-Video 2B 分镜预览客户端封装",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/services/ltx_video_service.py",
-              "platform/backend/app/services/__init__.py"
-            ],
-            "summary": "LTXVideoService 类封装分镜预览编排：submit_preview（POST /v1/video/preview 提交任务，返回 task_id）、poll_status（GET /v1/video/status/{task_id} 轮询 pending→running→succeeded/failed，进度去重同步回调，超时抛 TimeoutError）、get_result（GET /v1/video/result/{task_id} 获取 video_url + duration_seconds）、generate_preview（端到端编排，进度回调 10/30/95/100 四阶段）。is_enabled() 受 settings.ltx_video_enabled 控制，默认关闭。默认 65 帧（≈2.7s @ 24fps）+ 512x320 低分辨率加速。复用 BaseAgent 的 httpx.AsyncClient。所有外呼经 with_retry(max_attempts=2) 装饰。"
-          },
-          {
-            "id": "P4.3.4",
-            "name": "character_agent.py 双后端派发：HunyuanImage/FLUX+PuLID 为主 + SDXL 回退",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/character_agent.py"
-            ],
-            "summary": "CharacterAgent 重构：新增 hunyuanimage_service 与 flux_pulid_service 两个懒加载 property（复用 self.http）。execute() 按 settings.image_backend 派发：'hunyuanimage'/'flux_pulid' 走 _generate_image_via_service（调用图像服务返回字节 → 保存到 output/character/ → 返回 /static/character/ URL）；'sdxl' 走原 ComfyUI 路径。三视图并行生成时若主后端单视图失败，自动调用 _fallback_to_sdxl 回退到 ComfyUI 单图生成。视图主+回退均失败时 raise RuntimeError。新增 OUTPUT_DIR = output/character/ + POSITIVE_SUFFIX/NEGATIVE_SUFFIX 强制追加提示词约束。"
-          },
-          {
-            "id": "P4.3.5",
-            "name": "storyboard_agent.py 双后端派发 + LTX-Video 预览钩子",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/storyboard_agent.py",
-              "platform/backend/app/models/schemas.py",
-              "platform/backend/app/main.py"
-            ],
-            "summary": "StoryboardAgent 重构：新增 hunyuanimage_service/flux_pulid_service/ltx_video_service 三个懒加载 property。execute() 按 settings.image_backend 派发到 _dispatch_image_generation：'hunyuanimage'/'flux_pulid' 走 _generate_image_via_service（保存到 output/storyboard/ → 返回 /static/storyboard/ URL），主后端失败自动回退 _generate_image_via_sdxl（原 ComfyUI 路径，重命名自原 _generate_image）。新增 _generate_ltx_preview 钩子：ltx_video_service.is_enabled()=True 时分镜生成成功后自动调用 LTXVideoService.generate_preview 生成低分辨率预览视频（motion_prompt 由 camera_movement + character_actions 组合），预览失败仅 warning 不影响主流程，preview_video_url 填充到 StoryboardResult。schemas.py 新增 StoryboardResult.preview_video_url 字段。main.py 新增 /static/character + /static/storyboard 挂载点（同步修复 character_agent 已写入但未挂载的 404 问题）。batch_execute 改造：仅 sdxl 路径预分配 ComfyUI Worker，主后端路径并行调用图像服务无需 Worker。"
-          },
-          {
-            "id": "P4.3.6",
-            "name": "test_image_service.py + test_ltx_video_service.py + agent 双后端测试扩展",
-            "status": "completed",
-            "files": [
-              "platform/backend/tests/unit/test_image_service.py",
-              "platform/backend/tests/unit/test_ltx_video_service.py",
-              "platform/backend/tests/unit/test_character_agent.py",
-              "platform/backend/tests/unit/test_storyboard_agent.py",
-              "platform/backend/tests/conftest.py"
-            ],
-            "summary": "新增 test_image_service.py 15 个测试（httpx.MockTransport）：HunyuanImageService 7（b64_json 解析 / url 回退下载 / 空 data / 无图像数据 / payload 字段校验 / HTTP 错误 / generate_one 单图）+ FluxPuLIDService 7（基础生成 / reference_image_url 注入 / reference_image_bytes 注入 / url 优先 bytes / id_weight 钳制 [0,1] / 空 data / HTTP 错误）+ generate_one 单图 1。新增 test_ltx_video_service.py 12 个测试：submit_preview 3（成功 / 缺 task_id / HTTP 错误）+ poll_status 3（succeeded / failed / progress 同步回调）+ get_result 2（成功 / 缺 video_url）+ generate_preview 2（端到端 / 进度回调 10/30/95/100 四阶段）+ is_enabled 2（默认关闭 / 标志位开启）。扩展 test_character_agent.py 新增 TestCharacterAgentDualBackend 类 4 个测试：hunyuanimage 成功 / flux_pulid 成功 / hunyuanimage 失败回退 sdxl / sdxl 跳过图像服务。重写 test_storyboard_agent.py：保留原 3 个基础测试 + 新增 TestStoryboardDualBackend 5 个测试（hunyuanimage 成功 / flux_pulid 成功 / 失败回退 sdxl / 双失败 / sdxl 跳过服务）+ TestStoryboardLTXPreview 3 个测试（预览成功 / 预览失败不影响主流程 / 关闭时跳过）。conftest._patch_settings 默认 image_backend='sdxl' ltx_video_enabled=False 保持旧测试向后兼容。",
-            "tests": {
-              "image_service_unit": "15/15 passed",
-              "ltx_video_service_unit": "12/12 passed",
-              "character_agent_dual_backend": "4/4 passed",
-              "storyboard_agent_dual_backend_and_ltx": "8/8 passed"
-            }
-          },
-          {
-            "id": "P4.3.7",
-            "name": "后端全量回归 + 前端测试 + 构建验证",
-            "status": "completed",
-            "summary": "后端 pytest 246/246 passed（含 P4.3 新增 39 个测试：image_service 15 + ltx_video_service 12 + character_agent 双后端 4 + storyboard_agent 双后端+LTX 预览 8），覆盖率 88.19%（image_service.py 90%、ltx_video_service.py 99%、character_agent.py 73%、storyboard_agent.py 79%、schemas.py 100%），超过 80% 阈值。前端 vitest 21/21 passed。前端 vite build 成功（dist/index.js 478KB / gzip 152KB）。Rust cargo build --release 成功（comfy-downloader v0.1.0 编译完成）。",
-            "tests": {
-              "backend": "246/246 passed",
-              "backend_coverage": "88.19%",
-              "frontend": "21/21 passed",
-              "build": "success",
-              "rust_build": "success"
-            }
-          }
-        ]
-      },
-      "P4.4": {
-        "name": "唇形同步 + 后处理：LatentSync 1.6 + RealBasicVSR + RIFE + ProPainter + DeepFilterNet3 + Mac FFmpeg",
-        "status": "completed",
-        "summary": "引入 LatentSync 1.6 唇形同步消除口型脱节（512 分辨率，2-5s/秒视频，6GB 显存），新增后处理五步编排（RealBasicVSR x4 超分 1080p→4K → RIFE 插帧 24fps→60fps → ProPainter 去水印 → DeepFilterNet3 Mac 集群 Rust 原生音频降噪 → Mac FFmpeg VideoToolbox H.265 4K 编码）。LipSyncAgent 受 settings.lip_sync_enabled 总开关控制，LatentSync 失败自动降级返回原视频（synced=False）。PostprocessAgent 受 settings.postprocess_enabled 总开关控制，单步开关独立（允许部分启用），单步失败不阻断整体流程（best-effort）。最终编码失败回退 H.264 软编码。新增 82 个单元测试（latentsync_service 20 + postprocess_service 27 + lip_sync_agent 9 + postprocess_agent 26），总测试数从 246 提升到 328。",
-        "subtasks": [
-          {
-            "id": "P4.4.1",
-            "name": "config.py + .env.example 新增唇形同步与后处理配置参数",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/config.py",
-              "platform/backend/.env.example"
-            ],
-            "summary": "新增 lip_sync_enabled（默认 false）、latentsync_endpoint（workstation IPv6:8289/v1）、latentsync_model（LatentSync-1.6）、latentsync_timeout/resolution/seed、postprocess_enabled（默认 false）、postprocess_endpoint（workstation IPv6:8290/v1）、postprocess_super_resolution_enabled（默认 true）、realbasicvsr_model/scale/timeout、postprocess_frame_interpolation_enabled（默认 true）、rife_model/target_fps/timeout、postprocess_inpainting_enabled（默认 false，按需）、propainter_model/timeout、postprocess_audio_denoise_enabled（默认 true）、deepfilternet_endpoint（Mac studio01 IPv6:8301/v1）、deepfilternet_model/timeout、postprocess_final_encode_enabled（默认 true）、postprocess_final_codec（hevc_videotoolbox）、postprocess_final_crf/preset/resolution（3840x2160）共 20 项配置。"
-          },
-          {
-            "id": "P4.4.2",
-            "name": "latentsync_service.py：LatentSync 1.6 客户端封装",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/services/latentsync_service.py",
-              "platform/backend/app/services/__init__.py"
-            ],
-            "summary": "LatentSyncService 类封装：upload_media（下载+上传视频/音频/参考图，按 media_type 推断扩展名与 content-type）、submit_task（提交唇形同步任务，透传 model/resolution/seed/scene_id，可选参考图）、poll_status（轮询 pending→running→succeeded/failed，进度去重同步回调，超时抛 TimeoutError）、get_result（获取 video_url + duration_seconds）、sync_lip（端到端编排，进度回调 5/15/30/95/100 五阶段）。复用 BaseAgent 的 httpx.AsyncClient（trust_env=False 避免 macOS 代理拦截 IPv6）。所有外呼经 with_retry(max_attempts=3) 装饰。"
-          },
-          {
-            "id": "P4.4.3",
-            "name": "postprocess_service.py：RealBasicVSR/RIFE/ProPainter/DeepFilterNet3 客户端封装",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/services/postprocess_service.py",
-              "platform/backend/app/services/__init__.py"
-            ],
-            "summary": "PostprocessService 类封装 RealBasicVSR/RIFE/ProPainter：upload_video、submit_super_resolution（scale 参数透传）、submit_frame_interpolation（target_fps 透传）、submit_inpainting（可选 mask_url）、poll_status（轮询 succeeded/failed/timeout，进度回调消息前缀含 step_name）、get_result、run_super_resolution/run_frame_interpolation/run_inpainting（三个端到端编排方法，进度回调 10/20/30/95/100 五阶段）。DeepFilterNetService 类封装 Mac 集群 Rust 原生降噪：denoise 方法下载音频（按 URL 后缀推断 .wav/.m4a/.mp3 + content-type）、POST /v1/audio/denoise 上传字节、支持直接字节返回或 JSON 包装的 audio_b64 两种响应格式。空字节或缺 audio_b64 抛 PostprocessServiceError。"
-          },
-          {
-            "id": "P4.4.4",
-            "name": "schemas.py 新增 LipSync/Postprocess 数据模型",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/models/schemas.py"
-            ],
-            "summary": "新增 LipSyncRequest（scene_id/video_url/audio_url/reference_image_url 可选）、LipSyncResult（video_url/original_video_url/synced/elapsed_seconds）、PostprocessStep 枚举（super_resolution/frame_interpolation/inpainting/audio_denoise/final_encode）、PostprocessStepResult（step/success/output_url/elapsed_seconds/message/skipped）、PostprocessRequest（scene_id/video_url/audio_url/steps 覆盖/output_resolution 覆盖）、PostprocessResult（final_video_url/original_video_url/steps/success/elapsed_seconds）。"
-          },
-          {
-            "id": "P4.4.5",
-            "name": "lip_sync_agent.py：双后端 + 自动降级 Agent",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/lip_sync_agent.py"
-            ],
-            "summary": "LipSyncAgent 受 settings.lip_sync_enabled 控制：True 调用 LatentSyncService.sync_lip 主路径，返回 synced=True + 新 video_url；False 直接跳过返回原视频 synced=False。主后端 LatentSyncServiceError/TimeoutError/通用 Exception 三类异常均触发降级（返回原视频，synced=False，success=True 不阻断主流程）。仅严重错误（如参数校验异常）返回 success=False。progress_callback 透传 LatentSync 进度。"
-          },
-          {
-            "id": "P4.4.6",
-            "name": "postprocess_agent.py：五步编排 + best-effort Agent",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/agents/postprocess_agent.py"
-            ],
-            "summary": "PostprocessAgent 受 settings.postprocess_enabled 总开关控制：True 按 _resolve_steps（override 非空时去重保序执行指定步骤，空时按 settings 单步开关决定，固定顺序 SR→RIFE→ProPainter→AUDIO_DENOISE→FINAL_ENCODE）编排。每步 try/except 包裹，失败记录到 steps 列表并继续后续步骤，current_url 保持不变（不传递失败输出）。AUDIO_DENOISE 缺 audio_url 抛 PostprocessServiceError 但仍不阻断。FINAL_ENCODE 调用 _final_encode（下载视频/本地静态资源复用 → ffprobe 探测分辨率 → scale+pad+fps 滤镜 → hevc_videotoolbox H.265 编码，失败回退 libx264 H.264 软编码）。_save_denoised_audio 保存降噪字节到 /static/postprocess/。辅助函数 _local_path_from_url（localhost /static/ 资源返回本地路径）+ _parse_resolution（'WxH' → tuple）。"
-          },
-          {
-            "id": "P4.4.7",
-            "name": "main.py 静态挂载 + drama.py 路由 + _AGENT_REGISTRY 注册",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/main.py",
-              "platform/backend/app/routers/drama.py"
-            ],
-            "summary": "main.py 新增 POSTPROCESS_DIR = OUTPUT_DIR/postprocess，lifespan 启动时创建目录，挂载 /static/postprocess 静态资源（降噪音频 + 最终 4K 成片），启动日志新增 lip_sync_enabled 与 postprocess_enabled 状态。drama.py 新增 POST /lipsync/generate 与 POST /postprocess/generate 两条路由，_AGENT_REGISTRY 扩展包含 lipsync/postprocess 两个 Agent，_run_agent_task 进度回调支持新增的 lipsync/postprocess（其他 Agent 忽略未知参数）。"
-          },
-          {
-            "id": "P4.4.8",
-            "name": "单元测试：latentsync_service + postprocess_service + lip_sync_agent + postprocess_agent",
-            "status": "completed",
-            "files": [
-              "platform/backend/tests/unit/test_latentsync_service.py",
-              "platform/backend/tests/unit/test_postprocess_service.py",
-              "platform/backend/tests/unit/test_lip_sync_agent.py",
-              "platform/backend/tests/unit/test_postprocess_agent.py",
-              "platform/backend/tests/conftest.py"
-            ],
-            "summary": "新增 82 个单元测试（httpx.MockTransport 模拟 + AsyncMock 注入）。test_latentsync_service.py 20 个：upload_media 6（video/audio/reference media_type 扩展名推断 + 缺 filename 回退 + 下载/上传 HTTP 错误）+ submit_task 4（成功/参考图注入/缺 task_id/HTTP 错误）+ poll_status 4（succeeded/failed/timeout/进度回调去重）+ get_result 2（成功/缺 video_url）+ sync_lip 4（端到端/进度回调四阶段/参考图三次上传/上传失败传播）。test_postprocess_service.py 27 个：upload_video 3 + submit_super_resolution 3（scale 透传）+ submit_frame_interpolation 2（target_fps 透传）+ submit_inpainting 2（mask_url 注入）+ poll 4 + get_result 2 + run_* 端到端 3 + DeepFilterNet 8（直接字节/b64_json 包装/缺 audio_b64/空字节/wav 扩展名/m4a 扩展名/下载失败/HTTP 错误）。test_lip_sync_agent.py 9 个：关闭跳过 2 + 成功 2（参考图透传）+ 降级 3（LatentSyncServiceError/TimeoutError/通用 Exception）+ 进度回调 2。test_postprocess_agent.py 26 个：总开关 2 + _resolve_steps 5（全开/部分/override 覆盖/去重保序/空）+ 主路径 4（单步/链式 current_url 传递/单步失败不阻断/全失败 best-effort）+ AUDIO_DENOISE 2（成功/缺 audio_url）+ _save_denoised_audio 1 + FINAL_ENCODE 2（成功/失败不阻断）+ 进度回调 2 + 辅助函数 6（_parse_resolution 3 + _local_path_from_url 4）。conftest._patch_settings 默认 lip_sync_enabled=False postprocess_enabled=False 保持旧测试向后兼容。",
-            "tests": {
-              "latentsync_service_unit": "20/20 passed",
-              "postprocess_service_unit": "27/27 passed",
-              "lip_sync_agent_unit": "9/9 passed",
-              "postprocess_agent_unit": "26/26 passed"
-            }
-          },
-          {
-            "id": "P4.4.9",
-            "name": "后端全量回归 + 前端测试 + 构建验证",
-            "status": "completed",
-            "summary": "后端 pytest 328/328 passed（含 P4.4 新增 82 个测试：latentsync_service 20 + postprocess_service 27 + lip_sync_agent 9 + postprocess_agent 26），覆盖率 87.58%（latentsync_service.py 99%、postprocess_service.py 90%、lip_sync_agent.py 91%、postprocess_agent.py 68%——_final_encode/_probe_resolution/_run_ffmpeg 依赖 FFmpeg 子进程的部分未覆盖，符合预期），超过 80% 阈值。前端 vitest 21/21 passed。前端 vite build 成功（dist/index.js 478KB / gzip 151.92KB）。Rust cargo build --release 成功（comfy-downloader v0.1.0 编译完成）。",
-            "tests": {
-              "backend": "328/328 passed",
-              "backend_coverage": "87.58%",
-              "frontend": "21/21 passed",
-              "build": "success",
-              "rust_build": "success"
-            }
-          },
-          {
-            "id": "P4.4.10",
-            "name": "前端 P4.4 补齐：LipSyncModal + PostprocessModal + store 扩展 + topbar 按钮",
-            "status": "completed",
-            "files": [
-              "platform/frontend/src/store/useDramaStore.ts",
-              "platform/frontend/src/components/Modals.tsx",
-              "platform/frontend/src/components/ui/Icon.tsx",
-              "platform/frontend/src/App.tsx",
-              "platform/frontend/src/store/useDramaStore.test.ts"
-            ],
-            "summary": "前端补齐唇形同步与后处理编排交互（此前仅有后端 Agent + API）。(1) useDramaStore 扩展：ModalsState 新增 lipSync/postprocess 两个模态开关，新增 lipSyncs/postprocesses 数组（按 scene_id 去重替换），新增 addLipSync/addPostprocess actions，reset/setScriptData 同步清空。(2) Modals.tsx 新增 LipSyncModal（选择视频场景 + 配音音频 + 可选角色参考图 → 调用 POST /lipsync/generate → 展示同步结果视频，synced=false 时提示降级）与 PostprocessModal（选择场景 + 五步开关超分/插帧/修复/降噪/编码 + 输出分辨率 → 调用 POST /postprocess/generate → 逐步骤展示成功/跳过/失败状态与耗时）。(3) Icon.tsx 补充 Smile（唇形同步）与 Layers（后处理）两个 lucide 图标。(4) App.tsx 注册两个新模态框、topbar 新增「唇形同步」「后处理」按钮（前置禁用条件 videos/voices 非空）、状态栏更新为 P4 服务栈（LatentSync + RealBasicVSR/RIFE + DeepFilterNet3）。",
-            "tests": {
-              "frontend": "25/25 passed（useDramaStore 14 + ThemeSwitcher 8 + App 3，新增 4 个 P4 store 测试：模态切换/lipSyncs 去重替换/postprocesses 去重替换/reset 清空）",
-              "build": "success（dist/index.js 487.79KB / gzip 154.05KB）",
-              "backend_regression": "328/328 passed，覆盖率 87.71% 无回归"
-            }
-          }
-        ]
-      },
-      "P4.5": {
-        "name": "管家最终配置接入 + EXO thinking 实测 + 全部服务地址切换 LAN",
-        "status": "completed",
-        "summary": "项目管家核查确认后接入最终模型配置：(1) LLM 重构为四层流水线 L1/L2/L3/L4（workstation qwen3.6-uncensored 初稿 / EXO Kimi-K2.7-Code-4bit 润色 / EXO GLM-5.2-fp8 终稿 / spark euryale-70b NSFW），EXO thinking 实测 chat_template_kwargs 与 prompt 抑制均无效（reasoning_tokens 占 76-92%），唯一可行方案 max_tokens 放大 6x 补偿；(2) TTS 接入 ToIV 共用 IndexTTS-2（workstation:9200, GPU3）；(3) ComfyUI 切换 LAN 192.168.71.127:8188；(4) 新增 EXO 图像生成端点（FLUX.1-schnell/dev/Kontext/Qwen-Image）；(5) xDiT 改单卡模式（cfg=1/ulysses=1，GPU0/2 已满不可 4 卡并行）；(6) ASR 默认改 qwen3_asr（待部署 Qwen3-ASR-1.7B）；(7) 视觉质检保留空 URL 待管家批准部署。修正三处失真：spark01 只有 euryale-70b（无 qwen3.6 并存）、workstation:8200 端口 free（Qwen2.5-VL-72B 未部署）、workstation:8000 实际是 qwen3.6-uncensored（不是 qwen3.6-35b-a3b-awq）。",
-        "subtasks": [
-          {
-            "id": "P4.5.1",
-            "name": "EXO thinking 关闭方案实测",
-            "status": "completed",
-            "summary": "curl 实测 EXO Kimi-K2.7-Code-4bit：方案 A（chat_template_kwargs.enable_thinking=false）完全无效，reasoning_tokens 238/259 占 91.8%；方案 B（system prompt 抑制）轻微抑制 91.8%→76.5%（111/145），仍不可用；方案 C（max_tokens 放大 5-6x）为唯一可行方案。结论：L2/L3 max_tokens 设为预期 content 的 6 倍。"
-          },
-          {
-            "id": "P4.5.2",
-            "name": "config.py 重构：四层 LLM 流水线 + LAN 地址切换",
-            "status": "completed",
-            "files": [
-              "platform/backend/app/config.py",
-              "platform/backend/tests/unit/test_xdit_service.py"
-            ],
-            "summary": "config.py 重写：新增 llm_l1/l2/l3/l4_endpoint/model/max_tokens/temperature/timeout 共 24 个字段（四层 LLM 流水线）；L2/L3 max_tokens 放大 6x（12000/24000）补偿 reasoning；IPv6 地址全部切换 LAN（192.168.71.127/192.168.71.109/192.168.71.82/192.168.71.115）；TTS 改为 indextts_endpoint 指向 workstation:9200（ToIV 共用）；xDiT 改单卡模式（cfg_parallel=1/ulysses_degree=1）；新增 EXO 图像生成端点；保留 exo_base_url/visual_model_url 等向后兼容字段。test_xdit_service.py 断言从 hunyuanvideo-1.5 改为 hunyuanvideo-i2v。"
-          },
-          {
-            "id": "P4.5.3",
-            "name": "后端全量回归验证",
-            "status": "completed",
-            "summary": "pytest 328/328 passed（修复 indextts_endpoint 字段后全绿），覆盖率 87.68%（config.py 99%）。仅 1 个测试断言需更新（hunyuanvideo-1.5 → hunyuanvideo-i2v）。",
-            "tests": {
-              "backend": "328/328 passed",
-              "backend_coverage": "87.68%"
-            }
-          }
-        ]
-      },
-      "P4.6": {
-        "name": "P4 服务部署落地：4 服务全部上线（LatentSync + video-enhance + HunyuanImage + xDiT）",
-        "status": "completed",
-        "summary": "在 workstation (192.168.71.127) 上完成 P4 升级全 4 服务部署。当前状态：LatentSync 1.6 + video-enhance @ GPU1（已加载模型），HunyuanImage 2.1 + xDiT @ GPU3（懒加载待首次请求）。为释放 GPU3 资源（83.5GB），暂停 Qwen3-VL-30B-A3B-Thinking 容器（视觉质检回退到 Qwen2.5-VL-72B 或跳过）。GPU 资源分布：GPU0/2 各 93GB（ComfyUI 85GB），GPU1 69GB（LatentSync 18GB + IndexTTS + Qwen3-ASR + ComfyUI，video-enhance 按需调用），GPU3 2.9GB（IndexTTS 1GB + ComfyUI 0.5GB + 桌面 1.4GB，余 95GB 待 HunyuanImage 24GB + xDiT 35-45GB 加载）。模型权重通过 hf-mirror.com 镜像下载（HuggingFace 直连超时，mihomo 代理未运行）。",
-        "subtasks": [
-          {
-            "id": "P4.6.1",
-            "name": "video-enhance 镜像构建 + 服务部署上线",
-            "status": "completed",
-            "summary": "RealBasicVSR + RIFE + ProPainter 三合一后处理服务镜像构建完成（22.1GB）+ 服务部署到 GPU1:8290。宿主机预克隆三个仓库后 COPY 入镜像。mmcv-full 1.5.3 与 torch 2.5.1 编译失败（版本不兼容），但 serve_api.py 通过 subprocess 调用三个工具 CLI，进程隔离，RealBasicVSR/RIFE 主流程可用，ProPainter 部分功能受限。RIFE 仓库（hzwer/RIFE）在镜像构建时缺失，后通过 git clone 补充并 volume 挂载到容器。serve_api.py 修复 do_interpolate 传入 --model={CHECKPOINT_DIR} 参数，RIFE 权重文件名 flownet.pkl 通过副本兼容。健康检查 5 个权重全部就绪。"
-          },
-          {
-            "id": "P4.6.2",
-            "name": "xDIT 镜像构建 + 服务部署上线",
-            "status": "completed",
-            "summary": "xDiT + HunyuanVideo-I2V 视频生成服务镜像构建完成（21.6GB）+ 服务部署到 GPU3:8288。基础镜像从 thufeifeibear/xdit-dev（daocloud 镜像源 403）改为 pytorch:2.5.1-cuda12.4。xDIT 引擎通过 GitHub 安装（PyPI xdiffusers 包名不稳定）。服务懒加载（model_loaded:false），首次请求时加载模型（cpu_offload=True 降低显存峰值）。健康检查 status:ok。"
-          },
-          {
-            "id": "P4.6.3",
-            "name": "LatentSync 1.6 镜像构建 + 服务部署上线",
-            "status": "completed",
-            "summary": "唇形同步服务镜像构建完成（26.3GB）+ 服务部署到 GPU1:8289。cog 0.21.0 依赖已持久化到镜像。flash-attn 2.7.3 预编译 wheel COPY 入镜像避免源码编译。serve_api.py 修复 from predict import Predictor（原 latentsync.predict 路径错误）。权重通过 -v 挂载宿主机 checkpoints 目录（避免容器内下载）。健康检查 model_ready:true，/v1/models 返回 LatentSync-1.6 resolution:512。显存占用 18GB（GPU1 余 29GB 富余）。"
-          },
-          {
-            "id": "P4.6.4",
-            "name": "HunyuanImage 2.1 镜像构建 + 服务部署上线",
-            "status": "completed",
-            "summary": "图像生成服务镜像构建完成（22.9GB，hunyuanimage:2.1-fp8）+ 服务部署到 GPU3:8600。仓库已克隆到宿主机 /home/merlin/deploys/hunyuanimage/HunyuanImage，flash_attn wheel 就位，Dockerfile 采用 COPY 方式。服务懒加载（loaded:false），首次请求时加载 pipeline（threading.Lock 保护）。健康检查 status:ok。显存 FP8 模式约 24GB（GPU3 余 95GB 富余）。"
-          },
-          {
-            "id": "P4.6.5",
-            "name": "后处理模型权重下载完成",
-            "status": "completed",
-            "summary": "5 个模型权重全部下载到 /home/merlin/video-models/（总计 415MB）：RealBasicVSR_x4.pth (201M, akhaliq/RealBasicVSR_x4) + ProPainter.pth (151M, camenduru/ProPainter) + raft-things.pth (21M) + recurrent_flow_completion.pth (20M) + RIFE_v4.6.pkl (24M, 实为 lopi999/rife_v4.26 的 flownet.pkl 副本, v4.26 比 v4.6 更新性能更好, 文件名兼容 RIFE load_model 期望)。下载源全部走 hf-mirror.com 镜像（HuggingFace 直连超时, mihomo 代理未运行, GitHub Release 404）。"
-          },
-          {
-            "id": "P4.6.6",
-            "name": "config.py 启用全部 P4 服务",
-            "status": "completed",
-            "summary": "config.py 已配置全部服务端点：video_backend='xdit' (xdit_endpoint=192.168.71.127:8288) + image_backend='hunyuanimage' (hunyuanimage_endpoint=192.168.71.127:8600/v1) + lip_sync_enabled=True (latentsync_endpoint=192.168.71.127:8289/v1) + postprocess_enabled=True (postprocess_endpoint=192.168.71.127:8290/v1) + super_resolution=True + frame_interpolation=True + inpainting=False (按需开启) + audio_denoise=True (Mac studio01:8301 待部署) + final_encode=True (Mac VideoToolbox H.265)。全量后端测试 328/328 passed，覆盖率 87.71% 无回归。"
-          },
-          {
-            "id": "P4.6.7",
-            "name": "Qwen3-VL 暂停释放 GPU3 资源",
-            "status": "completed",
-            "summary": "为部署 HunyuanImage (24GB) + xDiT (35-45GB)，暂停 Qwen3-VL-30B-A3B-Thinking 容器（docker stop qwen3-vl-30b-thinking），释放 GPU3 83.5GB。Qwen3-VL 用于视觉质检（P4.5 双轨方案），暂停后视觉质检回退到 Qwen2.5-VL-72B 或跳过。优先保障短剧生成管线核心功能（视频生成 + 图像生成）。Qwen3-VL 可在 GPU 资源释放后重启（docker start qwen3-vl-30b-thinking）。"
-          },
-          {
-            "id": "P4.6.8",
-            "name": "DeepFilterNet3 音频降噪服务部署到 Mac studio01:8301",
-            "status": "completed",
-            "summary": "DeepFilterNet3 0.5.6 音频降噪服务部署到 Mac studio01 (192.168.71.109:8301)。下载 arm64 预编译二进制（27MB，无 Rust 编译），编写 Python HTTP 包装器（仅标准库，零依赖），launchd 守护进程（com.aicg.deepfilternet，开机自启 + KeepAlive）。健康检查 /v1/health 返回 200，/v1/denoise 端到端测试通过（2s 440Hz+白噪声 wav → 0.167s 处理完成，输出 WAVE 16bit mono 48kHz）。M3 Ultra RTF=0.000032，CPU 实时无 GPU 依赖。后处理编排步骤 4 完整可用。"
-          }
-        ]
+        "notes": "为 20 条类型片模板按风格搭配 LoRA 并写入 recommended_loras；检查 NAS 后以风格化 LoRA 缺失为主，从 civitai.com/civitai.red 双源批量下载 20 个 Flux.1 D LoRA（17 成功/3 跳过/0 失败，全部 SHA256 校验通过）；RAGService 与响应 schema 接入 LoRA 推荐；新增/更新 4 个单元测试；全量回归：后端 356/356（覆盖率 85.47%），前端 36/36，tsc 0 错误，build 成功"
       }
     }
   },
   "test_summary": {
     "backend": {
-      "total": 328,
-      "passed": 328,
+      "total": 356,
+      "passed": 356,
       "failed": 0,
-      "coverage": "87.71%",
+      "coverage": "85.47%",
       "coverage_threshold": "80%"
     },
     "frontend": {
-      "total": 25,
-      "passed": 25,
-      "failed": 0
+      "total": 36,
+      "passed": 36,
+      "failed": 0,
+      "tsc": "0 errors"
     },
     "build": "success",
     "rust_build": "success"
   },
   "infrastructure": {
     "llm": {
-      "endpoint": "http://[240e:b8f:1d22:e700:3a8b:56c1:3275:4437]:8000/v1",
-      "model": "qwen3.6-35b-a3b-awq",
-      "topology": "spark01 vLLM 双机 TP2 256GB 统一内存池"
+      "endpoint": "http://192.168.71.127:8000/v1",
+      "model": "qwen3.6-uncensored (Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16, served alias)",
+      "topology": "workstation 本机 vLLM 0.26.0, GPU3 89GB, 全模态(文/图/音/视), systemd nemotron-vllm.service"
     },
     "visual_llm": {
-      "endpoint": "http://[240e:b8f:1d22:e700:57fc:3cf9:d856:e46c]:8200/v1",
-      "model": "Qwen/Qwen3-VL-72B-Instruct",
-      "topology": "workstation GPU0+1 BF16 TP2"
+      "endpoint": "http://192.168.71.127:8000/v1",
+      "model": "qwen3.6-uncensored (Nemotron 全模态 alias)",
+      "topology": "workstation GPU3；旧 qwen3-vl-30b-thinking :8200 已下线"
     },
     "comfyui": {
-      "endpoint": "http://[240e:b8f:1d22:e700:57fc:3cf9:d856:e46c]:8188",
-      "rule": "统一 LB 入口 8188，禁止直连单卡 8189-8192"
+      "endpoint": "http://192.168.71.127:8188",
+      "rule": "统一 LB 入口 8188，禁止直连单卡 8189-8192",
+      "backends": "5 后端轮询：本地 gpu0/1/2 (8189-8191) + pc01(:8188 v0.28.0) + pc02(:8193)；GPU3 已让给 Nemotron"
     },
     "xdit": {
       "endpoint": "http://[240e:b8f:1d22:e700:57fc:3cf9:d856:e46c]:8288",
@@ -657,8 +281,10 @@
         "role": "TTS 主后端（zero-shot 克隆 + 150ms 流式）"
       },
       "indextts": {
-        "endpoint": "http://[240e:b8f:1d22:e700:57fc:3cf9:d856:e46c]:8500/v1",
+        "endpoint": "http://192.168.71.127:9200",
         "model": "IndexTTS-2",
+        "contract": "POST /tts multipart/form-data(text/language/emo_text) → WAV，客户端转码 MP3",
+        "topology": "workstation GPU0 (cuda:0), systemd 托管（2026-07-27 变更）",
         "role": "TTS 情感解耦后端（中文 WER 0.821 领先）"
       },
       "fallback": "edge-tts（无需部署服务，本地预设声音）"

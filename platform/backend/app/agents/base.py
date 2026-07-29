@@ -47,6 +47,9 @@ class BaseAgent:
             http_client=self.http,
         )
 
+    async def aclose(self) -> None:
+        """关闭底层 httpx 连接池（应用关闭时调用）。"""
+        await self.http.aclose()
 
     @with_retry(max_attempts=3, base_delay=1.0, max_delay=10.0)
     async def call_llm(
@@ -57,12 +60,15 @@ class BaseAgent:
         max_tokens: int = 8000,
         response_format_json: bool = False,
         stream: bool = True,
+        disable_thinking: bool = False,
     ) -> str:
         """调用 EXO 集群的 LLM（OpenAI 兼容 API）。
 
         GLM-5.2 默认启用思考模式，reasoning_content 和 content 分离。
         使用 streaming 模式避免长时间等待超时；若 content 为空则回退到 reasoning_content。
         当 response_format_json=True 时自动去除 markdown 代码块包裹。
+        disable_thinking=True 时通过 chat_template_kwargs 关闭 Nemotron 推理模式，
+        适用于结构化 JSON 输出场景（提示词重写、质检），避免推理链耗尽 token。
         """
         kwargs: dict[str, Any] = dict(
             model=model or settings.exo_model_glm52,
@@ -73,6 +79,8 @@ class BaseAgent:
         )
         if response_format_json:
             kwargs["response_format"] = {"type": "json_object"}
+        if disable_thinking:
+            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
         if stream:
             content_parts: list[str] = []
@@ -97,6 +105,12 @@ class BaseAgent:
             content = msg.content or ""
             if not content:
                 content = getattr(msg, "reasoning_content", "") or ""
+
+        # Nemotron 等推理模型会把思考过程内联进 content（<think>...</think>），
+        # 下游 JSON 解析前必须剥离；GLM 走 reasoning_content 字段不受影响
+        if "</think>" in content:
+            content = content.split("</think>", 1)[1]
+        content = content.replace("<think>", "").strip()
 
         if response_format_json:
             content = _strip_markdown(content)

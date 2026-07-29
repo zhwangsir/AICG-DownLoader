@@ -1,0 +1,229 @@
+{
+  "version": "1.0.0",
+  "description": "RAG 风格库配套 Flux.1 D 风格 LoRA 下载清单",
+  "source": "civitai",
+  "destination_dir": "/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models/loras",
+  "hosts": ["civitai.com", "civitai.red"],
+  "items": [
+    {
+      "style_key": "realistic_film",
+      "name": "Realistic Photographic Film Stock Footage Style XL + F1D",
+      "model_id": 263259,
+      "version_id": 1407985,
+      "filename": "Cinematic_Photography_style_v1.safetensors",
+      "size_kb": 299515.66,
+      "sha256": "29A06A259B35D645ECC2518C47E8228771EF74EBC850D9CA4950C9DB1B6199BD",
+      "trigger_words": ["Cinematic Photography style"],
+      "download_url": "https://civitai.com/api/download/models/1407985"
+    },
+    {
+      "style_key": "suspense_dark",
+      "name": "Single poster suspense_flux",
+      "model_id": 856473,
+      "version_id": 958271,
+      "filename": "suspense_poster_flux.safetensors",
+      "size_kb": 149720.15,
+      "sha256": "11ED5EC055739F65CCEAF1C94DED11065ED618789ED52BAF17F8D54ECDE62E7E",
+      "trigger_words": ["drhb"],
+      "download_url": "https://civitai.com/api/download/models/958271"
+    },
+    {
+      "style_key": "cyberpunk",
+      "name": "Cyberpunk Anime Style",
+      "model_id": 128568,
+      "version_id": 747534,
+      "filename": "Cyberpunk_Anime_Style_CPA.safetensors",
+      "size_kb": 18812.78,
+      "sha256": "7C838AC356211D6C49E711A764D8B7252C5FCC3F7C9122420D3A6AC654045F37",
+      "trigger_words": ["anime", "cyberpunk"],
+      "download_url": "https://civitai.com/api/download/models/747534"
+    },
+    {
+      "style_key": "ancient_fantasy",
+      "name": "xianxia",
+      "model_id": 821282,
+      "version_id": 918397,
+      "filename": "xianxia_ancient_chinese.safetensors",
+      "size_kb": 17833.71,
+      "sha256": "CE295AABD03AC6D144E665375DED624D558BB57CF97E8416BC25588715921A73",
+      "trigger_words": ["xianxia", "Hanfu dress"],
+      "download_url": "https://civitai.com/api/download/models/918397"
+    },
+    {
+      "style_key": "chinese_anime",
+      "name": "Integration Of Chinese Cultural Styles Animation Character Creation",
+      "model_id": 1887090,
+      "version_id": 2135994,
+      "filename": "Chinese_Cultural_Styles_Animation.safetensors",
+      "size_kb": 299249.31,
+      "sha256": "69169683436AAD2965C066115119D75784C3993B25CCFDED7AE518668DB14B2A",
+      "trigger_words": ["A_style"],
+      "download_url": "https://civitai.com/api/download/models/2135994"
+    },
+    {
+      "style_key": "japanese_anime",
+      "name": "Anime Style - Flux1.D",
+      "model_id": 969406,
+      "version_id": 1085432,
+      "filename": "Anime_Style_Flux1D.safetensors",
+      "size_kb": 18811.91,
+      "sha256": "3780E2240F7B13B22DF561079610B327DCEF80A249EB9F54D5CA7BBC707FB578",
+      "trigger_words": ["anime style"],
+      "download_url": "https://civitai.com/api/download/models/1085432"
+    },
+    {
+      "style_key": "cartoon_3d",
+      "name": "DL_3D Cartoon Style Game Icon Design",
+      "model_id": 1917932,
+      "version_id": 2170736,
+      "filename": "DL_3D_Cartoon_Style.safetensors",
+      "size_kb": 299248.52,
+      "sha256": "8640E16A9110A62303B49738177647B5EFD85D0F30973CFE4E3F187D1E52FE1A",
+      "trigger_words": ["DL_style"],
+      "download_url": "https://civitai.com/api/download/models/2170736"
+    },
+    {
+      "style_key": "horror",
+      "name": "Silent Hill cinematic horror style XL + F1D",
+      "model_id": 458750,
+      "version_id": 1185373,
+      "filename": "Silent_Hill_Horror_Style.safetensors",
+      "size_kb": 299293.80,
+      "sha256": "DADC955FD75D437CAB53ABA7C052F258972994300574A84F93E26134D089B599",
+      "trigger_words": ["horror style"],
+      "download_url": "https://civitai.com/api/download/models/1185373"
+    },
+    {
+      "style_key": "sci_fi_space",
+      "name": "Sci-Fi Interior Space",
+      "model_id": 955690,
+      "version_id": 1069992,
+      "filename": "SciFi_Interior_Space.safetensors",
+      "size_kb": 598381.34,
+      "sha256": "7009D80FC24F16B07BF691A88841BE8C7BC6601F8F27B50BE2C4DF5C65E4551D",
+      "trigger_words": ["Scifi_Interior_Space"],
+      "download_url": "https://civitai.com/api/download/models/1069992"
+    },
+    {
+      "style_key": "post_apocalyptic",
+      "name": "Vast post-apocalyptic wasteland",
+      "model_id": 2343089,
+      "version_id": 2635543,
+      "filename": "Vast_Post_Apocalyptic_Wasteland.safetensors",
+      "size_kb": 299244.98,
+      "sha256": "00D7E2D2CD4ACB70A5D9239D7EE98E8B03C71205A1D2947A4BB6471B05939AED",
+      "trigger_words": ["VPAW", "a vast post-apocalyptic wasteland"],
+      "download_url": "https://civitai.com/api/download/models/2635543"
+    },
+    {
+      "style_key": "film_noir",
+      "name": "Classic + (Neo) Film Noir Cinematic Style XL + F1D",
+      "model_id": 311769,
+      "version_id": 1307068,
+      "filename": "Film_Noir_1940s_Style.safetensors",
+      "size_kb": 299244.84,
+      "sha256": "9E7548A452932FC0E20C6CA79E84EE4174F15E1AE92EF1E0D7B443B4D50DD72F",
+      "trigger_words": ["Film Noir", "1940's"],
+      "download_url": "https://civitai.com/api/download/models/1307068"
+    },
+    {
+      "style_key": "retro_hongkong",
+      "name": "Hong Kong Action Cinema style XL + F1D",
+      "model_id": 361831,
+      "version_id": 931042,
+      "filename": "Hong_Kong_Action_Cinema_Style.safetensors",
+      "size_kb": 299314.20,
+      "sha256": "752E57AE0B7D123EE207D1F38654362D87B749C43894CFEFBCE110B3BEDBFA79",
+      "trigger_words": ["Hong Kong action cinema style"],
+      "download_url": "https://civitai.com/api/download/models/931042"
+    },
+    {
+      "style_key": "palace_hanfu",
+      "name": "Tangfeng Netidol Face",
+      "model_id": 895914,
+      "version_id": 1002536,
+      "filename": "Tangfeng_Netidol_Face_Hanfu.safetensors",
+      "size_kb": 149685.61,
+      "sha256": "A83E347DF266FE339C9BFAF210672EE4E4472740D75F5863FBE42A131C5FA183",
+      "trigger_words": ["chinese palace", "Hanfu dress"],
+      "download_url": "https://civitai.com/api/download/models/1002536"
+    },
+    {
+      "style_key": "campus_youth",
+      "name": "DK_Youthful Campus Style Campus Portrait Generation",
+      "model_id": 1882342,
+      "version_id": 2130555,
+      "filename": "Youthful_Campus_Style.safetensors",
+      "size_kb": 299249.15,
+      "sha256": "EB1AEBA79607A5BCCAFBDF910330ED83FABDFA147765065AB9DB28780A3411EC",
+      "trigger_words": ["DK_style"],
+      "download_url": "https://civitai.com/api/download/models/2130555"
+    },
+    {
+      "style_key": "comedy_bright",
+      "name": "Bright & Colorful Photos Flux Dev",
+      "model_id": 1502722,
+      "version_id": 1699972,
+      "filename": "Bright_Colorful_Photos.safetensors",
+      "size_kb": 18805.97,
+      "sha256": "0C445F408AAD3104ADDDEB4793635A33CD41B1D1D7FBC5501B6A6D7294EE9601",
+      "trigger_words": ["bright"],
+      "download_url": "https://civitai.com/api/download/models/1699972"
+    },
+    {
+      "style_key": "documentary",
+      "name": "Black and White Documentary Photograph",
+      "model_id": 1239366,
+      "version_id": 1396770,
+      "filename": "Black_White_Documentary_Photo.safetensors",
+      "size_kb": 2313.56,
+      "sha256": "5CD0EBF3CF1478D4A67C4B6110BA10D5CCF9DEA2E9B61668D94890BCB1C3404E",
+      "trigger_words": ["documentary", "black and white photography"],
+      "download_url": "https://civitai.com/api/download/models/1396770"
+    },
+    {
+      "style_key": "modern_action",
+      "name": "Cinematic Action Film Style XL + F1D",
+      "model_id": 185709,
+      "version_id": 1274281,
+      "filename": "Cinematic_Action_Film_Style.safetensors",
+      "size_kb": 335747.05,
+      "sha256": "7B771224B75DC890FA51726B23810C97395E95A661A70914F2B902CDB3A5C2C6",
+      "trigger_words": [],
+      "download_url": "https://civitai.com/api/download/models/1274281"
+    },
+    {
+      "style_key": "claymation",
+      "name": "Claymation FLUX.1 D",
+      "model_id": 695774,
+      "version_id": 778613,
+      "filename": "Claymation_Flux.safetensors",
+      "size_kb": 18815.43,
+      "sha256": "D3C5B43638CEE639177F37FD8026A887F8198EA64208646204BEA24DB3A15ED5",
+      "trigger_words": ["claymation"],
+      "download_url": "https://civitai.com/api/download/models/778613"
+    },
+    {
+      "style_key": "vaporwave",
+      "name": "Vaporwave Graphic",
+      "model_id": 124587,
+      "version_id": 892373,
+      "filename": "Vaporwave_Graphic.safetensors",
+      "size_kb": 18831.44,
+      "sha256": "3C0433460AAA4411893D264858BFE6EBC28C3CFEC66914F48FCFE5AB67161480",
+      "trigger_words": ["vaporwave"],
+      "download_url": "https://civitai.com/api/download/models/892373"
+    },
+    {
+      "style_key": "western_fantasy",
+      "name": "Fantasy Medieval Street",
+      "model_id": 2413353,
+      "version_id": 2713409,
+      "filename": "Fantasy_Medieval_Street.safetensors",
+      "size_kb": 309646.51,
+      "sha256": "EB5EAE85FE619303D86A70E21C63FDB9C2F6ED2CEBA622F741B0920D58025F61",
+      "trigger_words": ["FMS", "Fantasy Medieval Street"],
+      "download_url": "https://civitai.com/api/download/models/2713409"
+    }
+  ]
+}

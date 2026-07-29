@@ -64,14 +64,14 @@ class TestCosyVoiceSynthesize:
             import json
 
             captured["body"] = json.loads(request.read().decode())
-            return _bytes_resp(b"fake-mp3-bytes")
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
         svc = _make_cosyvoice(handler)
         audio = await svc.synthesize(
             text="你好世界", voice="zh-CN-YunxiNeural", speed=1.0
         )
 
-        assert audio == b"fake-mp3-bytes"
+        assert audio == b"ID3" + b"\x00" * 16
         assert captured["method"] == "POST"
         assert "/audio/speech" in captured["url"]
         assert captured["body"]["input"] == "你好世界"
@@ -89,7 +89,7 @@ class TestCosyVoiceSynthesize:
             import json
 
             captured["body"] = json.loads(request.read().decode())
-            return _bytes_resp(b"audio")
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
         svc = _make_cosyvoice(handler)
         await svc.synthesize(text="加速播放", voice="v1", speed=1.5)
@@ -104,7 +104,7 @@ class TestCosyVoiceSynthesize:
             import json
 
             captured["body"] = json.loads(request.read().decode())
-            return _bytes_resp(b"cloned-voice")
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
         svc = _make_cosyvoice(handler)
         await svc.synthesize(
@@ -147,7 +147,7 @@ class TestCosyVoiceSynthesize:
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured_url.append(str(request.url))
-            return _bytes_resp(b"audio")
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
         svc = _make_cosyvoice(handler)
         await svc.synthesize(text="t", voice="v")
@@ -162,63 +162,81 @@ class TestCosyVoiceSynthesize:
 
 
 class TestIndexTTSSynthesize:
-    """IndexTTSService.synthesize 方法测试。"""
+    """IndexTTSService.synthesize 方法测试（2026-07-27 真实契约：POST /tts multipart → WAV）。"""
 
-    async def test_success_returns_audio_bytes(self):
-        """正常调用返回 MP3 字节流。"""
+    async def test_success_returns_audio_bytes(self, monkeypatch):
+        """正常调用返回音频字节流，multipart 字段正确。"""
         captured: dict = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured["method"] = request.method
             captured["url"] = str(request.url)
-            import json
+            captured["content_type"] = request.headers.get("content-type", "")
+            captured["body"] = request.read()
+            return _bytes_resp(b"ID3" + b"\x00" * 64)
 
-            captured["body"] = json.loads(request.read().decode())
-            return _bytes_resp(b"index-mp3-bytes")
+        async def fake_convert(b: bytes) -> bytes:
+            return b
 
+        monkeypatch.setattr("app.services.tts_service._wav_to_mp3", fake_convert)
         svc = _make_indextts(handler)
         audio = await svc.synthesize(
             text="情感台词", voice="narrator", emotion="happy", speed=0.9
         )
 
-        assert audio == b"index-mp3-bytes"
+        assert audio == b"ID3" + b"\x00" * 64
         assert captured["method"] == "POST"
-        assert "/audio/speech" in captured["url"]
-        assert captured["body"]["input"] == "情感台词"
-        assert captured["body"]["voice"] == "narrator"
-        assert captured["body"]["emotion"] == "happy"
-        assert captured["body"]["speed"] == 0.9
-        assert captured["body"]["response_format"] == "mp3"
+        assert captured["url"].endswith("/tts")
+        assert "multipart/form-data" in captured["content_type"]
+        assert "情感台词".encode("utf-8") in captured["body"]
+        assert b"happy" in captured["body"]
 
-    async def test_default_emotion_neutral(self):
-        """未传 emotion 时默认 'neutral'。"""
+    async def test_neutral_emotion_omits_emo_text(self, monkeypatch):
+        """emotion 为 neutral 时不发送 emo_text 字段。"""
         captured: dict = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
-            import json
+            captured["body"] = request.read()
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
-            captured["body"] = json.loads(request.read().decode())
-            return _bytes_resp(b"audio")
-
+        monkeypatch.setattr("app.services.tts_service._wav_to_mp3", lambda b: b)
         svc = _make_indextts(handler)
         await svc.synthesize(text="t", voice="v")
 
-        assert captured["body"]["emotion"] == "neutral"
+        assert b"emo_text" not in captured["body"]
 
-    async def test_emotion_param_passed_through(self):
-        """emotion 参数透传。"""
+    async def test_emotion_param_passed_through(self, monkeypatch):
+        """非 neutral emotion 映射为 emo_text。"""
         captured: dict = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
-            import json
+            captured["body"] = request.read()
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
-            captured["body"] = json.loads(request.read().decode())
-            return _bytes_resp(b"audio")
-
+        monkeypatch.setattr("app.services.tts_service._wav_to_mp3", lambda b: b)
         svc = _make_indextts(handler)
         await svc.synthesize(text="t", voice="v", emotion="sad")
 
-        assert captured["body"]["emotion"] == "sad"
+        assert b"sad" in captured["body"]
+
+    async def test_wav_response_transcoded(self, monkeypatch):
+        """RIFF/WAV 响应触发 WAV→MP3 转码。"""
+        wav = b"RIFF" + b"\x24\x00\x00\x00" + b"WAVE" + b"fmt " + b"\x00" * 32
+        called: list[bytes] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _bytes_resp(wav)
+
+        async def fake_convert(b: bytes) -> bytes:
+            called.append(b)
+            return b"ID3" + b"\x00" * 16
+
+        monkeypatch.setattr("app.services.tts_service._wav_to_mp3", fake_convert)
+        svc = _make_indextts(handler)
+        audio = await svc.synthesize(text="t", voice="v")
+
+        assert called == [wav]
+        assert audio == b"ID3" + b"\x00" * 16
 
     async def test_empty_audio_raises(self):
         """服务返回空字节时抛 TTSServiceError。"""
@@ -227,6 +245,15 @@ class TestIndexTTSSynthesize:
 
         svc = _make_indextts(handler)
         with pytest.raises(TTSServiceError, match="空音频"):
+            await svc.synthesize(text="t", voice="v")
+
+    async def test_non_audio_content_raises(self):
+        """服务返回占位文本（如 cloned-voice）时抛 TTSServiceError 而非落盘。"""
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _bytes_resp(b"cloned-voice")
+
+        svc = _make_indextts(handler)
+        with pytest.raises(TTSServiceError, match="非音频内容"):
             await svc.synthesize(text="t", voice="v")
 
     async def test_http_error_raises(self):
@@ -243,19 +270,20 @@ class TestIndexTTSSynthesize:
             await svc.synthesize(text="t", voice="v")
         assert call_count == 3
 
-    async def test_endpoint_path_correct(self):
-        """请求 URL 为 {endpoint}/audio/speech。"""
+    async def test_endpoint_path_correct(self, monkeypatch):
+        """请求 URL 为 {endpoint}/tts。"""
         captured_url: list[str] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured_url.append(str(request.url))
-            return _bytes_resp(b"audio")
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
+        monkeypatch.setattr("app.services.tts_service._wav_to_mp3", lambda b: b)
         svc = _make_indextts(handler)
         await svc.synthesize(text="t", voice="v")
 
-        # conftest.py 中 indextts_endpoint = http://localhost:8500/v1
-        assert captured_url[0] == "http://localhost:8500/v1/audio/speech"
+        # conftest.py 中 indextts_endpoint = http://localhost:9200
+        assert captured_url[0] == "http://localhost:9200/tts"
 
 
 # ============================================================================
@@ -297,37 +325,41 @@ class TestEmotionFromScene:
 
 
 class TestTTSServiceConsistency:
-    """两个 TTS 服务的 API 契约一致性验证。"""
+    """两个 TTS 服务的 API 契约验证（2026-07-27 修正：两者契约不同）。"""
 
-    async def test_both_services_use_same_endpoint_path(self):
-        """CosyVoice 与 IndexTTS 都使用 /audio/speech 路径（OpenAI 兼容）。"""
-        urls: list[str] = []
+    async def test_services_use_their_real_paths(self, monkeypatch):
+        """CosyVoice 用 OpenAI 兼容 /audio/speech；IndexTTS 用 ToIV 自定义 /tts。"""
+        urls: list[tuple[str, str]] = []
 
         def cv_handler(request: httpx.Request) -> httpx.Response:
             urls.append(("cv", str(request.url)))
-            return _bytes_resp(b"a")
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
         def it_handler(request: httpx.Request) -> httpx.Response:
             urls.append(("it", str(request.url)))
-            return _bytes_resp(b"b")
+            return _bytes_resp(b"ID3" + b"\x00" * 16)
 
+        monkeypatch.setattr("app.services.tts_service._wav_to_mp3", lambda b: b)
         await _make_cosyvoice(cv_handler).synthesize(text="t", voice="v")
         await _make_indextts(it_handler).synthesize(text="t", voice="v")
 
-        # 两者路径都是 /audio/speech（端点域名不同）
         cv_url = next(u for k, u in urls if k == "cv")
         it_url = next(u for k, u in urls if k == "it")
         assert cv_url.endswith("/audio/speech")
-        assert it_url.endswith("/audio/speech")
+        assert it_url.endswith("/tts")
 
-    async def test_both_services_return_bytes(self):
-        """两个服务都返回 bytes 类型（Content-Type: audio/mpeg）。"""
+    async def test_both_services_return_bytes(self, monkeypatch):
+        """两个服务都返回 bytes 类型。"""
         def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, content=b"audio", headers={"content-type": "audio/mpeg"})
+            return httpx.Response(
+                200, content=b"ID3" + b"\x00" * 16,
+                headers={"content-type": "audio/mpeg"},
+            )
 
+        monkeypatch.setattr("app.services.tts_service._wav_to_mp3", lambda b: b)
         cv_audio = await _make_cosyvoice(handler).synthesize(text="t", voice="v")
         it_audio = await _make_indextts(handler).synthesize(text="t", voice="v")
 
         assert isinstance(cv_audio, bytes)
         assert isinstance(it_audio, bytes)
-        assert cv_audio == it_audio == b"audio"
+        assert cv_audio == it_audio == b"ID3" + b"\x00" * 16

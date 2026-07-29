@@ -1,0 +1,102 @@
+{
+  "version": "1.0.0",
+  "description": "AI 图像/视频提示词工程方法论库",
+  "entries": [
+    {
+      "id": "method_video_prompt_structure",
+      "category": "method",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "视频/图像提示词核心结构",
+      "content": "Core prompt structure for video/image generation: Shot + Subject + Action + Environment + Lighting + Camera + Style + Quality. Write in this order, separate with commas, keep each segment concrete and visually observable. Avoid abstract adjectives alone; pair them with visual cues. Example: 'wide establishing shot, a female astronaut in a silver suit walking on Mars surface, red dust swirling under her boots, harsh rim light from the sun, slow dolly in, sci-fi cinematic, 4k, highly detailed'.",
+      "tags": ["提示词结构", "视频", "图像", "方法论"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan", "CogVideoX"]
+    },
+    {
+      "id": "method_cogvideox_four_steps",
+      "category": "method",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "CogVideoX 四步提示词法",
+      "content": "CogVideoX prompt formula: 1) Spatial Anchor - describe where the scene happens and key props/characters; 2) Motion Blueprint - describe what moves, in which direction, and at what speed; 3) Look & Feel - describe lighting, color grading, camera, and style; 4) Guardrails - append negative prompts for quality, anatomy, and temporal consistency. Keep total prompt within 100-200 English tokens for best results.",
+      "tags": ["CogVideoX", "提示词公式", "视频", "四步法"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["CogVideoX", "ComfyUI"]
+    },
+    {
+      "id": "method_seedance_formula",
+      "category": "method",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "Seedance 2.0 九模块公式与防崩规则",
+      "content": "Seedance 2.0 nine-module formula: Subject + Appearance + Action + Setting + Lighting + Camera + Atmosphere + Style + Quality. Each module should be 1-2 short phrases. Anti-break rules: use concrete motion verbs, avoid conflicting descriptions, keep subject count to 1-2, specify camera start and end if there is movement, do not mix realistic and anime descriptors in one prompt.",
+      "tags": ["Seedance", "提示词公式", "视频", "九模块"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["Sora-like", "ComfyUI"]
+    },
+    {
+      "id": "method_hunyuan_tips",
+      "category": "method",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "HunyuanVideo 提示词最佳实践",
+      "content": "HunyuanVideo supports both Chinese and English prompts, but English usually yields better motion control. Prefer continuous camera movement and continuous subject action rather than abrupt cuts. Describe motion direction and speed explicitly. Use '24fps', '1080p', and 'smooth camera motion' as quality anchors. Avoid overly long prompts; 50-150 English tokens is the sweet spot. Add temporal negative prompts to reduce flicker.",
+      "tags": ["HunyuanVideo", "提示词技巧", "视频", "运动控制"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["HunyuanVideo", "ComfyUI"]
+    },
+    {
+      "id": "method_motion_verbs",
+      "category": "method",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "动作动词精准化",
+      "content": "Avoid vague verbs like 'move' or 'change'. Use concrete motion verbs: walk, run, sprint, glide, hover, drift, slam, embrace, turn, nod, gaze, pour, unfold. Add direction: left to right, toward camera, away from camera, upward, downward. Add rhythm: slow, gradual, sudden, rhythmic, stuttering. Add camera behavior: tracking, dolly in, handheld, static. Example: 'a woman walks toward camera from left to right, hair swaying gently, medium tracking shot'.",
+      "tags": ["动作动词", "视频", "运动描述", "运镜"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["Sora-like", "HunyuanVideo", "Wan", "CogVideoX", "ComfyUI"]
+    },
+    {
+      "id": "method_negative_strategy",
+      "category": "method",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "负面提示词组合策略",
+      "content": "Negative prompt strategy: 1) General quality negatives (blurry, low quality, watermark, text, deformed); 2) Scene-specific negatives (conflicting styles, unwanted elements); 3) Domain-specific negatives (anatomy for people, temporal for video, architecture for landscapes). Do not blindly concatenate; remove terms that conflict with positive prompts. Keep token budget balanced: negatives usually 20-40% of total prompt length.",
+      "tags": ["负面提示词", "策略", "视频", "图像"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan", "CogVideoX"]
+    },
+    {
+      "id": "method_subject_consistency",
+      "category": "method",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "主体一致性保障",
+      "content": "For subject consistency: describe the subject concretely with stable attributes (age, clothing color, hairstyle, accessories); limit to 1-2 main subjects; use a first-frame anchor for video by describing the opening pose clearly; reuse the same adjectives across scenes. Avoid ambiguous pronouns. If a character reference image is available, mention it in the workflow, but prompts should still include text descriptions.",
+      "tags": ["主体一致性", "角色", "视频", "图像"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["SDXL", "ComfyUI", "Sora-like", "HunyuanVideo", "Wan", "CogVideoX"]
+    },
+    {
+      "id": "method_duration_pacing",
+      "category": "method",
+      "domain": ["video"],
+      "lang": "zh",
+      "title": "时长与节奏控制",
+      "content": "Optimal AI video length is 8-15 seconds for single prompt generation. Within this budget, plan one main motion or a clear two-beat arc. Use 'slow motion' or 'time-lapse' only when explicitly desired. For looping clips, describe a return-to-start pose or cyclical motion. Do not overload 5-second clips with multiple actions; keep a single motion budget per generation.",
+      "tags": ["时长", "节奏", "视频", "循环"],
+      "negative_terms": [],
+      "style_intensity": 0.5,
+      "model_target": ["Sora-like", "HunyuanVideo", "Wan", "CogVideoX", "ComfyUI"]
+    }
+  ]
+}

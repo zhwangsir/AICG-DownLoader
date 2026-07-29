@@ -12,6 +12,7 @@ P4.3: 覆盖 OpenAI 兼容的 /images/generations 接口客户端：
 from __future__ import annotations
 
 import base64
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -46,6 +47,12 @@ def _b64(b: bytes) -> str:
     return base64.b64encode(b).decode("ascii")
 
 
+@pytest.fixture(autouse=True)
+def _mock_poll_sleep(monkeypatch):
+    """轮询的 asyncio.sleep 替换为立即返回，避免测试等待真实 3s 间隔。"""
+    monkeypatch.setattr("app.services.image_service.asyncio.sleep", AsyncMock())
+
+
 # ============================================================================
 # HunyuanImageService
 # ============================================================================
@@ -58,15 +65,23 @@ class TestHunyuanImageGenerate:
         """b64_json 返回格式 → 解码为字节列表。"""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            assert request.method == "POST"
-            assert str(request.url).endswith("/images/generations")
-            payload = httpx.Response(200, json={
-                "data": [
-                    {"b64_json": _b64(b"img1")},
-                    {"b64_json": _b64(b"img2")},
-                ]
-            })
-            return payload
+            url = str(request.url)
+            if request.method == "POST" and url.endswith("/images/generations"):
+                return httpx.Response(200, json={
+                    "task_id": "mock-task-1",
+                    "status": "pending",
+                })
+            if request.method == "GET" and url.endswith("/v1/tasks/mock-task-1"):
+                return httpx.Response(200, json={
+                    "status": "succeeded",
+                    "result": {
+                        "data": [
+                            {"b64_json": _b64(b"img1")},
+                            {"b64_json": _b64(b"img2")},
+                        ]
+                    },
+                })
+            return httpx.Response(404)
 
         svc = _make_hunyuanimage(handler)
         images = await svc.generate(prompt="test", num_images=2)
@@ -82,7 +97,13 @@ class TestHunyuanImageGenerate:
             url = str(request.url)
             if request.method == "POST" and url.endswith("/images/generations"):
                 return httpx.Response(200, json={
-                    "data": [{"url": "http://mock/img.png"}]
+                    "task_id": "mock-task-1",
+                    "status": "pending",
+                })
+            if request.method == "GET" and url.endswith("/v1/tasks/mock-task-1"):
+                return httpx.Response(200, json={
+                    "status": "succeeded",
+                    "result": {"data": [{"url": "http://mock/img.png"}]},
                 })
             if request.method == "GET" and url == "http://mock/img.png":
                 return httpx.Response(200, content=b"downloaded-img")
@@ -97,7 +118,18 @@ class TestHunyuanImageGenerate:
         """data 为空 → ImageServiceError。"""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={"data": []})
+            url = str(request.url)
+            if request.method == "POST" and url.endswith("/images/generations"):
+                return httpx.Response(200, json={
+                    "task_id": "mock-task-1",
+                    "status": "pending",
+                })
+            if request.method == "GET" and url.endswith("/v1/tasks/mock-task-1"):
+                return httpx.Response(200, json={
+                    "status": "succeeded",
+                    "result": {"data": []},
+                })
+            return httpx.Response(404)
 
         svc = _make_hunyuanimage(handler)
         with pytest.raises(ImageServiceError, match="返回空 data"):
@@ -107,7 +139,18 @@ class TestHunyuanImageGenerate:
         """data 中既无 b64_json 也无 url → ImageServiceError。"""
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={"data": [{}]})
+            url = str(request.url)
+            if request.method == "POST" and url.endswith("/images/generations"):
+                return httpx.Response(200, json={
+                    "task_id": "mock-task-1",
+                    "status": "pending",
+                })
+            if request.method == "GET" and url.endswith("/v1/tasks/mock-task-1"):
+                return httpx.Response(200, json={
+                    "status": "succeeded",
+                    "result": {"data": [{}]},
+                })
+            return httpx.Response(404)
 
         svc = _make_hunyuanimage(handler)
         with pytest.raises(ImageServiceError, match="返回无图像数据"):
@@ -118,8 +161,19 @@ class TestHunyuanImageGenerate:
         captured: dict = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
-            captured["payload"] = __import__("json").loads(request.content)
-            return httpx.Response(200, json={"data": [{"b64_json": _b64(b"x")}]})
+            url = str(request.url)
+            if request.method == "POST" and url.endswith("/images/generations"):
+                captured["payload"] = __import__("json").loads(request.content)
+                return httpx.Response(200, json={
+                    "task_id": "mock-task-1",
+                    "status": "pending",
+                })
+            if request.method == "GET" and url.endswith("/v1/tasks/mock-task-1"):
+                return httpx.Response(200, json={
+                    "status": "succeeded",
+                    "result": {"data": [{"b64_json": _b64(b"x")}]},
+                })
+            return httpx.Response(404)
 
         svc = _make_hunyuanimage(handler)
         await svc.generate(
@@ -148,7 +202,18 @@ class TestHunyuanImageGenerateOne:
 
     async def test_returns_single_bytes(self):
         def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={"data": [{"b64_json": _b64(b"single")}]})
+            url = str(request.url)
+            if request.method == "POST" and url.endswith("/images/generations"):
+                return httpx.Response(200, json={
+                    "task_id": "mock-task-1",
+                    "status": "pending",
+                })
+            if request.method == "GET" and url.endswith("/v1/tasks/mock-task-1"):
+                return httpx.Response(200, json={
+                    "status": "succeeded",
+                    "result": {"data": [{"b64_json": _b64(b"single")}]},
+                })
+            return httpx.Response(404)
 
         svc = _make_hunyuanimage(handler)
         img = await svc.generate_one(prompt="test", negative_prompt="neg")

@@ -18,6 +18,7 @@ from app.agents.ai_optimizer import web_search
 from app.agents.base import BaseAgent
 from app.config import settings
 from app.models.schemas import AgentResponse, Script, ScriptRequest
+from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +27,14 @@ SYSTEM_PROMPT = """你是专业短剧编剧。根据用户的一句话创意，�
 输出 JSON 必须严格遵循以下格式：
 {
   "title": "剧名",
-  "genre": "题材",
+  "synopsis": "一句话剧情简介（30-60字，含核心悬念）",
   "characters": [
     {
       "character_id": "char_001",
       "name": "角色名",
       "role": "主角/配角/反派",
       "age": 25,
-      "description": "外貌特征详细描述（用于图像生成）",
+      "description": "外貌特征详细描述（用于图像生成，含五官、发型、服装、气质）",
       "personality": "性格特征"
     }
   ],
@@ -42,6 +43,7 @@ SYSTEM_PROMPT = """你是专业短剧编剧。根据用户的一句话创意，�
       "scene_id": 1,
       "episode": 1,
       "shot_type": "特写/近景/中景/远景",
+      "location": "场景地点（如：便利店内部/街道/卧室）",
       "description": "画面描述（中文，详细到可以画出来）",
       "prompt": "English positive prompt for image generation",
       "negative_prompt": "English negative prompt",
@@ -58,11 +60,22 @@ SYSTEM_PROMPT = """你是专业短剧编剧。根据用户的一句话创意，�
 1. 每集 {scenes_per_episode} 个分镜，共 {episodes} 集
 2. 角色描述要详细到可以生成定妆照（五官、发型、服装、气质）
 3. 画面描述要具体（场景、光线、构图、人物状态）
-4. 英文 prompt 要包含画质关键词（cinematic, 8k, detailed 等）
-5. 台词要口语化、有张力
+4. **英文 prompt 必须完整翻译 description 中的核心视觉元素**，包含：
+   - 画质关键词：cinematic, 8k, photorealistic, highly detailed
+   - 镜头语言：shot_type 对应的英文（close-up/medium shot/wide shot）
+   - 场景细节：location、关键道具、光线氛围（如 dim yellow lighting, neon signs）
+   - 角色外观：出场角色的核心特征（发色、服装、表情），与 characters.description 一致
+   - 角色动作：character_actions 的英文翻译
+   - 情绪氛围：emotion 对应的英文氛围词（eerie/tense/romantic）
+   - 彩色风格：默认生成彩色画面，禁止黑白（除非剧情明确要求）
+   - 反面示例（禁止）："cinematic 8k detailed store interior" （过于简略，丢失核心剧情元素）
+   - 正面示例："cinematic medium shot, late-night convenience store interior, dim yellow fluorescent lighting, young Chinese female clerk with shoulder-length black wavy hair in white t-shirt and denim jacket standing behind checkout counter, staring at surveillance monitor showing her own doppelganger waving back, eerie tension, photorealistic, 8k"
+5. 台词要口语化、有张力，单条不超过 30 字
 6. 节奏：开场悬念 → 冲突升级 → 高潮 → 悬念结尾
 7. JSON 字符串值中的双引号必须用 \\" 转义，不要使用未转义的英文双引号
 8. 如果需要引用文字，请用中文引号「」或单引号
+9. negative_prompt 默认包含：black and white, monochrome, blurry, low quality, deformed, cartoon, anime, text, watermark, extra fingers, bad anatomy
+10. synopsis 必填，30-60字概括全剧核心悬念
 
 直接输出纯 JSON，不要用 markdown 代码块包裹，不要输出任何解释性文字。
 """
@@ -107,16 +120,13 @@ class ScriptAgent(BaseAgent):
                 model=settings.exo_model_glm52,
                 temperature=0.85,
                 max_tokens=16000,
-                response_format_json=False,
+                response_format_json=True,
             )
 
-            try:
-                script_data = json.loads(content)
-            except json.JSONDecodeError:
-                script_data = json_repair.loads(content)
+            script_data = self._parse_llm_json(content)
 
-            # 容错：json_repair 可能返回非字典类型
             if not isinstance(script_data, dict):
+                logger.error("剧本 LLM 返回无法解析为 JSON 对象，原始内容前 1000 字：%s", content[:1000])
                 raise RuntimeError(f"剧本 LLM 返回格式异常: {type(script_data)}")
 
             raw_chars = script_data.get("characters", [])
@@ -135,6 +145,10 @@ class ScriptAgent(BaseAgent):
                 if "description" not in s:
                     continue
                 clean_scenes.append(s)
+
+            # RAG 增强：基于知识库优化每个场景的生成提示词
+            if settings.rag_optimize_enabled:
+                await self._rag_enhance_scenes(clean_scenes, request.genre)
 
             script = Script(
                 project_id=str(uuid.uuid4()),
@@ -157,6 +171,91 @@ class ScriptAgent(BaseAgent):
                 error=f"剧本生成失败: {e}",
                 elapsed_seconds=time.time() - start,
             )
+
+    @staticmethod
+    def _parse_llm_json(content: str) -> Any:
+        """多层容错解析 LLM 返回的 JSON。
+
+        1. 先尝试标准 json.loads
+        2. 失败则用 json_repair 修复
+        3. 若 json_repair 返回字符串（双重转义 / 含多余文本），尝试二次解析
+        4. 仍失败时从文本中提取 { ... } / [ ... ] 片段再解析
+        """
+        if not content or not content.strip():
+            return None
+
+        cleaned = content.strip()
+
+        # 1) 标准解析
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+        # 2) json_repair 修复
+        try:
+            parsed = json_repair.loads(cleaned)
+        except Exception as e:
+            logger.warning("json_repair 解析失败: %s", e)
+            parsed = None
+
+        # 3) 处理双重转义字符串
+        if isinstance(parsed, str):
+            second = parsed.strip()
+            try:
+                return json.loads(second)
+            except json.JSONDecodeError:
+                pass
+            try:
+                return json_repair.loads(second)
+            except Exception as e:
+                logger.warning("二次 json_repair 解析失败: %s", e)
+                parsed = second
+
+        # 4) 如果还是字符串，尝试从文本中截取 JSON 片段
+        if isinstance(parsed, str):
+            # 找第一个 { 或 [ 到最后一个 } 或 ]
+            start_idx = -1
+            for ch in ("{", "["):
+                idx = parsed.find(ch)
+                if idx != -1 and (start_idx == -1 or idx < start_idx):
+                    start_idx = idx
+            end_idx = -1
+            for ch in ("}", "]"):
+                idx = parsed.rfind(ch)
+                if idx != -1 and idx > end_idx:
+                    end_idx = idx
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                snippet = parsed[start_idx : end_idx + 1]
+                try:
+                    return json.loads(snippet)
+                except json.JSONDecodeError:
+                    try:
+                        return json_repair.loads(snippet)
+                    except Exception as e:
+                        logger.warning("JSON 片段解析失败: %s", e)
+
+        return parsed
+
+    async def _rag_enhance_scenes(self, scenes: list[dict[str, Any]], genre: str) -> None:
+        """使用 RAG 优化每个场景的正向/负向提示词。"""
+        for scene in scenes:
+            description = scene.get("description", "").strip()
+            if not description:
+                continue
+            try:
+                result = await rag_service.optimize_prompt(
+                    user_prompt=description,
+                    domain="video",
+                    style_hint=genre or None,
+                    extra_instruction="根据短剧场景描述生成高质量英文图像/视频生成提示词",
+                )
+                if result.get("optimized_positive"):
+                    scene["prompt"] = result["optimized_positive"]
+                if result.get("optimized_negative"):
+                    scene["negative_prompt"] = result["optimized_negative"]
+            except Exception as e:
+                logger.warning("场景 %s RAG 优化失败，保留原提示词: %s", scene.get("scene_id"), e)
 
 
 script_agent = ScriptAgent()

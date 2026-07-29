@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.agents.script_agent import ScriptAgent
+from app.config import settings
 from app.models.schemas import ScriptRequest
 
 
@@ -99,3 +101,66 @@ class TestScriptAgentExecute:
         assert response.success is False
         assert "LLM 失败" in response.error
         assert response.elapsed_seconds >= 0
+
+
+class TestScriptAgentRAGEnhance:
+    async def test_rag_enhances_scene_prompts(self, agent, mock_call_llm, monkeypatch):
+        monkeypatch.setattr(settings, "rag_optimize_enabled", True)
+        mock_call_llm.return_value = json.dumps(
+            {
+                "title": "RAG 测试",
+                "characters": [],
+                "scenes": [
+                    {
+                        "scene_id": 1,
+                        "description": "主角看手机",
+                        "prompt": "original prompt",
+                        "negative_prompt": "original negative",
+                    }
+                ],
+            }
+        )
+
+        with patch(
+            "app.agents.script_agent.rag_service.optimize_prompt",
+            new_callable=AsyncMock,
+            return_value={
+                "optimized_positive": "rag positive",
+                "optimized_negative": "rag negative",
+            },
+        ):
+            response = await agent.execute(ScriptRequest(premise="x"))
+
+        assert response.success is True
+        scene = response.data["scenes"][0]
+        assert scene["prompt"] == "rag positive"
+        assert scene["negative_prompt"] == "rag negative"
+
+    async def test_rag_failure_keeps_original_prompt(self, agent, mock_call_llm, monkeypatch):
+        monkeypatch.setattr(settings, "rag_optimize_enabled", True)
+        mock_call_llm.return_value = json.dumps(
+            {
+                "title": "RAG 失败测试",
+                "characters": [],
+                "scenes": [
+                    {
+                        "scene_id": 1,
+                        "description": "主角看手机",
+                        "prompt": "original prompt",
+                        "negative_prompt": "original negative",
+                    }
+                ],
+            }
+        )
+
+        with patch(
+            "app.agents.script_agent.rag_service.optimize_prompt",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("RAG 失败"),
+        ):
+            response = await agent.execute(ScriptRequest(premise="x"))
+
+        assert response.success is True
+        scene = response.data["scenes"][0]
+        assert scene["prompt"] == "original prompt"
+        assert scene["negative_prompt"] == "original negative"
