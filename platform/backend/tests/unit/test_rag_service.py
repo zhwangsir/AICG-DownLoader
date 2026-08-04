@@ -12,6 +12,87 @@ import pytest
 from app.services.rag_service import KnowledgeEntry, RAGService, rag_service
 
 
+class TestModelLoadCircuitBreaker:
+    """嵌入模型加载失败熔断：TTL 内不再重试，避免逐场景 ~130s 超时。"""
+
+    def _make_service(self, tmp_path: Path) -> RAGService:
+        return RAGService(cache_dir=tmp_path / "cache", kb_dir=tmp_path / "kb")
+
+    def test_failure_circuit_breaks_subsequent_calls(self, tmp_path):
+        service = self._make_service(tmp_path)
+        with patch("app.services.rag_service.TextEmbedding", side_effect=OSError("Connection timed out")) as m_te:
+            with pytest.raises(RuntimeError, match="无法加载嵌入模型"):
+                service._init_model()
+            assert m_te.call_count == 1
+            # TTL 内第二次调用：熔断，不再尝试加载
+            with pytest.raises(RuntimeError, match="熔断中"):
+                service._init_model()
+            assert m_te.call_count == 1
+
+    def test_circuit_resets_after_ttl(self, tmp_path):
+        service = self._make_service(tmp_path)
+        with patch("app.services.rag_service.TextEmbedding", side_effect=OSError("timeout")):
+            with pytest.raises(RuntimeError):
+                service._init_model()
+        # 模拟 TTL 已过
+        service._model_load_failed_at -= 10000
+        with patch("app.services.rag_service.TextEmbedding") as m_te:
+            m_te.return_value = MagicMock()
+            service._init_model()
+            assert service._embedding_model is not None
+            assert service._model_load_failed_at is None
+
+
+class TestWarmUp:
+    """M9.6 回归：缓存命中时 initialize() 提前返回不加载模型（_embedding_model 为 None），
+    若预热仅调 _ensure_initialized，首个 search() 会在事件循环内同步下载模型，
+    外网不可达时冻结全接口 ~130s（2026-08-04 core py-spy 实锤）。
+    _warm_up 必须显式补加载模型，且 optimize_prompt 必须经 _warm_up 预热。"""
+
+    def _make_service(self, tmp_path: Path) -> RAGService:
+        return RAGService(cache_dir=tmp_path / "cache", kb_dir=tmp_path / "kb")
+
+    def test_warm_up_loads_model_when_entries_exist(self, tmp_path):
+        service = self._make_service(tmp_path)
+        # 模拟缓存命中：initialize() 提前返回，模型未加载
+        service._initialized = True
+        service._entries = [
+            KnowledgeEntry(id="s1", category="style", title="t", content="c")
+        ]
+        with patch("app.services.rag_service.TextEmbedding") as m_te:
+            m_te.return_value = MagicMock()
+            service._warm_up()
+            assert m_te.call_count == 1
+            assert service._embedding_model is not None
+
+    def test_warm_up_skips_model_when_no_entries(self, tmp_path):
+        service = self._make_service(tmp_path)
+        service._initialized = True
+        service._entries = []
+        with patch("app.services.rag_service.TextEmbedding") as m_te:
+            service._warm_up()
+            assert m_te.call_count == 0
+
+    async def test_optimize_prompt_warms_up_via_thread(self, monkeypatch, tmp_path):
+        """回归守卫：optimize_prompt 必须调 _warm_up（而非仅 _ensure_initialized）。"""
+        service = self._make_service(tmp_path)
+        service._initialized = True
+        service._entries = []
+        called = {"warm_up": 0}
+
+        def fake_warm_up() -> None:
+            called["warm_up"] += 1
+
+        monkeypatch.setattr(service, "_warm_up", fake_warm_up)
+        monkeypatch.setattr(service, "search", MagicMock(return_value=[]))
+
+        with patch("app.services.rag_service.AsyncOpenAI", side_effect=RuntimeError("no llm")):
+            result = await service.optimize_prompt("测试提示词", domain="image")
+
+        assert called["warm_up"] == 1
+        assert result["fallback"] is True
+
+
 class TestKnowledgeEntry:
     def test_to_embed_text(self):
         entry = KnowledgeEntry(

@@ -41,6 +41,7 @@ from app.models.schemas import (
     CharacterRequest,
 )
 from app.services.image_service import FluxPuLIDService, HunyuanImageService
+from app.services.character_library import character_library
 from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,18 @@ class CharacterAgent(BaseAgent):
                     "negative_prompt": prompts["negative_prompt"],
                 },
             )
+
+            # Step 4: 自动登记角色资产库（外观锁定卡，跨集一致性强制引用）
+            try:
+                character_library.register_from_card(
+                    character=char,
+                    reference_images=reference_images,
+                    used_prompts=card.used_prompts,
+                    consistency_level=request.consistency_level,
+                )
+            except Exception as e:
+                # 资产库登记失败不阻断角色生成主流程
+                logger.warning("角色资产库登记失败（不影响生成结果）: %s", e)
 
             return AgentResponse(
                 success=True,

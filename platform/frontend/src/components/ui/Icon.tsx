@@ -33,6 +33,9 @@ export {
   Palette,      // 主题切换（Film Atelier 多配色）
   Smile,        // 唇形同步（P4.4）
   Layers,       // 后处理编排管线（P4.4）
+  Zap,          // 一键全链路（M8）
+  Square,       // 停止/取消任务（M8）
+  Workflow,     // 加载到画布（M9）
 } from "lucide-react";
 
 import type {
@@ -58,6 +61,9 @@ import type {
   Palette as PaletteIcon,
   Smile as SmileIcon,
   Layers as LayersIcon,
+  Zap as ZapIcon,
+  Square as SquareIcon,
+  Workflow as WorkflowIcon,
 } from "lucide-react";
 
 /** 项目中所有可用的图标组件类型联合，供泛型推断使用。 */
@@ -83,4 +89,7 @@ export type IconComponent =
   | typeof ActivityIcon
   | typeof PaletteIcon
   | typeof SmileIcon
-  | typeof LayersIcon;
+  | typeof LayersIcon
+  | typeof ZapIcon
+  | typeof SquareIcon
+  | typeof WorkflowIcon;

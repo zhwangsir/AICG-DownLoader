@@ -29,6 +29,7 @@ export interface ModalsState {
   visualQuality: boolean;
   lipSync: boolean;
   postprocess: boolean;
+  pipeline: boolean;
 }
 
 /** 角色生成预览/确认阶段 */
@@ -148,6 +149,7 @@ const initialModals: ModalsState = {
   visualQuality: false,
   lipSync: false,
   postprocess: false,
+  pipeline: false,
 };
 
 const initialState = {

@@ -54,6 +54,10 @@ class Scene(BaseModel):
     emotion: str = "neutral"
     duration_seconds: int = 5
     camera_movement: str = "static"
+    narrative_beat: str = Field(
+        "",
+        description="叙事节拍：hook(强钩子)/escalation(冲突升级)/reversal(反转)/cliffhanger(悬念)/emotional_beat(情绪落点)/transition(过渡)",
+    )
 
 
 class Script(BaseModel):
@@ -75,6 +79,41 @@ class ScriptRequest(BaseModel):
     genre: str = Field("都市悬疑", description="题材")
     episodes: int = Field(1, ge=1, le=100, description="集数")
     scenes_per_episode: int = Field(5, ge=1, le=30, description="每集分镜数")
+    monetization_mode: str = Field(
+        "iaa",
+        description="变现模式：iaa(免费剧/红果模式，每集末尾钩子驱动完播) / iap(付费剧，第8-12集设首充卡点)",
+    )
+
+
+class CharacterAsset(BaseModel):
+    """角色资产库条目：跨集/跨镜一致性的外观锁定卡（本地 JSON 持久化）。"""
+
+    character_id: str
+    name: str
+    role: str = ""
+    age: int | None = None
+    description: str = ""
+    personality: str = ""
+    reference_images: dict[str, str] = Field(default_factory=dict, description="三视图定妆照 URL（front/side/closeup）")
+    used_prompts: dict[str, str] = Field(default_factory=dict, description="定妆照生成时使用的提示词")
+    appearance_lock: str = Field("", description="外观锁定卡：分镜生成时强制注入的核心外观关键词")
+    locked: bool = Field(True, description="锁定后分镜/视频生成强制引用外观锁定卡")
+    consistency_level: str = "L3"
+    created_at: int = 0
+    updated_at: int = 0
+
+
+class CharacterAssetUpdateRequest(BaseModel):
+    """角色资产局部更新请求（仅白名单字段生效）。"""
+
+    name: str | None = None
+    role: str | None = None
+    age: int | None = None
+    description: str | None = None
+    personality: str | None = None
+    appearance_lock: str | None = None
+    locked: bool | None = None
+    consistency_level: str | None = None
 
 
 class CharacterCard(BaseModel):
@@ -256,6 +295,9 @@ class EditRequest(BaseModel):
     bgm_url: str | None = Field(None, description="背景音乐 URL（可选）")
     output_resolution: str = Field("1080x1920", description="输出分辨率，如 1080x1920")
     output_fps: int = Field(24, ge=1, le=60, description="输出帧率")
+    # 2026-09-01 新规：AI 生成微短剧须在每集明显位置添加提示标识
+    ai_label_enabled: bool = Field(True, description="是否在成片右上角烧录「AI生成」标识（合规要求默认开启）")
+    license_number: str = Field("", description="短剧备案号/节目编号（非空时随标识一并烧录）")
 
 
 class EditResult(BaseModel):
@@ -266,6 +308,25 @@ class EditResult(BaseModel):
     final_video_url: str
     duration_seconds: float
     segments_count: int
+
+
+class PipelineRunRequest(BaseModel):
+    """M7 全链路自动编排请求：从一句话创意一键生成短剧成片。"""
+
+    premise: str = Field(..., description="一句话创意", min_length=1)
+    genre: str = Field("都市悬疑", description="题材")
+    episodes: int = Field(1, ge=1, le=10, description="集数")
+    scenes_per_episode: int = Field(3, ge=1, le=10, description="每集分镜数")
+    monetization_mode: str = Field("iaa", description="变现模式：iaa / iap")
+    style: str = Field("写实电影感", description="画风")
+    generate_character_refs: bool = Field(True, description="是否生成角色定妆照（耗时较长）")
+    max_character_refs: int = Field(2, ge=0, le=10, description="最多生成定妆照的角色数")
+    video_duration_seconds: int = Field(3, ge=1, le=10, description="单镜头视频时长（秒）")
+    run_quality_check: bool = Field(True, description="成片后是否执行文本质检")
+    ai_label_enabled: bool = Field(True, description="成片烧录「AI生成」标识（合规默认开启）")
+    license_number: str = Field("", description="短剧备案号（非空时随标识烧录）")
+    output_resolution: str = Field("1080x1920", description="输出分辨率")
+    output_fps: int = Field(24, ge=1, le=60, description="输出帧率")
 
 
 class AsyncTaskResponse(BaseModel):

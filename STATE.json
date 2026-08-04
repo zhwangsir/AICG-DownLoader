@@ -1,7 +1,7 @@
 {
   "project": "AICG-DownLoader-main",
-  "version": "0.13.0",
-  "last_updated": "2026-07-29",
+  "version": "0.15.1",
+  "last_updated": "2026-08-04",
   "description": "ComfyUI 模型下载器 + AI 短剧生成平台。里程碑状态追踪文件，记录历史交付与当前会话优先级任务进度。",
   "milestones": {
     "M0": {
@@ -176,70 +176,267 @@
           "notes": "为 20 条类型片模板按 style_key 搭配推荐 LoRA（含 filename/trigger_words/weight）；检查 NAS 现有 LoRA 后以视频类为主、缺风格化 LoRA，于是从 civitai.com/civitai.red 批量下载 20 个 Flux.1 D 风格 LoRA，结果 17 成功、3 已存在跳过、0 失败，全部通过 SHA256 校验；RAGService 新增 _collect_lora_recommendations 与系统提示词 [推荐 LoRA] 章节；RAGOptimizeResponse 新增 lora_recommendations 字段；新增/更新 4 个单元测试覆盖 LoRA 去重、系统提示词、优化返回、兜底输出"
         }
       ]
+    },
+    "M7": {
+      "name": "短剧工业化优化 + 全链路自动编排",
+      "status": "delivered",
+      "summary": "基于 AI 短剧行业调研（爆款公式：单集 50-70s、首镜强钩子 ≤3s、每 15s 强节拍、IAP/IAA 卡点）完成四层工业化优化：剧本层结构校验+LLM 自动返修闭环、分镜层 BEAT_VISUAL_HINTS 节拍视觉化、质检层多角色/极端角度/跨集角色标注、剪辑层按 2026-09-01 广电新规烧录「AI生成」标识+备案号。新增角色资产库（外观锁定卡 CRUD）。M7 核心：PipelineOrchestrator 全链路自动编排（一句话创意 → 剧本→角色定妆照→分镜→视频→配音→字幕→剪辑→质检 → 成片），支持任务启动/查询/取消与进度跟踪。部署实测修复 RAG 嵌入模型外网不可达导致的 ~130s 逐场景超时：引入 600s 熔断 TTL + asyncio.to_thread 线程化。思维链清洗 strip_think_tags 抽取至 base.py 全局复用。全量回归：后端 420/420（覆盖率 84.48%）、前端 36/36、tsc 0 错误、build 成功，已部署 core 实测通过。",
+      "subtasks": [
+        {
+          "id": "M7.1",
+          "name": "剧本层：结构校验 + LLM 自动返修闭环",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/script_agent.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/tests/unit/test_script_agent.py"
+          ],
+          "notes": "VALID_NARRATIVE_BEATS 六种节拍（hook/escalation/reversal/cliffhanger/emotional_beat/transition）；校验规则：首镜必须为 hook 且 ≤3s（HOOK_MAX_DURATION，黄金 3 秒原则）、每 15s 内至少一个强节拍（DENSITY_MAX_WEAK_SECONDS）、IAP 模式 8-12 集反转卡点检查；校验不通过时携带 issues 调用 LLM 自动返修，形成生成→校验→返修闭环"
+        },
+        {
+          "id": "M7.2",
+          "name": "分镜层：BEAT_VISUAL_HINTS 节拍视觉化",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py"
+          ],
+          "notes": "BEAT_VISUAL_HINTS 字典将 narrative_beat 转换为具体视觉指令（如 hook=高对比戏剧光+压迫感构图+主体张力），在分镜提示词组装时注入，使叙事节拍直接指导画面生成"
+        },
+        {
+          "id": "M7.3",
+          "name": "质检层增强 + 剪辑层合规标识",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/quality_agent.py",
+            "platform/backend/app/agents/edit_agent.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/tests/unit/test_quality_agent.py"
+          ],
+          "notes": "quality_agent 复用剧本结构检查（hook/cliffhanger/时长/景别/情绪密度维度），自动标注多角色场景/极端角度/跨集次要角色；edit_agent._burn_ai_label 按 2026-09-01 广电总局新规在成片右上角烧录「AI生成」标识+备案号（license_number 经 re.sub 消毒）；schemas 新增 ai_label_enabled（默认 True）/license_number/monetization_mode 字段"
+        },
+        {
+          "id": "M7.4",
+          "name": "角色资产库（外观锁定卡）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/character_library.py",
+            "platform/backend/tests/unit/test_character_library.py"
+          ],
+          "notes": "本地 JSON 持久化角色外观锁定卡（177 行服务 + 241 行测试），支持 CRUD、character_id 格式严格校验、update 白名单字段过滤，为跨集/跨镜角色一致性提供资产基础"
+        },
+        {
+          "id": "M7.5",
+          "name": "全链路编排服务 + API",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/app/routers/drama.py",
+            "platform/backend/app/models/schemas.py"
+          ],
+          "notes": "PipelineOrchestrator（464 行）：内存任务句柄 + asyncio.Event 取消标志管理，_run 依次执行 剧本→角色定妆照（可跳过）→分镜→视频→配音→字幕→剪辑→质检 8 步，每步间 _check_cancel；进度经 progress_tracker 实时推送，成功/取消/异常三态终态报告含 total_elapsed_seconds。drama.py 新增 POST /pipeline/run（返回 task_id+poll_url+stream_url）、GET /pipeline/status/{task_id}、POST /pipeline/cancel/{task_id}；schemas 新增 PipelineRunRequest（premise/genre/episodes/scenes_per_episode/monetization_mode/generate_character_refs/video_duration_seconds/run_quality_check/ai_label_enabled/license_number/output_resolution/output_fps）"
+        },
+        {
+          "id": "M7.6",
+          "name": "单元测试 + 全量回归",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_pipeline_orchestrator.py"
+          ],
+          "notes": "test_pipeline_orchestrator.py（336 行）11 用例：完整流程 happy path 断言 8 步结果报告、角色定妆照跳过分支、剧本失败终态、取消后 cancelled by user 报告；修复 pytest fixture 与内置 request 冲突（重命名 pipeline_req）。全量回归：后端 420 passed / 0 failed，覆盖率 84.48%（≥80% 达标）；前端 vitest 36/36、tsc 0 错误、build 1.10s 成功"
+        },
+        {
+          "id": "M7.7",
+          "name": "部署 core 实测验证",
+          "status": "completed",
+          "files": [],
+          "notes": "代码 rsync 同步至 core（192.168.71.47），解决 pnpm 用户目录安装（npm config set prefix ~/.local）与 pnpm-workspace.yaml packages 字段缺失问题；后端 uvicorn 与前端 http.server 以 setsid 后台托管；实测 /api/drama/pipeline/run 任务启动、progress 轮询、cancel 取消全链路正常"
+        },
+        {
+          "id": "M7.8",
+          "name": "RAG 熔断+线程化修复 + 思维链清洗抽取",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/rag_service.py",
+            "platform/backend/app/agents/base.py",
+            "platform/backend/app/agents/ai_optimizer.py",
+            "platform/backend/app/agents/quality_agent.py",
+            "platform/backend/app/routers/drama.py",
+            "platform/backend/tests/unit/test_rag_service.py"
+          ],
+          "notes": "core 外网不可达导致 fastembed 嵌入模型加载每次超时 ~130s 且阻塞事件循环：_init_model 引入 MODEL_LOAD_FAILURE_TTL_SECONDS=600 熔断（失败后 TTL 内直接抛错，TTL 过期自动重置允许重试）；optimize_prompt 首次初始化改 asyncio.to_thread 避免冻结事件循环。strip_think_tags 抽取至 agents/base.py，ai_optimizer/rag_service/quality_agent/drama 全部复用，消除 LLM 输出思维链残留。test_rag_service 新增 TestModelLoadCircuitBreaker 2 用例（TTL 内熔断不重试、TTL 过期自动重置）"
+        }
+      ]
+    },
+    "M8": {
+      "name": "前端一键全链路成片入口",
+      "status": "delivered",
+      "summary": "将 M7 PipelineOrchestrator 能力暴露到前端：client.ts 新增 pipeline API 类型与 runPipeline/cancelPipeline/resolveTaskUrl/resolveStaticUrl（解决后端 localhost 绝对 URL 远程不可直连问题）；新增 PipelineModal 一键成片弹窗（创意设定表单 → 启动任务 → SSE 进度 → 终态报告/取消），App 顶栏新增「一键成片」入口，store 新增 pipeline 模态状态，Icon 库补 Zap/Square。全量回归：后端 420/420（84.48%）、前端 vitest 43/43（新增 M8 pipeline API 7 用例）、tsc 0 错误、build 938ms 成功（426.81 kB / gzip 130.51 kB）。已 rsync 部署 core 实测：pipeline run/status/cancel 全链路正常，取消闭环终态「任务已被用户取消」，前端 bundle 已含一键成片入口。",
+      "subtasks": [
+        {
+          "id": "M8.1",
+          "name": "client.ts pipeline API + URL 重写助手",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/api/client.ts"
+          ],
+          "notes": "PipelineRunParams（premise/genre/episodes/scenes_per_episode/monetization_mode/generate_character_refs/max_character_refs/video_duration_seconds/run_quality_check/ai_label_enabled/license_number/output_resolution/output_fps）与 PipelineReport（steps 键为各环节名，三态终态字段）类型；runPipeline POST /pipeline/run 返回 AsyncTaskResponse，cancelPipeline POST /pipeline/cancel/{id} 对 id encodeURIComponent；resolveTaskUrl 将后端 localhost 绝对 poll/stream URL 按 API_BASE 同源重写（相对 API_BASE 时仅保留 path）；resolveStaticUrl 处理静态资源 URL"
+        },
+        {
+          "id": "M8.2",
+          "name": "PipelineModal 一键成片弹窗 + store/App 接入",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/components/modals/PipelineModal.tsx",
+            "platform/frontend/src/components/modals/index.ts",
+            "platform/frontend/src/App.tsx",
+            "platform/frontend/src/store/useDramaStore.ts",
+            "platform/frontend/src/components/ui/Icon.tsx"
+          ],
+          "notes": "PipelineModal 两态界面：未启动时创意设定表单（premise/genre/style/集数/每集场景数/iaa-iap 模式/角色定妆照/质检/AI标识+备案号开关），启动后 SSE 进度条 + 分步报告展示 + 取消按钮；复用 useProgress hook 与 ProgressBar 组件；App 顶栏新增「一键成片」按钮（Zap 图标）；useDramaStore ModalsState 新增 pipeline 字段；Icon.tsx 按需 re-export Zap/Square 并纳入 IconComponent 联合类型"
+        },
+        {
+          "id": "M8.3",
+          "name": "前端测试 + 全量回归",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/api/client.test.ts"
+          ],
+          "notes": "client.test.ts 新增 describe(\"M8 全链路 pipeline API\") 7 用例：runPipeline 正常/422 错误、cancelPipeline URL 编码/404、resolveTaskUrl 相对 API_BASE 剥离 localhost 源/非法 URL 原样返回、resolveStaticUrl 三分支。全量：vitest 43/43 通过（36→43）、tsc 0 错误、build 938ms（dist 426.81 kB / gzip 130.51 kB）；修复 ProgressBar 调用缺 result 属性的 tsc 错误"
+        },
+        {
+          "id": "M8.4",
+          "name": "部署 core 实测验证",
+          "status": "completed",
+          "files": [],
+          "notes": "rsync 同步 platform/ 至 core（排除 node_modules/.venv/static/outputs）；后端 uvicorn :8100 重启 health 200，前端 http.server :3501 dist 200 且 bundle 已含 pipeline/run 调用与「一键成片」文案；实测 POST /pipeline/run 返回 task_id+poll/stream URL，status 轮询显示 Step 1/8 生成剧本，cancel 返回 cancel_requested，30s 后终态 failed「任务已被用户取消」——取消闭环验证通过"
+        },
+        {
+          "id": "M8.5",
+          "name": "STATE.json / TEST_LOG.md 更新",
+          "status": "completed",
+          "files": [
+            "STATE.json",
+            "TEST_LOG.md"
+          ],
+          "notes": "M8 里程碑 5 子任务、current_session、test_summary（前端 36→43 用例）已记录；TEST_LOG.md 新增 2026-08-04 M8 时序条目"
+        }
+      ]
+    },
+    "M9": {
+      "name": "全链路结果回填画布",
+      "status": "delivered",
+      "summary": "打通「一键生成 → 画布微调 → 局部重跑」闭环：后端 pipeline_orchestrator._step_script 终态报告 steps.script 内嵌完整剧本 model_dump（此前仅有摘要，前端无法还原画布）；前端新增 extractScriptFromReport 防御性解析纯函数（任何一层缺失返回 null），PipelineModal 任务成功后在操作栏显示「加载到画布」按钮（Workflow 图标），点击 setScriptData 回填 store 并关闭弹窗，画布立即呈现完整项目供微调。全量回归：后端 420/420（84.48%，happy path 断言 script.data 含完整 scenes）、前端 vitest 46/46（新增 M9 提取函数 3 用例）、tsc 0 错误、build 1.12s 成功。已部署 core，bundle 含「加载到画布」，E2E 实测验证通过。",
+      "subtasks": [
+        {
+          "id": "M9.1",
+          "name": "后端报告内嵌完整剧本数据",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_pipeline_orchestrator.py"
+          ],
+          "notes": "_step_script 报告 steps.script 新增 data: script.model_dump()（体积几 KB 可接受）；test_full_pipeline_completes 断言 script_data 含 title/project_id 键/characters≥1/scenes==2/scene_id 非 None"
+        },
+        {
+          "id": "M9.2",
+          "name": "前端 extractScriptFromReport + 加载到画布",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/api/client.ts",
+            "platform/frontend/src/components/modals/PipelineModal.tsx",
+            "platform/frontend/src/components/ui/Icon.tsx",
+            "platform/frontend/src/api/client.test.ts"
+          ],
+          "notes": "extractScriptFromReport(report) 防御性解析 steps.script.data（校验 project_id/title 为 string、characters/scenes 为数组，否则 null）；PipelineModal 新增 canvasScript memo（仅 report.passed 时可用）与 handleLoadToCanvas（setScriptData + statusInfo 提示 + 关弹窗）；Icon.tsx 补 Workflow 图标"
+        },
+        {
+          "id": "M9.3",
+          "name": "测试 + 全量回归",
+          "status": "completed",
+          "notes": "client.test.ts 新增 describe(\"M9 extractScriptFromReport\") 3 用例（完整报告返回剧本/null 与结构缺失返回 null），vitest 43→46 全绿；后端 420/420 复跑 84.48% 无回归；tsc 0 错误；build 1.12s（427.38 kB / gzip 130.70 kB）"
+        },
+        {
+          "id": "M9.4",
+          "name": "部署 core 实测验证",
+          "status": "completed",
+          "files": [],
+          "notes": "rsync 同步 + 后端重启；health/前端均 200；orchestrator 含 model_dump 新代码、bundle 含「加载到画布」文案；E2E 启动 1 集 1 场景 pipeline 任务验证终态报告 script.data 完整"
+        },
+        {
+          "id": "M9.5",
+          "name": "STATE.json / TEST_LOG.md 更新",
+          "status": "completed",
+          "files": [
+            "STATE.json",
+            "TEST_LOG.md"
+          ],
+          "notes": "M9 里程碑 5 子任务、current_session、test_summary（前端 43→46）已记录；TEST_LOG.md 新增 2026-08-04 M9 时序条目"
+        },
+        {
+          "id": "M9.6",
+          "name": "core E2E 复验 + 事件循环冻结热修复（P0）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/rag_service.py",
+            "platform/backend/app/main.py"
+          ],
+          "notes": "core 复跑全链路时发现两个 P0：①RAG 嵌入模型在事件循环内同步加载（缓存命中时 initialize() 不加载模型，首个 search() 触发 fastembed 同步下载，HF 不可达阻塞 ~130s 致全接口冻结，py-spy 实锤）→ 新增 _warm_up() 显式预热模型并经 asyncio.to_thread 执行；②HF_ENDPOINT=hf-mirror.com 后 Xet 分块重建仍 401（cas-server.xethub.hf.co 不走镜像）→ main.py 顶部 import 前 setdefault HF_ENDPOINT + HF_HUB_DISABLE_XET=1。修复后 core 两次全链路 E2E 均 passed:true（8 步全绿，RAG 0 失败，成片正常产出，quality 85）；本地全量回归 423/423（84.29%，新增 TestWarmUp 3 回归用例防复发）；AI-Omni ASR 转写实测恢复（带时间轴 segments）"
+        }
+      ]
     }
   },
   "current_session": {
-    "session_id": "2026-07-29-m6-rag-prompt-optimization",
-    "goal": "M6 RAG 提示词优化知识库：内置 AI 模型优化影视/短剧/动漫生成提示词",
-    "previous_session_archived": "2026-07-27-m5-systematic-optimization",
+    "session_id": "2026-08-04-m9-canvas-backfill",
+    "goal": "M9 全链路结果回填画布：一键生成 → 画布微调 → 局部重跑闭环",
+    "previous_session_archived": "2026-08-04-m8-pipeline-frontend",
     "tasks": {
-      "R1": {
-        "name": "影视/动漫生成提示词优化方法与 RAG 架构深度调研",
-        "status": "completed",
-        "notes": "整理风格(style)、镜头技法(shot)、负面提示词(negative)、示例(example)、提示词方法论(method)五类知识；统一 JSON schema 与 metadata 过滤策略；覆盖 28 种视觉风格、43 种镜头/光影/构图/天气技法、14 组负面提示词、11 条高质量示例、8 条提示词优化方法论"
-      },
-      "R2": {
-        "name": "RAGService 与 API 路由实现",
+      "T1": {
+        "name": "后端报告内嵌完整剧本",
         "status": "completed",
         "files": [
-          "platform/backend/app/services/rag_service.py",
-          "platform/backend/app/routers/drama.py",
-          "platform/backend/app/config.py",
-          "platform/backend/app/models/schemas.py"
+          "platform/backend/app/services/pipeline_orchestrator.py"
         ],
-        "notes": "fastembed 向量生成+本地缓存，domain/style 元数据过滤，Top-K 检索，LLM 重写英文正/负提示词；暴露 /api/drama/rag/optimize 与 /api/drama/rag/styles"
+        "notes": "steps.script.data = script.model_dump()，报告自包含"
       },
-      "R3": {
-        "name": "剧本/角色/分镜 Agent 集成 RAG",
+      "T2": {
+        "name": "前端提取函数 + 加载到画布按钮",
         "status": "completed",
         "files": [
-          "platform/backend/app/agents/script_agent.py",
-          "platform/backend/app/agents/character_agent.py",
-          "platform/backend/app/agents/storyboard_agent.py"
+          "platform/frontend/src/api/client.ts",
+          "platform/frontend/src/components/modals/PipelineModal.tsx",
+          "platform/frontend/src/components/ui/Icon.tsx"
         ],
-        "notes": "剧本场景 description→英文视频提示词；角色三视图按 style 优化并保持 solo single person；分镜提示词保持 9:16 竖屏构图；RAG 失败均兜底保留原提示词"
+        "notes": "extractScriptFromReport 防御性解析；任务成功后操作栏显示「加载到画布」，setScriptData 回填 store"
       },
-      "R4": {
-        "name": "后端全量回归测试",
+      "T3": {
+        "name": "测试与全量回归",
         "status": "completed",
-        "notes": "pytest tests/ -q --tb=short → 354 passed / 0 failed，覆盖率 85.36%（≥80% 达标）；RAG 相关 test_rag_service 12/12 + integration/test_rag 5/5 全部通过"
+        "notes": "前端 46/46（新增 3 用例）、后端 420/420（84.48%）、tsc 0、build 成功"
       },
-      "L5": {
-        "name": "LoRA 批量下载与 RAG 推荐集成回归",
+      "T4": {
+        "name": "部署 core 实测",
         "status": "completed",
-        "files": [
-          "platform/backend/app/knowledge_base/genre_tropes.json",
-          "platform/backend/app/services/rag_service.py",
-          "platform/backend/app/models/schemas.py",
-          "platform/backend/tests/unit/test_rag_service.py",
-          "platform/backend/scripts/lora_manifest.json",
-          "platform/backend/scripts/download_loras.py"
-        ],
-        "notes": "为 20 条类型片模板按风格搭配 LoRA 并写入 recommended_loras；检查 NAS 后以风格化 LoRA 缺失为主，从 civitai.com/civitai.red 双源批量下载 20 个 Flux.1 D LoRA（17 成功/3 跳过/0 失败，全部 SHA256 校验通过）；RAGService 与响应 schema 接入 LoRA 推荐；新增/更新 4 个单元测试；全量回归：后端 356/356（覆盖率 85.47%），前端 36/36，tsc 0 错误，build 成功"
+        "notes": "rsync + 重启；health/前端 200；E2E 任务验证终态报告 script.data 完整"
+      },
+      "T5": {
+        "name": "文档更新",
+        "status": "completed",
+        "notes": "STATE.json M9 + TEST_LOG.md M9 时序条目"
       }
     }
   },
   "test_summary": {
     "backend": {
-      "total": 356,
-      "passed": 356,
+      "total": 420,
+      "passed": 420,
       "failed": 0,
-      "coverage": "85.47%",
+      "coverage": "84.48%",
       "coverage_threshold": "80%"
     },
     "frontend": {
-      "total": 36,
-      "passed": 36,
+      "total": 46,
+      "passed": 46,
       "failed": 0,
       "tsc": "0 errors"
     },

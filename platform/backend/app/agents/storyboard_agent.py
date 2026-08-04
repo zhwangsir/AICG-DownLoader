@@ -37,6 +37,7 @@ import json_repair
 
 from app.agents.ai_optimizer import web_search
 from app.agents.base import BaseAgent
+from app.services.character_library import character_library
 from app.config import settings
 from app.models.schemas import (
     AgentResponse,
@@ -96,6 +97,16 @@ DEFAULT_NEGATIVE_PROMPT = (
     "bad anatomy, bad hands, missing fingers, extra digits, cropped, out of frame, "
     "duplicate, clone, bad proportions, malformed limbs"
 )
+
+# 叙事节拍 → 分镜视觉指令（与剧本层 narrative_beat 联动，引导关键帧画面的情绪表达）
+BEAT_VISUAL_HINTS = {
+    "hook": "强钩子镜头：画面必须有第一眼的视觉冲击力——高对比戏剧光、压迫感构图、主体表情/动作极具张力",
+    "escalation": "冲突升级镜头：画面张力递进——更紧的构图、更强的明暗对比、肢体语言对抗感",
+    "reversal": "反转镜头：画面要有戏剧性落差——预期违背的瞬间，表情特写或局势翻盘的视觉定格",
+    "cliffhanger": "悬念镜头：画面悬而未决——信息只给一半，留白构图，制造追更冲动",
+    "emotional_beat": "情绪落点镜头：画面放缓——柔光、浅景深、表情细腻特写，让观众共情",
+    "transition": "过渡镜头：画面承担衔接——环境交代或视线引导，构图平稳不过载信息",
+}
 
 # SDXL 9:16 竖屏分镜工作流模板
 WORKFLOW_TEMPLATE = {
@@ -475,9 +486,25 @@ class StoryboardAgent(BaseAgent):
         """调用 GLM-5.2 生成分镜英文提示词（可注入联网搜索参考资料）。"""
         char_info = ""
         if characters:
-            char_info = "\n".join(
-                f"- {c.name}（{c.role}）: {c.description}" for c in characters
-            )
+            # 角色资产库解析：锁定角色强制注入外观锁定卡（跨集/跨镜一致性）
+            try:
+                resolved = character_library.resolve_characters(characters)
+            except Exception as e:
+                logger.warning("角色资产库解析失败，回退请求内角色描述: %s", e)
+                resolved = [
+                    {"name": c.name, "role": c.role, "description": c.description, "appearance_lock": ""}
+                    for c in characters
+                ]
+            char_lines: list[str] = []
+            for r in resolved:
+                line = f"- {r['name']}（{r['role']}）: {r['description']}"
+                if r.get("appearance_lock"):
+                    line += (
+                        "\n  外观锁定（跨集一致性，必须原样保留以下英文外观关键词）: "
+                        f"{r['appearance_lock']}"
+                    )
+                char_lines.append(line)
+            char_info = "\n".join(char_lines)
 
         user_msg = (
             f"场景编号：{scene.scene_id}\n"
@@ -492,6 +519,9 @@ class StoryboardAgent(BaseAgent):
         )
         if scene.prompt:
             user_msg += f"\n剧本 LLM 已给出的英文 prompt（仅供参考，请在此基础上补全场景细节与角色外观，不要直接复用）：\n{scene.prompt}\n"
+        beat_hint = BEAT_VISUAL_HINTS.get(scene.narrative_beat.strip(), "")
+        if beat_hint:
+            user_msg += f"\n叙事节拍：{scene.narrative_beat}——{beat_hint}，构图与光影必须体现该节拍情绪\n"
         if char_info:
             user_msg += f"\n相关角色（必须将出场角色的外观特征嵌入 prompt）：\n{char_info}\n"
         if reference:

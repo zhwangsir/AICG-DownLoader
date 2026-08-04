@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.agents.storyboard_agent import StoryboardAgent
+from app.agents.storyboard_agent import BEAT_VISUAL_HINTS, StoryboardAgent
 from app.config import settings
-from app.models.schemas import StoryboardRequest
+from app.models.schemas import Scene, StoryboardRequest
 
 
 @pytest.fixture
@@ -92,6 +92,56 @@ class TestStoryboardAgentExecute:
 
         assert response.success is False
         assert "失败" in response.error
+
+
+class TestBeatVisualHints:
+    """narrative_beat → 分镜视觉指令注入测试。"""
+
+    def _make_scene(self, beat: str) -> Scene:
+        return Scene(
+            scene_id=1,
+            episode=1,
+            shot_type="特写",
+            description="主角盯着手机屏幕",
+            narrative_beat=beat,
+        )
+
+    async def test_beat_hint_injected_into_llm_message(self, agent, mock_call_llm):
+        mock_call_llm.return_value = json.dumps({"prompt": "p", "negative_prompt": "n"})
+        scene = self._make_scene("hook")
+
+        await agent._generate_prompts(scene, [], "写实电影感")
+
+        messages = mock_call_llm.call_args.kwargs["messages"]
+        user_msg = next(m["content"] for m in messages if m["role"] == "user")
+        assert "叙事节拍" in user_msg
+        assert "hook" in user_msg
+        assert BEAT_VISUAL_HINTS["hook"] in user_msg
+
+    async def test_no_beat_no_hint(self, agent, mock_call_llm):
+        mock_call_llm.return_value = json.dumps({"prompt": "p", "negative_prompt": "n"})
+        scene = self._make_scene("")
+
+        await agent._generate_prompts(scene, [], "写实电影感")
+
+        messages = mock_call_llm.call_args.kwargs["messages"]
+        user_msg = next(m["content"] for m in messages if m["role"] == "user")
+        assert "叙事节拍" not in user_msg
+
+    async def test_unknown_beat_no_hint(self, agent, mock_call_llm):
+        mock_call_llm.return_value = json.dumps({"prompt": "p", "negative_prompt": "n"})
+        scene = self._make_scene("unknown_beat")
+
+        await agent._generate_prompts(scene, [], "写实电影感")
+
+        messages = mock_call_llm.call_args.kwargs["messages"]
+        user_msg = next(m["content"] for m in messages if m["role"] == "user")
+        assert "叙事节拍" not in user_msg
+
+    def test_all_valid_beats_have_hints(self):
+        for beat in ("hook", "escalation", "reversal", "cliffhanger", "emotional_beat", "transition"):
+            assert beat in BEAT_VISUAL_HINTS
+            assert BEAT_VISUAL_HINTS[beat]
 
 
 # ============================================================================

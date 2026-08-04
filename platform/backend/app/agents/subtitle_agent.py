@@ -110,7 +110,11 @@ class SubtitleAgent(BaseAgent):
             audio_path = await self._download_audio(request.audio_url)
 
             # ASR 转写：按后端派发
-            if backend == "firered":
+            if backend == "ai_omni":
+                segments_data, language = await self._transcribe_via_ai_omni(
+                    audio_path, request.language
+                )
+            elif backend == "firered":
                 try:
                     segments_data, language = await self._transcribe_via_firered(
                         audio_path, request.language
@@ -199,6 +203,43 @@ class SubtitleAgent(BaseAgent):
                 error=f"字幕生成失败: {e}",
                 elapsed_seconds=time.time() - start,
             )
+
+    async def _transcribe_via_ai_omni(
+        self, audio_path: str, language: str
+    ) -> tuple[list[dict], str]:
+        """AI-Omni ASR 路径：Workstation :9210（faster-whisper large-v3）。
+
+        OpenAI 兼容端点 /v1/audio/transcriptions，verbose_json 返回含
+        segments 时间轴（2026-08-04 服务端已补回 segments 字段）。
+        返回 (segments, language)，segments 为 [{"start","end","text"}]。
+        """
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+
+        resp = await self.http.post(
+            f"{settings.ai_omni_asr_endpoint}/v1/audio/transcriptions",
+            files={"file": (Path(audio_path).name, audio_bytes, "audio/mpeg")},
+            data={
+                "response_format": "verbose_json",
+                "language": language if language != "auto" else "zh",
+            },
+            timeout=settings.ai_omni_asr_timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        segments = data.get("segments") or []
+        if not segments and data.get("text"):
+            # 服务端未返回时间轴时整段兜底，保证 SRT 可构建
+            segments = [
+                {
+                    "start": 0.0,
+                    "end": float(data.get("duration", 0.0)),
+                    "text": data["text"],
+                }
+            ]
+        logger.info("AI-Omni ASR 转写: %d 段", len(segments))
+        return segments, data.get("language", language)
 
     async def _transcribe_via_firered(
         self, audio_path: str, language: str

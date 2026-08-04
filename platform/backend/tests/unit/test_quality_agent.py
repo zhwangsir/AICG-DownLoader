@@ -40,8 +40,12 @@ class TestQualityAgent:
 
         assert response.success is True
         assert response.data["score"] == 85
-        assert len(response.data["issues"]) == 1
-        assert response.data["issues"][0]["category"] == "logic"
+        # LLM 返回的 logic 问题必须存在（结构校验/高风险打标可能追加额外 issue）
+        logic_issues = [i for i in response.data["issues"] if i["category"] == "logic"]
+        assert len(logic_issues) == 1
+        assert logic_issues[0]["message"] == "剧情跳跃"
+        # 极简场景缺少 narrative_beat，确定性结构校验应报末镜节拍问题
+        assert any(i["category"] == "structure" for i in response.data["issues"])
 
     async def test_json_decode_error(self, quality_agent):
         fake_resp = MagicMock()

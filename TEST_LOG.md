@@ -2,6 +2,255 @@
 
 > 本文件按时间倒序记录每次回归验证的命令、结果与关键代码片段。
 
+## 2026-08-04 M9.6 core E2E 复验 + 事件循环冻结热修复（P0）
+
+### 变更摘要
+
+- **问题①（P0）事件循环冻结**：core 复跑全链路时 `/api/progress` 与 health 全部超时无响应。py-spy dump 实锤主线程阻塞链：`pipeline_orchestrator._step_script → script_agent._rag_enhance_scenes → rag_service.optimize_prompt → search → _init_model → fastembed → huggingface_hub model_info → sync httpx create_connection`（HF 不可达，connect 挂起 ~130s）。根因：`optimize_prompt` 虽用 `asyncio.to_thread(self._ensure_initialized)` 预热，但**缓存命中时 `initialize()` 提前返回不加载模型**（`_embedding_model` 仍为 None），首个 `search()` 在事件循环内同步触发模型下载。
+- **修复①（rag_service.py）**：新增 `_warm_up()`（`_ensure_initialized()` + 有条目时显式 `_init_model()`），`optimize_prompt` 改为 `await asyncio.to_thread(self._warm_up)`，确保模型加载始终在线程内完成。
+- **问题②（P0）HF 镜像 401**：设置 `HF_ENDPOINT=https://hf-mirror.com` 后 API 可达（0.5s），但 fastembed 默认 Xet 存储后端的分块重建请求直连 `cas-server.xethub.hf.co`（不走镜像）返回 401。
+- **修复②（main.py）**：文件顶部（agent 导入前，ENDPOINT 常量在 import 时固化）`os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")` + `os.environ.setdefault("HF_HUB_DISABLE_XET", "1")`。
+- **验证**：core 嵌入模型下载成功（bge-small-zh-v1.5，dim 512）；两次全链路 E2E 均 `passed:true`（script/storyboard/video/voice/subtitle/edit/quality 全绿，RAG 0 失败，成片 final_pipeline-1785807045.mp4，quality 85）；本地全量回归 423/423（覆盖率 84.29%，新增 TestWarmUp 3 回归用例：缓存命中时 _warm_up 补加载模型 / 无条目跳过 / optimize_prompt 必须经 _warm_up 预热）；AI-Omni ASR 转写实测恢复（verbose_json 含 segments 时间轴）。
+
+### 关键代码片段
+
+#### 1. RAG 线程内完整预热（`platform/backend/app/services/rag_service.py`）
+
+```python
+def _warm_up(self) -> None:
+    """线程内预热：初始化索引并加载嵌入模型。
+
+    缓存命中时 initialize() 不会加载模型（_embedding_model 为 None），
+    首个 search() 会在事件循环内触发 _init_model() 同步下载/加载模型，
+    外网不可达时阻塞事件循环 ~130s（2026-08-04 core 实测全接口冻结）。
+    因此预热必须显式补加载模型。
+    """
+    self._ensure_initialized()
+    if self._entries:
+        self._init_model()
+
+# optimize_prompt 内：
+await asyncio.to_thread(self._warm_up)
+```
+
+#### 2. HF 镜像 + 禁用 Xet（`platform/backend/app/main.py` 顶部）
+
+```python
+import os
+
+# 必须在导入 fastembed/huggingface_hub 之前设置（ENDPOINT 常量在 import 时固化）
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+# hf-mirror 不代理 cas-server.xethub.hf.co，Xet 分块重建 401，禁用后走普通 HTTP
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+```
+
+### 回归结果
+
+| 项目 | 结果 |
+|------|------|
+| 后端 pytest | 423/423 通过，覆盖率 84.29%（新增 TestWarmUp 3 用例） |
+| core 全链路 E2E ×2 | passed:true，8 步全绿，RAG 0 失败 |
+| 事件循环 | 视频生成期间 health/progress 均 200 即时响应 |
+| AI-Omni ASR | 转写恢复，segments 时间轴正常 |
+
+## 2026-08-04 M9 全链路结果回填画布
+
+### 变更摘要
+
+- **后端报告自包含（pipeline_orchestrator.py）**：`_step_script` 终态报告 `steps.script` 新增 `data: script.model_dump()`——此前仅有 `{title, characters: len, scenes: len}` 摘要，前端无法从报告还原画布所需完整剧本，现报告自包含（体积几 KB 可接受）。
+- **前端提取函数（client.ts）**：`extractScriptFromReport(report)` 防御性解析 `steps.script.data`，校验 `project_id`/`title` 为 string、`characters`/`scenes` 为数组，任何一层缺失返回 null 由调用方降级。
+- **加载到画布（PipelineModal.tsx）**：`canvasScript` memo 仅在 `report.passed` 时可用；任务成功后操作栏显示「加载到画布」按钮（Workflow 图标），`handleLoadToCanvas` 执行 `setScriptData(canvasScript)` + statusInfo 提示 + 关弹窗，画布立即呈现完整项目，打通「一键生成 → 画布微调 → 局部重跑」闭环。
+- **测试**：client.test.ts 新增 `describe("M9 extractScriptFromReport")` 3 用例；test_pipeline_orchestrator happy path 断言 `script.data` 含完整 scenes。
+
+### 关键代码片段
+
+#### 1. 后端报告内嵌剧本（`platform/backend/app/services/pipeline_orchestrator.py`）
+
+```python
+report["steps"]["script"] = {
+    "title": script.title,
+    "characters": len(script.characters),
+    "scenes": len(script.scenes),
+    # 完整剧本数据：供前端「加载到画布」回填，报告体积约几 KB 可接受
+    "data": script.model_dump(),
+}
+```
+
+#### 2. 前端防御性提取（`platform/frontend/src/api/client.ts`）
+
+```typescript
+export function extractScriptFromReport(
+  report: PipelineReport | null | undefined
+): ScriptData | null {
+  const data = report?.steps?.script?.data;
+  if (!data || typeof data !== "object") return null;
+  const s = data as Partial<ScriptData>;
+  if (
+    typeof s.project_id !== "string" ||
+    typeof s.title !== "string" ||
+    !Array.isArray(s.characters) ||
+    !Array.isArray(s.scenes)
+  ) {
+    return null;
+  }
+  return data as ScriptData;
+}
+```
+
+### 回归结果
+
+| 项目 | 命令 | 结果 |
+|------|------|------|
+| 后端全量 | `python -m pytest tests/ -q` | **420 passed / 0 failed**，覆盖率 **84.48%**（≥80% 达标），47.63s |
+| 编排服务 | `tests/unit/test_pipeline_orchestrator.py` | 11/11 通过（happy path 新增 script.data 断言） |
+| 前端单测 | `pnpm vitest run` | **46/46 通过**（43→46，新增 M9 提取函数 3 用例），1.49s |
+| 前端类型 | `npx tsc --noEmit` | 0 错误 |
+| 前端构建 | `pnpm build` | 成功（1.12s，427.38 kB / gzip 130.70 kB） |
+| core 部署实测 | rsync + curl + E2E pipeline 任务 | health/前端 200；orchestrator 含 model_dump、bundle 含「加载到画布」；E2E 终态报告 script.data 完整 |
+
+## 2026-08-04 M8 前端一键全链路成片入口
+
+### 变更摘要
+
+- **pipeline API 层（client.ts）**：新增 `PipelineRunParams`（14 个参数，含 monetization_mode/ai_label_enabled/license_number 等合规字段）与 `PipelineReport`（终态报告，steps 键为各环节名）类型；`runPipeline` POST `/pipeline/run` 返回 `AsyncTaskResponse`，`cancelPipeline` POST `/pipeline/cancel/{id}` 对 id 做 `encodeURIComponent`；`resolveTaskUrl` 将后端返回的 localhost 绝对 poll/stream URL 按 `API_BASE` 同源重写（相对 API_BASE 部署时仅保留 path），解决远程部署浏览器无法直连 localhost 的问题；`resolveStaticUrl` 统一处理静态资源 URL。
+- **PipelineModal 一键成片弹窗（PipelineModal.tsx）**：两态界面——未启动时为创意设定表单（premise/genre/style/集数/每集场景数/iaa-iap 模式/角色定妆照/质检/AI标识+备案号开关），启动后切换为 SSE 进度条（复用 `useProgress` + `ProgressBar`）+ 分步终态报告展示 + 取消按钮；`handleStart` 校验 premise 非空后调用 `runPipeline`，`resolveTaskUrl(resp.stream_url)` 接入进度流。
+- **入口接入（App.tsx / useDramaStore / Icon.tsx）**：顶栏新增「一键成片」按钮（Zap 图标，`title="一句话创意 → 全链路自动成片"`）；`ModalsState` 新增 `pipeline` 字段；Icon.tsx 按需 re-export `Zap`/`Square` 并纳入 `IconComponent` 联合类型。
+- **测试（client.test.ts）**：新增 `describe("M8 全链路 pipeline API")` 7 用例——runPipeline 正常/422 错误、cancelPipeline URL 编码/404、resolveTaskUrl 相对 API_BASE 剥离 localhost 源/非法 URL 原样返回、resolveStaticUrl 三分支。
+
+### 关键代码片段
+
+#### 1. localhost 绝对 URL 同源重写（`platform/frontend/src/api/client.ts`）
+
+```typescript
+export function resolveTaskUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (API_BASE.startsWith("http")) {
+      const base = new URL(API_BASE);
+      u.protocol = base.protocol;
+      u.host = base.host;
+      return u.toString();
+    }
+    // API_BASE 为相对路径（经代理/同源部署）：仅保留 path，走当前页面源
+    return u.pathname + u.search;
+  } catch {
+    return url;
+  }
+}
+```
+
+#### 2. 一键全链路启动（`platform/frontend/src/components/modals/PipelineModal.tsx`）
+
+```typescript
+const resp = await runPipeline({
+  premise: premise.trim(),
+  genre, style, episodes,
+  scenes_per_episode: scenesPerEpisode,
+  monetization_mode: mode,
+  generate_character_refs: genCharRefs,
+  run_quality_check: runQc,
+  ai_label_enabled: aiLabel,
+  license_number: licenseNumber.trim(),
+});
+setTaskId(resp.task_id);
+setStreamUrl(resolveTaskUrl(resp.stream_url));
+```
+
+### 回归结果
+
+| 项目 | 命令 | 结果 |
+|------|------|------|
+| 后端全量 | `python -m pytest tests/ -q` | **420 passed / 0 failed**，覆盖率 **84.48%**（≥80% 达标），50.72s |
+| 前端单测 | `pnpm vitest run` | **43/43 通过**（36→43，新增 M8 pipeline API 7 用例），1.12s |
+| 前端类型 | `npx tsc --noEmit` | 0 错误（修复 ProgressBar 缺 result 属性 1 处） |
+| 前端构建 | `pnpm build` | 成功（938ms，426.81 kB / gzip 130.51 kB） |
+| core 部署实测 | rsync + curl `/api/drama/pipeline/run\|status\|cancel` | run 返回 task_id+poll/stream URL；status 显示 Step 1/8 生成剧本；cancel 返回 cancel_requested；30s 后终态「任务已被用户取消」，取消闭环验证通过；前端 :3501 bundle 已含「一键成片」 |
+
+## 2026-08-04 M7 短剧工业化优化 + 全链路自动编排
+
+### 变更摘要
+
+- **剧本层（script_agent.py）**：新增结构校验器 `VALID_NARRATIVE_BEATS`（hook/escalation/reversal/cliffhanger/emotional_beat/transition）——首镜必须为 hook 且 ≤3s（`HOOK_MAX_DURATION`，黄金 3 秒原则）、每 15s 内至少一个强节拍（`DENSITY_MAX_WEAK_SECONDS`）、IAP 模式 8-12 集反转卡点检查；校验不通过时携带 issues 调用 LLM 自动返修，形成生成→校验→返修闭环。
+- **分镜层（storyboard_agent.py）**：`BEAT_VISUAL_HINTS` 将 narrative_beat 转换为具体视觉指令（hook=高对比戏剧光+压迫感构图+主体张力），注入分镜提示词组装。
+- **质检层（quality_agent.py）**：复用剧本结构检查维度（hook/cliffhanger/时长/景别/情绪密度），自动标注多角色场景/极端角度/跨集次要角色。
+- **剪辑层（edit_agent.py）**：`_burn_ai_label` 按 2026-09-01 广电总局新规在成片右上角烧录「AI生成」标识+备案号（`license_number` 经 `re.sub` 消毒）；schemas 新增 `ai_label_enabled`（默认 True）/`license_number`/`monetization_mode`。
+- **角色资产库（character_library.py，177 行）**：本地 JSON 持久化外观锁定卡，CRUD + `character_id` 格式严格校验 + update 白名单字段过滤，支撑跨集/跨镜角色一致性。
+- **全链路编排（pipeline_orchestrator.py，464 行）**：`PipelineOrchestrator` 内存任务句柄 + `asyncio.Event` 取消标志；`_run` 依次执行 剧本→角色定妆照（可跳过）→分镜→视频→配音→字幕→剪辑→质检 8 步，步间 `_check_cancel`；成功/取消/异常三态终态报告含 `total_elapsed_seconds`。drama.py 新增 `POST /pipeline/run`、`GET /pipeline/status/{task_id}`、`POST /pipeline/cancel/{task_id}`；schemas 新增 `PipelineRunRequest`。
+- **RAG 熔断+线程化（rag_service.py）**：core 外网不可达导致嵌入模型加载每次超时 ~130s 且阻塞事件循环——`MODEL_LOAD_FAILURE_TTL_SECONDS=600` 熔断（TTL 内直接抛错，过期自动重置）；`optimize_prompt` 首次初始化改 `asyncio.to_thread`。
+- **思维链清洗**：`strip_think_tags` 抽取至 `agents/base.py`，ai_optimizer/rag_service/quality_agent/drama 全部复用，消除 LLM 输出 `</think>` 残留。
+
+### 关键代码片段
+
+#### 1. 嵌入模型加载失败熔断（`platform/backend/app/services/rag_service.py`）
+
+```python
+MODEL_LOAD_FAILURE_TTL_SECONDS = 600.0
+
+def _init_model(self) -> None:
+    """懒加载嵌入模型，避免导入即耗时。加载失败后熔断 TTL 内直接抛错。"""
+    if self._embedding_model is not None:
+        return
+    if self._model_load_failed_at is not None:
+        if time.time() - self._model_load_failed_at < MODEL_LOAD_FAILURE_TTL_SECONDS:
+            raise RuntimeError(
+                f"嵌入模型 {self.model_name} 此前加载失败，熔断中（TTL 内不再重试）"
+            )
+        self._model_load_failed_at = None  # TTL 已过，允许重试
+    try:
+        self._embedding_model = TextEmbedding(model_name=self.model_name)
+    except Exception as e:
+        self._model_load_failed_at = time.time()
+        raise RuntimeError(f"无法加载嵌入模型 {self.model_name}: {e}") from e
+```
+
+#### 2. 全链路编排任务启动与取消（`platform/backend/app/services/pipeline_orchestrator.py`）
+
+```python
+def start(self, request: PipelineRunRequest) -> str:
+    project_id = f"pipeline-{int(time.time())}"
+    task_id = progress_tracker.create("pipeline", message="全链路任务已创建")
+    cancel_event = asyncio.Event()
+    self._cancel_events[task_id] = cancel_event
+    self._handles[task_id] = asyncio.create_task(
+        self._run(task_id, project_id, request, cancel_event)
+    )
+    return task_id
+
+def cancel(self, task_id: str) -> bool:
+    event = self._cancel_events.get(task_id)
+    if event is None:
+        return False
+    event.set()
+    return True
+```
+
+#### 3. 熔断单元测试（`platform/backend/tests/unit/test_rag_service.py`）
+
+```python
+def test_failure_circuit_breaks_subsequent_calls(self, tmp_path):
+    service = self._make_service(tmp_path)
+    with patch("app.services.rag_service.TextEmbedding", side_effect=OSError("Connection timed out")) as m_te:
+        with pytest.raises(RuntimeError, match="无法加载嵌入模型"):
+            service._init_model()
+        assert m_te.call_count == 1
+        with pytest.raises(RuntimeError, match="熔断中"):
+            service._init_model()
+        assert m_te.call_count == 1  # TTL 内不再重试
+```
+
+### 回归结果
+
+| 项目 | 命令 | 结果 |
+|------|------|------|
+| 后端全量 | `python -m pytest tests/ -q` | **420 passed / 0 failed**，覆盖率 **84.48%**（≥80% 达标），48.65s |
+| 编排服务 | `tests/unit/test_pipeline_orchestrator.py` | 11/11 通过（happy path 8 步报告、跳过分支、失败终态、取消报告） |
+| 角色资产库 | `tests/unit/test_character_library.py` | 全绿（CRUD、id 校验、白名单过滤） |
+| RAG 熔断 | `TestModelLoadCircuitBreaker` | 2/2 通过（TTL 内不重试、TTL 过期重置） |
+| 前端单测 | `pnpm vitest run` | 36/36 通过（1.54s） |
+| 前端类型 | `npx tsc --noEmit` | 0 错误 |
+| 前端构建 | `pnpm build` | 成功（1.10s，417.35 kB / gzip 127.84 kB） |
+| core 部署实测 | rsync + curl `/api/drama/pipeline/run|status|cancel` | 任务启动/进度轮询/取消全链路正常 |
+
 ## 2026-07-29 M6.7 LoRA 搭配、批量下载与 RAG 推荐集成
 
 ### 变更摘要

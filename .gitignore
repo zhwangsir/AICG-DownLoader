@@ -30,6 +30,13 @@ platform/frontend/src-tauri/target/
 __pycache__/
 *.pyc
 
+# 运行时日志 / 进程文件 / 本地数据
+*.log
+*.pid
+platform/backend/data/
+platform/frontend/.debug/
+*.png.jpg
+
 # 编辑器/系统
 .DS_Store
 .vscode/

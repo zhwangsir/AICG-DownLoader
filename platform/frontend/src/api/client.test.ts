@@ -16,6 +16,11 @@ import {
   generateLipSync,
   generatePostprocess,
   pollVideoTask,
+  runPipeline,
+  cancelPipeline,
+  resolveTaskUrl,
+  resolveStaticUrl,
+  extractScriptFromReport,
   type ProgressEvent,
 } from "./client";
 
@@ -271,5 +276,176 @@ describe("pollVideoTask 轮询截止期限", () => {
       API_TIMEOUTS.pollInterval + API_TIMEOUTS.taskCreate
     );
     await assertion;
+  });
+});
+
+describe("M8 全链路 pipeline API", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const PIPELINE_PARAMS = {
+    premise: "都市悬疑，外卖员发现客户是凶手",
+    genre: "都市悬疑",
+    style: "写实电影感",
+    episodes: 1,
+    scenes_per_episode: 3,
+    monetization_mode: "iaa" as const,
+    generate_character_refs: false,
+    run_quality_check: true,
+    ai_label_enabled: true,
+    license_number: "",
+  };
+
+  it("runPipeline POST /pipeline/run 并返回任务句柄", async () => {
+    const fetchMock = vi.fn(async (url: string, opts?: RequestInit) => {
+      expect(url).toBe("/api/drama/pipeline/run");
+      expect(opts?.method).toBe("POST");
+      const body = JSON.parse(String(opts?.body));
+      expect(body.premise).toBe(PIPELINE_PARAMS.premise);
+      expect(body.monetization_mode).toBe("iaa");
+      expect(body.ai_label_enabled).toBe(true);
+      return mockJsonResponse({
+        task_id: "task-1",
+        agent: "pipeline",
+        status: "pending",
+        poll_url: "http://localhost:8100/api/progress/task-1",
+        stream_url: "http://localhost:8100/api/progress/task-1/stream",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const resp = await runPipeline(PIPELINE_PARAMS);
+    expect(resp.task_id).toBe("task-1");
+    expect(resp.agent).toBe("pipeline");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runPipeline 非 2xx 时抛出含状态码的错误", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("bad request", { status: 422 }))
+    );
+    await expect(runPipeline(PIPELINE_PARAMS)).rejects.toThrow(
+      /启动全链路任务失败: 422/
+    );
+  });
+
+  it("cancelPipeline POST /pipeline/cancel/{task_id} 并对 id 编码", async () => {
+    const fetchMock = vi.fn(async (url: string, opts?: RequestInit) => {
+      expect(url).toBe("/api/drama/pipeline/cancel/task%2F1");
+      expect(opts?.method).toBe("POST");
+      return mockJsonResponse({ success: true, data: { cancel_requested: true } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const resp = await cancelPipeline("task/1");
+    expect(resp.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancelPipeline 404 时抛出错误", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("not found", { status: 404 }))
+    );
+    await expect(cancelPipeline("nope")).rejects.toThrow(/取消任务失败: 404/);
+  });
+
+  it("resolveTaskUrl 在相对 API_BASE 下剥离 localhost 源仅保留路径", () => {
+    // 测试环境 API_BASE 为相对路径 "/api/drama"
+    expect(resolveTaskUrl("http://localhost:8100/api/progress/t1/stream")).toBe(
+      "/api/progress/t1/stream"
+    );
+  });
+
+  it("resolveTaskUrl 对非法 URL 原样返回", () => {
+    expect(resolveTaskUrl("not-a-url")).toBe("not-a-url");
+  });
+
+  it("resolveStaticUrl 对绝对 URL 原样返回、对相对路径在相对 API_BASE 下原样返回", () => {
+    expect(resolveStaticUrl("http://x/f.mp4")).toBe("http://x/f.mp4");
+    expect(resolveStaticUrl("/static/final/p.mp4")).toBe("/static/final/p.mp4");
+    expect(resolveStaticUrl("")).toBe("");
+  });
+});
+
+describe("M9 extractScriptFromReport 报告剧本提取", () => {
+  const SCRIPT = {
+    project_id: "p1",
+    title: "外卖惊魂",
+    genre: "都市悬疑",
+    aspect_ratio: "9:16",
+    total_episodes: 1,
+    characters: [
+      {
+        character_id: "c1",
+        name: "小李",
+        role: "主角",
+        age: 25,
+        description: "外卖员",
+        personality: "机敏",
+      },
+    ],
+    scenes: [
+      {
+        scene_id: 1,
+        episode: 1,
+        shot_type: "close",
+        description: "d",
+        prompt: "p",
+        negative_prompt: "",
+        character_actions: "",
+        dialogue: "台词",
+        emotion: "紧张",
+        duration_seconds: 3,
+        camera_movement: "static",
+      },
+    ],
+  };
+
+  it("完整报告返回剧本数据", () => {
+    const report = {
+      project_id: "p1",
+      premise: "x",
+      started_at: 1,
+      steps: { script: { title: "外卖惊魂", characters: 1, scenes: 1, data: SCRIPT } },
+      passed: true,
+    };
+    const s = extractScriptFromReport(report);
+    expect(s).not.toBeNull();
+    expect(s!.title).toBe("外卖惊魂");
+    expect(s!.characters).toHaveLength(1);
+    expect(s!.scenes[0].dialogue).toBe("台词");
+  });
+
+  it("report 为 null/undefined 时返回 null", () => {
+    expect(extractScriptFromReport(null)).toBeNull();
+    expect(extractScriptFromReport(undefined)).toBeNull();
+  });
+
+  it("steps.script.data 缺失或结构不完整时返回 null", () => {
+    expect(
+      extractScriptFromReport({
+        project_id: "p",
+        premise: "x",
+        started_at: 1,
+        steps: {},
+      })
+    ).toBeNull();
+    expect(
+      extractScriptFromReport({
+        project_id: "p",
+        premise: "x",
+        started_at: 1,
+        steps: { script: { title: "t" } },
+      })
+    ).toBeNull();
+    expect(
+      extractScriptFromReport({
+        project_id: "p",
+        premise: "x",
+        started_at: 1,
+        steps: { script: { data: { title: "t" } } }, // 缺 project_id/characters/scenes
+      })
+    ).toBeNull();
   });
 });

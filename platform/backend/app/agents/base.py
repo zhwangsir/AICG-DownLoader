@@ -29,6 +29,13 @@ def _strip_markdown(text: str) -> str:
     return text
 
 
+def strip_think_tags(text: str) -> str:
+    """剥离推理模型内联进 content 的思维链（<think>...</think>）。"""
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1]
+    return text.replace("<think>", "").strip()
+
+
 class BaseAgent:
     """所有 Agent 的基类，提供 LLM 调用和 ComfyUI 调用能力。
 
@@ -108,9 +115,7 @@ class BaseAgent:
 
         # Nemotron 等推理模型会把思考过程内联进 content（<think>...</think>），
         # 下游 JSON 解析前必须剥离；GLM 走 reasoning_content 字段不受影响
-        if "</think>" in content:
-            content = content.split("</think>", 1)[1]
-        content = content.replace("<think>", "").strip()
+        content = strip_think_tags(content)
 
         if response_format_json:
             content = _strip_markdown(content)

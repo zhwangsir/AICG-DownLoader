@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import shutil
 import tempfile
 import time
@@ -18,6 +20,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.agents.base import BaseAgent
 from app.config import settings
@@ -30,6 +34,23 @@ from app.models.schemas import (
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output" / "video"
 DEFAULT_RESOLUTION = (1080, 1920)
+
+# drawtext 可用的中文字体候选路径（按优先级）
+_CJK_FONT_CANDIDATES = [
+    "/System/Library/Fonts/PingFang.ttc",                       # macOS
+    "/System/Library/Fonts/STHeiti Light.ttc",                  # macOS 备选
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",   # Linux Noto
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",             # Linux 文泉驿
+    "/usr/share/fonts/truetype/arphic/uming.ttc",               # Linux 文鼎
+]
+
+
+def _find_cjk_font() -> str | None:
+    """返回第一个存在的中文字体路径；找不到返回 None。"""
+    for path in _CJK_FONT_CANDIDATES:
+        if Path(path).exists():
+            return path
+    return None
 
 # macOS Homebrew 的默认 ffmpeg 可能未启用 libass/drawtext，优先使用 ffmpeg-full
 _FFMPEG_FULL = Path("/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg")
@@ -115,6 +136,10 @@ class EditAgent(BaseAgent):
                         request.bgm_url,
                         tmp_dir,
                     )
+
+                # 4. 合规标识：烧录「AI生成」（+备案号），2026-09-01 新规要求
+                if request.ai_label_enabled:
+                    final_path = await self._burn_ai_label(final_path, request.license_number)
 
                 output_path = final_path
 
@@ -229,6 +254,44 @@ class EditAgent(BaseAgent):
         ]
         await self._run_ffmpeg(cmd)
         shutil.move(str(tmp_path), str(video_path))
+
+    async def _burn_ai_label(self, video_path: Path, license_number: str = "") -> Path:
+        """在成片右上角烧录「AI生成」标识（含可选备案号）。
+
+        2026-09-01《微短剧发展管理办法》：AI 生成微短剧须在每集明显位置添加提示标识。
+        找不到中文字体时跳过烧录并记录 warning（不阻断主流程）。
+        """
+        font = _find_cjk_font()
+        if not font:
+            logger.warning("未找到可用中文字体，跳过「AI生成」标识烧录: %s", video_path.name)
+            return video_path
+
+        # 备案号消毒：drawtext 文本中 ':' '\\' '%' 有特殊含义，需剔除
+        safe_license = re.sub(r"[:\\'%]", "", license_number).strip()
+        label = f"AI生成  备案号:{safe_license}" if safe_license else "AI生成"
+
+        tmp_path = video_path.with_suffix(".label.mp4")
+        vf = (
+            f"drawtext=fontfile='{font}':text='{label}':"
+            "fontsize=36:fontcolor=white@0.85:"
+            "box=1:boxcolor=black@0.4:boxborderw=12:"
+            "x=w-tw-30:y=30"
+        )
+        cmd = [
+            FFMPEG_BIN,
+            "-y",
+            "-i", str(video_path),
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "copy",
+            str(tmp_path),
+        ]
+        await self._run_ffmpeg(cmd)
+        shutil.move(str(tmp_path), str(video_path))
+        logger.info("已烧录「AI生成」标识: %s", video_path.name)
+        return video_path
 
     async def _mix_bgm(
         self,

@@ -1,4 +1,5 @@
-const API_BASE = "/api/drama";
+/// <reference types="vite/client" />
+const API_BASE = import.meta.env.VITE_API_BASE || "/api/drama";
 
 /** 各端点分级超时（毫秒）：按后端实际耗时分布设定，避免阻塞时前端永久等待 */
 export const API_TIMEOUTS = {
@@ -653,4 +654,124 @@ export async function pollVideoTask(
   throw new Error(
     `轮询超时（${Math.round(maxWaitMs / 1000)}秒）。任务仍在运行，请稍后重试。`
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* M8 全链路一键成片（/pipeline/*）                                     */
+/* ------------------------------------------------------------------ */
+
+export interface PipelineRunParams {
+  premise: string;
+  genre: string;
+  episodes: number;
+  scenes_per_episode: number;
+  monetization_mode: "iaa" | "iap";
+  style: string;
+  generate_character_refs: boolean;
+  max_character_refs?: number;
+  video_duration_seconds?: number;
+  run_quality_check: boolean;
+  ai_label_enabled: boolean;
+  license_number?: string;
+  output_resolution?: string;
+  output_fps?: number;
+}
+
+/** 全链路终态报告（result 字段），steps 键为各环节名称 */
+export interface PipelineReport {
+  project_id: string;
+  premise: string;
+  started_at: number;
+  steps: Record<string, Record<string, unknown>>;
+  passed?: boolean;
+  cancelled?: boolean;
+  error?: string;
+  total_elapsed_seconds?: number;
+}
+
+/**
+ * 将后端返回的绝对任务 URL（http://localhost:PORT/...）重写为与 API_BASE 同源。
+ * 后端以 localhost 拼 poll/stream URL，远程部署时浏览器无法直连，需按当前 API 入口重写。
+ */
+export function resolveTaskUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (API_BASE.startsWith("http")) {
+      const base = new URL(API_BASE);
+      u.protocol = base.protocol;
+      u.host = base.host;
+      return u.toString();
+    }
+    // API_BASE 为相对路径（经代理/同源部署）：仅保留 path，走当前页面源
+    return u.pathname + u.search;
+  } catch {
+    return url;
+  }
+}
+
+/** 将后端返回的媒体路径（/static/...）补全为可访问的绝对 URL */
+export function resolveStaticUrl(path: string): string {
+  if (!path || path.startsWith("http")) return path;
+  if (API_BASE.startsWith("http")) {
+    const base = new URL(API_BASE);
+    return `${base.origin}${path}`;
+  }
+  return path;
+}
+
+/** M8 一键全链路：启动后台流水线任务，返回 task_id + poll/stream URL */
+export async function runPipeline(
+  params: PipelineRunParams
+): Promise<AsyncTaskResponse> {
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/pipeline/run`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`启动全链路任务失败: ${resp.status} ${text}`);
+  }
+  return resp.json();
+}
+
+/** M8 一键全链路：请求取消任务（步骤间生效） */
+export async function cancelPipeline(
+  taskId: string
+): Promise<{ success: boolean; data?: { cancel_requested: boolean } }> {
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/pipeline/cancel/${encodeURIComponent(taskId)}`,
+    { method: "POST" },
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`取消任务失败: ${resp.status} ${text}`);
+  }
+  return resp.json();
+}
+
+/**
+ * M9 从全链路终态报告中提取完整剧本数据（steps.script.data，M9 起后端内嵌）。
+ * 报告结构防御性解析：任何一层缺失都返回 null，由调用方降级处理。
+ */
+export function extractScriptFromReport(
+  report: PipelineReport | null | undefined
+): ScriptData | null {
+  const data = report?.steps?.script?.data;
+  if (!data || typeof data !== "object") return null;
+  const s = data as Partial<ScriptData>;
+  if (
+    typeof s.project_id !== "string" ||
+    typeof s.title !== "string" ||
+    !Array.isArray(s.characters) ||
+    !Array.isArray(s.scenes)
+  ) {
+    return null;
+  }
+  return data as ScriptData;
 }

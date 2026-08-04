@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+import os
+
+# HF 镜像：必须在导入 fastembed/huggingface_hub 之前设置（ENDPOINT 常量在 import 时固化）。
+# 集群设备直连 huggingface.co 超时（Errno 110），统一走 hf-mirror.com；
+# setdefault 保留外部环境变量的优先权。
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+# 禁用 Xet 存储后端：hf-mirror 不代理 cas-server.xethub.hf.co，
+# Xet 分块重建会 401（2026-08-04 core 实测），禁用后回退普通 HTTP 走镜像。
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path

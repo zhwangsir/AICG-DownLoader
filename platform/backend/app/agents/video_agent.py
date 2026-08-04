@@ -30,40 +30,57 @@ from app.services.xdit_service import XDiTService
 
 logger = logging.getLogger(__name__)
 
-# Wan 2.2 I2V 工作流模板
+# Wan 2.2 I2V 工作流模板（ComfyUI 原生节点，无需 WanVideoWrapper 自定义插件）
 # 节点说明：
-#   1: WanVideoModelLoader - 加载 Wan 2.2 I2V 模型
-#   2: WanVideoVAELoader - 加载 VAE
-#   3: LoadImage - 加载分镜关键帧图片
-#   5: WanVideoImageToVideoEncode - 图片编码为视频 latent
-#   6: WanVideoSampler - 采样生成视频
-#   7: WanVideoDecode - 解码视频
-#   8: VHS_VideoCombine - 保存为 MP4
-#  11: CLIPLoader - 原生 CLIP 加载器（type=wan，支持 fp8 scaled UMT5）
-#  12: CLIPTextEncode - 正面提示词编码
-#  13: CLIPTextEncode - 反向提示词编码
-#  14: WanVideoTextEmbedBridge - 桥接 CONDITIONING → WANVIDEOTEXTEMBEDS
+#    1: UNETLoader - 加载 Wan 2.2 I2V high_noise 模型（前半步数去噪）
+#    2: UNETLoader - 加载 Wan 2.2 I2V low_noise 模型（后半步数去噪）
+#    3: ModelSamplingSD3 - high_noise shift 调整（480p 推荐 3.0）
+#    4: ModelSamplingSD3 - low_noise shift 调整
+#   10: VAELoader - 加载 Wan 2.1 VAE
+#   11: CLIPLoader - 原生 CLIP 加载器（type=wan，支持 fp8 scaled UMT5）
+#   12: CLIPTextEncode - 正面提示词编码
+#   13: CLIPTextEncode - 反向提示词编码
+#   20: LoadImage - 加载分镜关键帧图片
+#   21: WanImageToVideo - 原生 I2V 条件节点（输出 positive/negative/latent）
+#   22: CLIPVisionLoader - 加载 CLIP-ViT-H 视觉编码器
+#   23: CLIPVisionEncode - 关键帧视觉特征编码（提升主体一致性）
+#   30: KSamplerAdvanced - high_noise 采样（0 → steps/2，保留噪声）
+#   31: KSamplerAdvanced - low_noise 采样（steps/2 → 结束）
+#   40: VAEDecode - 解码视频帧
+#   50: VHS_VideoCombine - 保存为 MP4
 WORKFLOW_TEMPLATE = {
     "1": {
-        "class_type": "WanVideoModelLoader",
+        "class_type": "UNETLoader",
         "inputs": {
-            "model": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
-            "base_precision": "bf16",
-            "quantization": "disabled",
-            "load_device": "main_device",
+            "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+            "weight_dtype": "default",
         }
     },
     "2": {
-        "class_type": "WanVideoVAELoader",
+        "class_type": "UNETLoader",
         "inputs": {
-            "model_name": "wan_2.1_vae.safetensors",
-            "precision": "bf16",
+            "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+            "weight_dtype": "default",
         }
     },
     "3": {
-        "class_type": "LoadImage",
+        "class_type": "ModelSamplingSD3",
         "inputs": {
-            "image": "{input_image_name}"
+            "shift": 3.0,
+            "model": ["1", 0],
+        }
+    },
+    "4": {
+        "class_type": "ModelSamplingSD3",
+        "inputs": {
+            "shift": 3.0,
+            "model": ["2", 0],
+        }
+    },
+    "10": {
+        "class_type": "VAELoader",
+        "inputs": {
+            "vae_name": "wan_2.1_vae.safetensors",
         }
     },
     "11": {
@@ -87,58 +104,87 @@ WORKFLOW_TEMPLATE = {
             "clip": ["11", 0],
         }
     },
-    "14": {
-        "class_type": "WanVideoTextEmbedBridge",
+    "20": {
+        "class_type": "LoadImage",
         "inputs": {
-            "positive": ["12", 0],
-            "negative": ["13", 0],
+            "image": "{input_image_name}"
         }
     },
-    "5": {
-        "class_type": "WanVideoImageToVideoEncode",
+    "22": {
+        "class_type": "CLIPVisionLoader",
+        "inputs": {
+            "clip_name": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+        }
+    },
+    "23": {
+        "class_type": "CLIPVisionEncode",
+        "inputs": {
+            "crop": "center",
+            "clip_vision": ["22", 0],
+            "image": ["20", 0],
+        }
+    },
+    "21": {
+        "class_type": "WanImageToVideo",
         "inputs": {
             "width": 480,
             "height": 832,
-            "num_frames": 81,
-            "noise_aug_strength": 0.0,
-            "start_latent_strength": 1.0,
-            "end_latent_strength": 1.0,
-            "force_offload": True,
-            "vae": ["2", 0],
-            "start_image": ["3", 0],
+            "length": 81,
+            "batch_size": 1,
+            "positive": ["12", 0],
+            "negative": ["13", 0],
+            "vae": ["10", 0],
+            "clip_vision_output": ["23", 0],
+            "start_image": ["20", 0],
         }
     },
-    "6": {
-        "class_type": "WanVideoSampler",
+    "30": {
+        "class_type": "KSamplerAdvanced",
         "inputs": {
-            "model": ["1", 0],
-            "image_embeds": ["5", 0],
-            "text_embeds": ["14", 0],
+            "add_noise": "enable",
+            "noise_seed": 0,
             "steps": 20,
-            "cfg": 6.0,
-            "shift": 5.0,
-            "seed": 0,
-            "force_offload": True,
-            "scheduler": "unipc",
-            "riflex_freq_index": 0,
+            "cfg": 3.5,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "start_at_step": 0,
+            "end_at_step": 10,
+            "return_with_leftover_noise": "enable",
+            "model": ["3", 0],
+            "positive": ["21", 0],
+            "negative": ["21", 1],
+            "latent_image": ["21", 2],
         }
     },
-    "7": {
-        "class_type": "WanVideoDecode",
+    "31": {
+        "class_type": "KSamplerAdvanced",
         "inputs": {
-            "vae": ["2", 0],
-            "samples": ["6", 0],
-            "enable_vae_tiling": True,
-            "tile_x": 272,
-            "tile_y": 272,
-            "tile_stride_x": 144,
-            "tile_stride_y": 128,
+            "add_noise": "disable",
+            "noise_seed": 0,
+            "steps": 20,
+            "cfg": 3.5,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "start_at_step": 10,
+            "end_at_step": 10000,
+            "return_with_leftover_noise": "disable",
+            "model": ["4", 0],
+            "positive": ["21", 0],
+            "negative": ["21", 1],
+            "latent_image": ["30", 0],
         }
     },
-    "8": {
+    "40": {
+        "class_type": "VAEDecode",
+        "inputs": {
+            "samples": ["31", 0],
+            "vae": ["10", 0],
+        }
+    },
+    "50": {
         "class_type": "VHS_VideoCombine",
         "inputs": {
-            "images": ["7", 0],
+            "images": ["40", 0],
             "frame_rate": 24,
             "loop_count": 0,
             "filename_prefix": "{video_prefix}",
@@ -287,12 +333,15 @@ class VideoAgent(BaseAgent):
         num_frames = ((num_frames - 1) // 4) * 4 + 1
 
         workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE))
-        workflow["3"]["inputs"]["image"] = input_image_name
+        workflow["20"]["inputs"]["image"] = input_image_name
         workflow["12"]["inputs"]["text"] = positive
         workflow["13"]["inputs"]["text"] = negative
-        workflow["5"]["inputs"]["num_frames"] = num_frames
-        workflow["6"]["inputs"]["seed"] = random.randint(0, 2**32 - 1)
-        workflow["8"]["inputs"]["filename_prefix"] = f"video_scene_{request.scene_id}"
+        workflow["21"]["inputs"]["length"] = num_frames
+        seed = random.randint(0, 2**32 - 1)
+        # 高/低噪声双采样器必须同 seed，保证两阶段去噪连贯
+        workflow["30"]["inputs"]["noise_seed"] = seed
+        workflow["31"]["inputs"]["noise_seed"] = seed
+        workflow["50"]["inputs"]["filename_prefix"] = f"video_scene_{request.scene_id}"
 
         _report(25, "提交视频生成任务")
         result = await self.call_comfyui(worker_url, workflow)

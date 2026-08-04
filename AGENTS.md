@@ -1,181 +1,206 @@
-# AGENTS.md — AICG-DownLoader-main
+# AGENTS.md — 集群操作记忆与决策记录
 
-> 本文件为 AI 协作规范,所有 Agent (含 Claude/Codex/Cursor/Trae) 在本仓库工作时必须遵守。
-
----
-
-## 一、项目概述
-
-- **定位**: ComfyUI 模型下载器 + AI 短剧生成平台
-- **版本**: main 分支,持续迭代
-- **技术栈**:
-  - 桌面端: Rust + egui (src-tauri 风格的本地 GUI)
-  - 后端: Python 3.11+ / FastAPI / Uvicorn
-  - 前端: TypeScript / React 18 / Vite
-- **核心能力**:
-  - ComfyUI 模型管理 (下载/校验/分类)
-  - AI 短剧生成全流程 (脚本 → 分镜 → 角色 → 配音 → 字幕 → 视频)
-- **部署位置**: 本地开发,后端 `platform/backend`,前端 `platform/frontend`
+> **目的**：避免 AI 助手反复犯同样的错误，每次会话必须先读本文件
+> **维护者**：设备管家（AI Assistant）
+> **最后更新**：2026-07-28 14:00
+> **读取规则**：每次会话开始时必须完整阅读本文件，尤其注意「⚠️ 易错点」和「🔒 硬性规则」
 
 ---
 
-## 二、项目结构
+## 一、集群设备清单（17台）
 
-```
-AICG-DownLoader-main/
-├── platform/
-│   ├── backend/              # Python FastAPI 后端
-│   │   ├── main.py           # 应用入口 (uvicorn main:app)
-│   │   ├── routers/          # API 路由
-│   │   ├── services/         # 业务逻辑 (短剧生成/模型下载)
-│   │   ├── models/           # 数据模型
-│   │   └── requirements.txt
-│   └── frontend/             # React + TypeScript 前端
-│       ├── src/
-│       │   ├── components/   # 组件 (统一使用 lucide-react 图标)
-│       │   ├── pages/        # 页面
-│       │   ├── hooks/
-│       │   └── api/          # API 调用封装
-│       ├── package.json      # pnpm 管理
-│       └── vite.config.ts
-├── src-tauri/                # Rust 桌面端 (egui/tauri)
-│   ├── src/
-│   │   └── main.rs
-│   └── Cargo.toml
-└── AGENTS.md
-```
+| # | 设备 | 角色 | LAN IP | Tailscale IP | 类型 | SSH 用户 |
+|---|------|------|--------|-------------|------|---------|
+| 1 | studio01-04 | EXO RDMA 推理 | .109/.111/.112/.113 | 100.64.201.37 / 100.66.68.72 / 100.95.164.2 / 100.97.146.45 | Mac Studio M2 Pro | dgmt-studio01-04 |
+| 2 | openclaw01-04 | OpenClaw 网关 | .86/.75/.81/.85 | 100.69.0.4 / 100.95.216.83 / 100.82.122.93 / 100.91.128.30 | Mac mini M2 | dgmt-openclaw01-04 |
+| 3 | spark01-02 | vLLM Ray (Euryale 70B) | .82/.84 | 100.81.235.124 / 100.86.42.89 | Linux GB10 | dgmt-spark |
+| 4 | workstation | 算力+真机服务 | 192.168.71.127 | 100.68.100.90 | Linux 4×RTX PRO 6000 | merlin |
+| 5 | pc01 | ComfyUI worker | 192.168.71.115 | 100.69.134.27 | Windows RTX 5090 | home |
+| 6 | pc02 | ComfyUI worker | 192.168.71.114 | 100.107.94.26 | Windows RTX 5090 | w |
+| 7 | NAS | SMB 存储 44T | 192.168.71.7 | 100.80.237.96 | Linux | dgmt-nas |
+| 8 | cloud | 网关/1Panel/frps | 43.119.32.180 | 100.83.78.114 | Linux | root |
+| 9 | core | 服务器(待业务) | 192.168.71.47 | 100.77.80.100 | Ubuntu | merlin |
+| 10 | MateBook | 操作终端 | — | 100.74.15.34 | macOS | 本机 |
 
 ---
 
-## 三、开发命令
+## 二、关键凭据
 
-### 后端 (Python FastAPI)
+> ⚠️ 这些凭据已多次询问用户，**禁止再次询问**
 
+| 服务 | 用户名 | 密码 | 备注 |
+|------|--------|------|------|
+| NAS SMB | dgmt-nas | Aki.19950108 | 192.168.71.7，共享名 NAS |
+| Tailscale Auth Key | — | tskey-auth-kPM5hHvNGY11CNTRL-UTn8rtRjK8Pfw3riNoGB8Pru71VhdRR9C | 已用于 core 设备授权 |
+
+### NAS 挂载方式
+
+**Linux (Workstation)**：已配置 fstab 自动挂载到 `/home/merlin/nas_mount`
 ```bash
-cd platform/backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8010
+# 凭据文件：/root/.smbcredentials（如不存在，内容为）
+# username=dgmt-nas
+# password=Aki.19950108
 ```
 
-### 前端 (React + Vite)
-
-```bash
-cd platform/frontend
-pnpm install
-pnpm dev
-```
-
-### 桌面端 (Rust)
-
-```bash
-cd src-tauri
-cargo build --release
-```
-
-### 构建
-
-```bash
-# 前端生产构建
-cd platform/frontend && pnpm build
-# Rust 桌面应用打包
-cd src-tauri && cargo build --release
+**Windows (PC01/PC02)**：用 `net use` + `cmdkey` + 计划任务自动挂载
+```cmd
+cmdkey /add:192.168.71.7 /user:dgmt-nas /pass:Aki.19950108
+net use Z: \\192.168.71.7\NAS /persistent:yes
 ```
 
 ---
 
-## 四、代码规范
+## 三、Workstation GPU 分配（🔒 硬性规则，不可随意更改）
 
-### Python (后端)
-- 类型注解必填,使用 `pydantic v2` 定义请求/响应模型
-- 路由函数使用 `async def`,IO 密集场景使用 `asyncio`/`httpx`
-- 不得在路由层写业务逻辑,统一放入 `services/`
-- 日志使用 `logging`,禁止裸 `print`
+> ⚠️ **2026-07-28 错误教训**：我曾把 IndexTTS 放到 GPU3，但 GPU3 是预留给 Nemotron vLLM 的。TTS 应在 GPU0。**每次启动服务前必须核对此表**。
 
-### TypeScript (前端)
-- 严格模式 `strict: true`,禁止 `any`(必要时用 `unknown` 收窄)
-- 函数组件 + Hooks,优先函数式而非 class
-- API 调用必须经 `src/api/` 封装,组件内不得直接 `fetch`
-- 状态管理优先 `zustand` 或 React Context,避免过度引入 Redux
+| GPU | 服务 | 端口 | 显存占用 | systemd 服务 | 备注 |
+|-----|------|------|---------|-------------|------|
+| GPU0 | ComfyUI #1 | :8189 | ~0.5GB | 手动 nohup | 与 TTS 共卡 |
+| GPU0 | IndexTTS2 | :9200 | ~7.6GB | 手动 nohup | `CUDA_VISIBLE_DEVICES=0` |
+| GPU1 | ComfyUI #2 | :8190 | ~0.5GB | 手动 nohup | 与 Embedding 共卡 |
+| GPU1 | Qwen3-Embedding-4B | :9302 | ~8.4GB | **qwen3-embedding.service** | `CUDA_VISIBLE_DEVICES=1` |
+| GPU2 | ComfyUI #3 | :8191 | ~0.5GB | 手动 nohup | 与 ASR 共卡 |
+| GPU2 | AI-Omni ASR (faster-whisper large-v3) | :9210 | ~4.9GB | 手动 screen | `device_index=2` |
+| GPU3 | **Nemotron vLLM** | :8000 | ~86GB | **nemotron-vllm.service** | `CUDA_VISIBLE_DEVICES=3`，served-name=qwen3.6-uncensored |
 
-### Rust (桌面端)
-- `cargo fmt` + `cargo clippy -- -D warnings`
-- 错误处理使用 `thiserror` + `anyhow`,禁止 `unwrap()`/`expect()` 进入生产代码
+### ComfyUI-LB 后端配置
+- 本地 3 后端：:8189(GPU0) / :8190(GPU1) / :8191(GPU2)
+- 远程 2 后端：pc01 :8188 / pc02 :8193
+- **GPU3 不跑 ComfyUI**（留给 Nemotron vLLM）
 
----
+### 关键服务路径（Workstation）
 
-## 五、测试策略
-
-| 层 | 工具 | 命令 | 覆盖目标 |
-|---|---|---|---|
-| 后端单元/接口 | pytest | `cd platform/backend && pytest -v` | ≥ 70% |
-| 前端组件 | vitest + @testing-library/react | `pnpm test` | 关键组件覆盖 |
-| Rust 单元 | cargo test | `cd src-tauri && cargo test` | 核心逻辑 |
-
-- 短剧生成流程必须有端到端冒烟测试
-- 模型下载器必须测试断点续传与校验逻辑
-
----
-
-## 六、集群依赖
-
-> 完整集群拓扑详见 `/Users/wangzhenyu/Desktop/ALLProject/.设备说明.md`
-
-- **ComfyUI-LB**: Workstation `192.168.71.127:8188`,短剧生成调用 ComfyUI 工作流
-- **NAS SMB 模型存储**: `192.168.71.7:445`,模型下载目标路径,挂载点 `~/NAS` (Mac) 或 `/home/merlin/nas_mount` (Workstation)
-- **mihomo 代理**: `:7890`,模型源 (HuggingFace/Civitai) 走代理
-- **不依赖**: EXO 集群、OpenClaw、spark vLLM
-
-调用 ComfyUI 时使用 LB 入口 `http://192.168.71.127:8188`,禁止直连单卡端口 8189-8192。
+| 服务 | 路径 | venv | 启动命令 |
+|------|------|------|---------|
+| ComfyUI | /opt/ComfyUI | /opt/ComfyUI/venv (Python 3.12, torch 2.13.0+cu130) | `CUDA_VISIBLE_DEVICES=N venv/bin/python main.py --listen 0.0.0.0 --port 818X` |
+| ComfyUI-LB | /opt/ComfyUI/comfyui-lb.py | 同上 | `venv/bin/python comfyui-lb.py` |
+| IndexTTS2 | /home/merlin/index-tts | /home/merlin/index-tts/.venv (Python 3.11, torch 2.8.0+cu128) | `CUDA_VISIBLE_DEVICES=0 .venv/bin/python toiv_tts_server.py --host 0.0.0.0 --port 9200` |
+| Nemotron vLLM | /home/merlin/models/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16 | /opt/nemotron-venv | `sudo systemctl start nemotron-vllm` |
+| Qwen3-Embedding-4B | /home/merlin/models/Qwen3-Embedding-4B | /opt/nemotron-venv | `sudo systemctl start qwen3-embedding` |
+| AI-Omni ASR | /opt/ai-omni-asr | /opt/ai-omni-asr (Python 3.12, faster-whisper 1.2.1) | `screen -S ai-omni-asr -L -Logfile /opt/ai-omni-asr/logs/screen.log bash -c 'cd /opt/ai-omni-asr && source bin/activate && python asr_server.py'` |
+| Drt ERP | /home/merlin/drt | — | **待项目负责人迁移到 core** |
+| ToIV | /home/merlin/toiv | — | **待项目负责人迁移到 core** |
 
 ---
 
-## 七、提交规范
+## 四、NAS 模型路径
 
-- **不主动提交**: 用户未明确要求时,严禁执行 `git commit`/`git push`
-- **Conventional Commits**:
-  - `feat(short-drama): add scene splitter`
-  - `fix(downloader): handle resume on network reset`
-  - `docs: update AGENTS.md`
-  - `refactor(frontend): extract video preview hook`
-- 范围 (scope) 优先使用: `short-drama` / `downloader` / `frontend` / `backend` / `rust` / `docs`
-
----
-
-## 八、项目隔离纪律
-
-- **禁止跨项目修改**: 本项目代码不得修改 `AIHub/`、`ToIV/`、`DRT管理中心/` 等其他项目
-- **共享基础设施不耦合**: 可调用集群服务 (ComfyUI-LB、NAS),但不得引用其他项目源码
-- **依赖管理**: 后端依赖在 `platform/backend/requirements.txt`,前端在 `platform/frontend/package.json`,Rust 在 `src-tauri/Cargo.toml`,三套独立
-- **配置隔离**: 环境变量通过 `.env` 注入,不得硬编码其他项目路径
-
----
-
-## 九、图标规范
-
-- **统一使用 Lucide React** (`lucide-react`),禁止 emoji、禁止其他图标库 (Heroicons/FontAwesome/Material Icons 等)
-- 图标按需引入: `import { Download, Film, Mic } from 'lucide-react'`
-- Rust 桌面端不涉及 Web 图标,遵循 egui 原生图标约定
-- 已存在的 emoji 必须在下次重构时替换为 Lucide 组件
-
----
-
-## 十、Agent 行为底线
-
-1. 改动前先读相关文件,理解上下文
-2. 不创建未要求的文件,不写未要求的文档
-3. 测试失败时不重复同一修复路径,报告阻塞点
-4. 完成任务后给出简明报告,包含改动文件路径与关键决策
-
----
-
-## 端口配置
-
-> 参考: /Users/wangzhenyu/Desktop/ALLProject/项目端口规划指南.md
-
-| 服务 | 端口 | 说明 |
+| 路径 | 内容 | 大小 |
 |------|------|------|
-| 前端 dev (platform/frontend) | 3501 | Vite，原 8085 改此 |
-| 后端 (FastAPI) | 8100 | 已固定，不变 |
+| `NAS/Windows/ComfyUI/ComfyUIModel/models` | 主模型库 | 524GB |
+| `NAS/toiv/comfyui-models` | ToIV 专用模型 | ~180GB |
 
-端口段 35XX 专属 AICG-DownLoader。
+### ComfyUI extra_model_paths.yaml 配置
+
+**Workstation**：未配置（使用本地 /opt/ComfyUI/models）
+
+**PC01/PC02**（已配置，注意不要包含 `custom_nodes`，会导致启动报错）：
+```yaml
+# C:\ComfyUI\extra_model_paths.yaml
+nas:
+    base_path: "Z:/Windows/ComfyUI/ComfyUIModel"
+    checkpoints: models/checkpoints
+    clip: models/clip
+    clip_vision: models/clip_vision
+    configs: models/configs
+    controlnet: models/controlnet
+    embeddings: models/embeddings
+    loras: models/loras
+    upscale_models: models/upscale_models
+    vae: models/vae
+    text_encoders: models/text_encoders
+    diffusion_models: models/diffusion_models
+    unet: models/unet
+```
+
+---
+
+## 五、Core 设备状态
+
+> **角色变更**：core 已从 Docker 监控栈改为真机服务器，待项目负责人推送 ToIV/DRT 业务
+
+| 项目 | 状态 |
+|------|------|
+| PostgreSQL 18 | ✅ 真机运行 |
+| Redis | ✅ 真机运行 (127.0.0.1:6379) |
+| Docker | ❌ 已禁用+全清（12个监控容器已删） |
+| ToIV/DRT 代码 | 待项目负责人推送 |
+| 备份文件 | 在 Workstation /tmp（drt_pg_dump.sql / drt_redis_dump.rdb / drt_env_backup） |
+
+---
+
+## 六、⚠️ 易错点记录（避免重复犯错）
+
+### 1. GPU 分配搞错（2026-07-28）
+- **错误**：把 IndexTTS 放到 GPU3
+- **正确**：GPU3 是 Nemotron vLLM 专用，TTS 在 GPU0
+- **教训**：启动服务前必须核对第三节 GPU 分配表
+
+### 2. /tmp tmpfs 吃内存（2026-07-28）
+- **错误**：往 /tmp 写大文件（toiv_code.tar.gz 8G）导致内存被吃
+- **正确**：/tmp 是 tmpfs（内存盘），大文件应写到磁盘
+- **教训**：打包备份文件写到 /var/tmp 或指定磁盘目录
+
+### 3. Windows SSH session 隔离（2026-07-28）
+- **错误**：在 SSH session 中 net use 映射 Z: 盘，用户桌面看不到
+- **正确**：用 cmdkey 保存凭据 + schtasks 在登录时运行 net use，或创建 .bat 启动脚本
+- **教训**：Windows 的 SMB 映射是 per-session 的
+
+### 4. ComfyUI-LB 后端数量搞错（2026-07-27）
+- **错误**：曾配置 6 个后端
+- **正确**：5 个后端（3 本地 GPU0/1/2 + pc01 + pc02），GPU3 不跑 ComfyUI
+
+### 5. Windows SSH session 中启动 ComfyUI 子进程被终止（2026-07-28）
+- **错误**：通过 ssh 用 `Start-Process` 或 `wscript` 启动 ComfyUI，ssh 断开后子进程被杀
+- **正确**：Windows 计划任务直接执行 `start_comfyui.bat`，且 `LogonType` 用 `InteractiveToken` 在用户登录后触发
+- **教训**：不要依赖 ssh 启动长期运行的 GUI/服务进程；计划任务 + bat 是最稳定的开机自启方案
+
+### 6. 重复询问 NAS 密码（多次）
+- **错误**：多次询问 NAS SMB 密码
+- **正确**：密码已记录在第二节，禁止再问
+
+---
+
+## 七、操作历史
+
+### 2026-07-28 会话
+
+| 时间 | 操作 | 结果 |
+|------|------|------|
+| 05:50 | 停止 Workstation 所有服务（Docker 4容器 + Caddy + socat代理 + dcgm-exporter + cups） | ✅ load 3.15→0.92 |
+| 05:55 | 清理 /tmp 残留文件（toiv_code.tar.gz 8G 等） | ✅ 释放 8G 内存 |
+| 06:00 | 全设备状态检查（15台SSH验证） | ✅ 14在线，1离线(cloud SSH超时) |
+| 06:04 | Core Docker 清理（12个监控容器全删，docker禁用） | ✅ |
+| 06:10 | 启动 ComfyUI 3卡 + LB | ✅ :8188-8191 全部 200 |
+| 06:15 | 启动 IndexTTS（误放 GPU3） | ❌ 后修正 |
+| 09:00 | 修正 GPU 分配：TTS 迁至 GPU0，启动 Nemotron vLLM on GPU3 | ✅ :8000/:9200 正常 |
+| 09:10 | PC02 磁盘分析：真凶是 Steam(40G)+炉石(11G)，非模型 | ✅ |
+| 09:15 | PC02 NAS 挂载（cmdkey + schtasks MountNAS） | ✅ 计划任务已注册 |
+| 09:20 | 创建 AGENTS.md | ✅ 本文件 |
+| 10:00 | 排查 PC01 ComfyUI 无法启动 | ✅ 原因：计划任务执行 wscript 且 ssh 触发子进程被杀 |
+| 10:05 | 修正 PC01 计划任务为直接执行 start_comfyui.bat | ✅ PC01 :8188 启动并加载 NAS 模型 |
+| 10:10 | 验证 PC02 :8193 加载 NAS 模型 | ✅ 805 节点，checkpoints 列表来自 NAS |
+| 11:00 | 优化 Nemotron vLLM 启动参数 | ✅ 去掉 --enforce-eager，启用 chunked-prefill/prefix-caching，显存 88%→94.5%，:8000 推理正常 |
+| 13:30 | 恢复 Qwen3-Embedding-4B 真机服务 | ✅ 安装 sentence-transformers，systemd 托管 :9302，输出维度 2560，OpenAI /v1/embeddings 兼容 |
+| 14:00 | 更新设备清单并分发到所有项目 | ✅ 已同步到 22 个项目目录（含 ToIV 新增） |
+| 14:05 | 清理 .archive/old-docs 过期文档 | ✅ 删除 8 个旧版设备说明/迁移计划/调研报告 |
+| 14:10 | 补齐 AGENTS.md 设备清单 Tailscale IP | ✅ 17 台设备 IP 全部具体化 |
+
+---
+
+## 八、待办事项
+
+- [x] PC01 ComfyUI 配置 extra_model_paths.yaml 指向 NAS（✅ 端口8188）
+- [x] PC01 start_with_nas.bat 启动脚本（✅ 端口8188）
+- [x] PC01 计划任务 MountNAS（✅ 用户 DESKTOP-04VJ6QG\home）
+- [x] PC01 凭据保存到 Windows 凭据管理器（✅ 已保存）
+- [x] PC02 ComfyUI 配置 extra_model_paths.yaml 指向 NAS（✅ 端口8193）
+- [x] PC02 start_with_nas.bat 启动脚本（✅ 端口8193）
+- [x] PC02 计划任务 MountNAS（✅ 用户 DESKTOP-T9JILFS\w）
+- [x] PC02 凭据保存到 Windows 凭据管理器（✅ 已保存）
+- [x] PC01/PC02 重启 ComfyUI 使 extra_model_paths.yaml 生效（✅ PC01 :8188 / PC02 :8193 均加载 NAS 模型）
+- [ ] Cloud SSH banner 超时排查（HTTPS 正常）
+- [x] Workstation SGLang/infinity 真机未安装（✅ 已用 Qwen3-Embedding-4B 真机 sentence-transformers 服务替代，:9302 恢复）
+- [ ] 项目负责人推送 ToIV/DRT 到 core
+- [ ] Cloud 反代切换指向 core（待 core 业务就绪后）

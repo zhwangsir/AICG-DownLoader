@@ -12,9 +12,10 @@ import {
   VisualQualityModal,
   LipSyncModal,
   PostprocessModal,
+  PipelineModal,
 } from "./components/modals";
 import { useDramaStore } from "./store/useDramaStore";
-import { ChevronDown, Clapperboard, Plus, Workflow } from "lucide-react";
+import { ChevronDown, Clapperboard, Plus, Workflow, Zap } from "lucide-react";
 
 export default function App() {
   const store = useDramaStore();
@@ -185,6 +186,15 @@ export default function App() {
         </div>
 
         <div className="topbar-actions">
+          <button
+            className="topbar-btn"
+            onClick={() => setModal("pipeline", true)}
+            disabled={globalLoading}
+            title="一句话创意 → 全链路自动成片"
+          >
+            <Zap size={13} />
+            一键成片
+          </button>
           <div className="dropdown-wrapper">
             <button
               className="topbar-btn"
@@ -341,6 +351,10 @@ export default function App() {
           onClose={() => setModal("postprocess", false)}
           onSuccess={handlePostprocessGenerated}
         />
+      )}
+
+      {modals.pipeline && (
+        <PipelineModal onClose={() => setModal("pipeline", false)} />
       )}
     </div>
   );

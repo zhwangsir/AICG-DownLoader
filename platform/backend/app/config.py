@@ -126,13 +126,16 @@ class Settings(BaseSettings):
     # 2026-07-24 部署：qwenllm/qwen3-asr 官方镜像，vllm 后端，served_model_name=Qwen/Qwen3-ASR-1.7B
     # 调研结论: Qwen3-ASR-1.7B (阿里 2026-01 开源) 中文超越 Whisper-large-v3
     # ====================================================================
-    asr_backend: str = "qwen3_asr"  # 'qwen3_asr' / 'firered' / 'whisper'
+    asr_backend: str = "qwen3_asr"  # 'qwen3_asr' / 'ai_omni' / 'firered' / 'whisper'
     qwen3_asr_endpoint: str = "http://192.168.71.127:9880/v1"
     qwen3_asr_model: str = "Qwen/Qwen3-ASR-1.7B"
     qwen3_asr_timeout: float = 120.0
     firered_asr_endpoint: str = "http://192.168.71.127:8300/v1"  # 回退
     firered_asr_model: str = "FireRedTeam/FireRedASR-AED-L"
     firered_asr_timeout: float = 120.0
+    # AI-Omni ASR（faster-whisper large-v3，Workstation GPU2，OpenAI 兼容端点）
+    ai_omni_asr_endpoint: str = "http://192.168.71.127:9210"
+    ai_omni_asr_timeout: float = 180.0
 
     # ====================================================================
     # EXO 图像生成（Mac Studio 集群, 可选）
@@ -250,7 +253,7 @@ class Settings(BaseSettings):
     # 后端服务
     backend_host: str = "0.0.0.0"
     backend_port: int = 8100
-    cors_origins: str = "http://localhost:3501,http://localhost:3508,http://localhost:3509,http://localhost:8085,http://localhost:5173,http://localhost:1420"
+    cors_origins: str = "http://localhost:3501,http://localhost:3508,http://localhost:3509,http://localhost:8085,http://localhost:5173,http://localhost:1420,http://192.168.71.47:3501"
 
     # 运行时填充
     downloader_config: DownloaderConfig | None = None

@@ -9,3 +9,4 @@ export { QualityModal } from "./QualityModal";
 export { VisualQualityModal } from "./VisualQualityModal";
 export { LipSyncModal } from "./LipSyncModal";
 export { PostprocessModal } from "./PostprocessModal";
+export { PipelineModal } from "./PipelineModal";

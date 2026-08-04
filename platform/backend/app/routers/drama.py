@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
+from app.agents.base import strip_think_tags
 from app.agents.character_agent import character_agent
 from app.agents.edit_agent import edit_agent
 from app.agents.lip_sync_agent import lip_sync_agent
@@ -25,10 +27,12 @@ from app.models.schemas import (
     AgentAssistResponse,
     AgentResponse,
     AsyncTaskResponse,
+    CharacterAssetUpdateRequest,
     CharacterPreviewRequest,
     CharacterRequest,
     EditRequest,
     LipSyncRequest,
+    PipelineRunRequest,
     PostprocessRequest,
     QualityCheckRequest,
     QualityVisualRequest,
@@ -43,6 +47,8 @@ from app.models.schemas import (
     VideoRequest,
     VoiceRequest,
 )
+from app.services.character_library import character_library
+from app.services.pipeline_orchestrator import pipeline_orchestrator
 from app.services.rag_service import rag_service
 
 router = APIRouter(prefix="/api/drama", tags=["drama"])
@@ -109,9 +115,10 @@ async def health() -> dict:
     }
 
 
-@router.post("/agent/assist", response_model=AgentAssistResponse)
-async def agent_assist(request: AgentAssistRequest) -> AgentAssistResponse:
+@router.post("/agent/assist", response_model=AgentResponse)
+async def agent_assist(request: AgentAssistRequest) -> AgentResponse:
     """通用智能体辅助：根据上下文润色、扩写、精简或改写文本。"""
+    start = time.time()
     action_map = {
         "polish": "润色（提升表达质量，保持原意）",
         "expand": "扩写（增加细节与画面感）",
@@ -158,17 +165,31 @@ async def agent_assist(request: AgentAssistRequest) -> AgentAssistResponse:
             max_tokens=1500,
         )
         content = resp.choices[0].message.content or request.text
-        # 去除可能的前缀与代码块
-        content = content.strip()
+        # 去除思维链（<think>...</think> 或未闭合的思考前缀）
+        if content.startswith("<think>") and "</think>" not in content:
+            # 思维链未闭合时无有效输出，回退原文
+            content = request.text
+        else:
+            content = strip_think_tags(content)
+        # 去除可能的代码块
         if content.startswith("```"):
             content = "\n".join(content.split("\n")[1:])
             if content.endswith("```"):
                 content = content[:-3].strip()
-        return AgentAssistResponse(text=content.strip(), action=request.action, context=request.context)
+        content = content.strip() or request.text
+        return AgentResponse(
+            success=True,
+            data=AgentAssistResponse(text=content, action=request.action, context=request.context).model_dump(),
+            elapsed_seconds=time.time() - start,
+        )
     except Exception as e:
         logger = logging.getLogger(__name__)
         logger.warning("智能体辅助失败: %s", e)
-        raise HTTPException(status_code=500, detail=f"智能体辅助失败: {e}") from e
+        return AgentResponse(
+            success=False,
+            error=f"智能体辅助失败: {e}",
+            elapsed_seconds=time.time() - start,
+        )
 
 
 @router.post("/rag/optimize", response_model=RAGOptimizeResponse)
@@ -218,6 +239,46 @@ async def preview_character(request: CharacterPreviewRequest) -> AgentResponse:
     前端展示并编辑后，将 edited_prompts 传回 /character/generate 生成定妆照。
     """
     return await character_agent.preview(request)
+
+
+# ============================================================================
+# 角色资产库（外观锁定卡，跨集/跨镜一致性）
+# ============================================================================
+
+
+@router.get("/character-library/list")
+async def list_character_assets() -> dict:
+    """列出资产库全部角色（按更新时间倒序）。"""
+    assets = character_library.list()
+    return {"success": True, "data": [a.model_dump() for a in assets], "total": len(assets)}
+
+
+@router.get("/character-library/{character_id}")
+async def get_character_asset(character_id: str) -> dict:
+    """获取单个角色资产。"""
+    asset = character_library.get(character_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"角色资产不存在: {character_id}")
+    return {"success": True, "data": asset.model_dump()}
+
+
+@router.put("/character-library/{character_id}")
+async def update_character_asset(character_id: str, request: CharacterAssetUpdateRequest) -> dict:
+    """局部更新角色资产（外观锁定卡/锁定状态/描述等白名单字段）。"""
+    asset = character_library.update(
+        character_id, **request.model_dump(exclude_none=True)
+    )
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"角色资产不存在: {character_id}")
+    return {"success": True, "data": asset.model_dump()}
+
+
+@router.delete("/character-library/{character_id}")
+async def delete_character_asset(character_id: str) -> dict:
+    """删除角色资产。"""
+    if not character_library.delete(character_id):
+        raise HTTPException(status_code=404, detail=f"角色资产不存在: {character_id}")
+    return {"success": True, "data": {"deleted": character_id}}
 
 
 @router.post("/storyboard/generate", response_model=AgentResponse)
@@ -317,6 +378,52 @@ async def apply_quality_subtitle_fix(request: SubtitleFixRequest) -> AgentRespon
             error=f"字幕回写修正失败: {e}",
             elapsed_seconds=_time.time() - start,
         )
+
+
+@router.post("/pipeline/run", response_model=AsyncTaskResponse)
+async def run_pipeline(request: PipelineRunRequest) -> AsyncTaskResponse:
+    """M7 全链路自动编排：一句话创意 → 短剧成片（后台异步执行）。
+
+    步骤：剧本 → 角色定妆照 → 分镜 → 视频 → 配音 → 字幕 → 剪辑 → 质检。
+    返回 task_id，通过 poll_url 轮询或 stream_url SSE 订阅进度。
+    """
+    task_id = pipeline_orchestrator.start(request)
+    base_url = f"http://localhost:{settings.backend_port}"
+    return AsyncTaskResponse(
+        task_id=task_id,
+        agent="pipeline",
+        status="pending",
+        poll_url=f"{base_url}/api/progress/{task_id}",
+        stream_url=f"{base_url}/api/progress/{task_id}/stream",
+    )
+
+
+@router.get("/pipeline/status/{task_id}")
+async def pipeline_status(task_id: str) -> dict:
+    """查询全链路任务状态（含各步骤结果报告）。"""
+    record = progress_tracker.get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"任务不存在或已过期: {task_id}")
+    return {
+        "success": True,
+        "data": {
+            "task_id": record.task_id,
+            "status": record.status,
+            "percent": record.percent,
+            "message": record.message,
+            "error": record.error,
+            "result": record.result,
+            "updated_at": record.updated_at,
+        },
+    }
+
+
+@router.post("/pipeline/cancel/{task_id}")
+async def cancel_pipeline(task_id: str) -> dict:
+    """取消全链路任务（步骤间生效，长步骤完成后停止）。"""
+    if not pipeline_orchestrator.cancel(task_id):
+        raise HTTPException(status_code=404, detail=f"任务不存在或已结束: {task_id}")
+    return {"success": True, "data": {"task_id": task_id, "cancel_requested": True}}
 
 
 async def _run_agent_task(agent_name: str, agent: Any, request: Any, task_id: str) -> None:

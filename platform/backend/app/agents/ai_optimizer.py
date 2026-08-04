@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
+from app.agents.base import strip_think_tags
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -130,9 +131,9 @@ async def optimize_content(
             temperature=0.6,
             max_tokens=3000,
         )
-        optimized = resp.choices[0].message.content or ""
-        if optimized.strip():
-            return optimized.strip()
+        optimized = strip_think_tags(resp.choices[0].message.content or "")
+        if optimized:
+            return optimized
     except Exception as e:
         logger.warning("AI 优化失败 (task=%s): %s", task_type, e)
 

@@ -22,7 +22,8 @@ from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
-from app.agents.base import BaseAgent
+from app.agents.base import BaseAgent, strip_think_tags
+from app.agents.script_agent import validate_script_scenes
 from app.config import settings
 from app.models.schemas import (
     AgentResponse,
@@ -130,6 +131,9 @@ class QualityAgent(BaseAgent):
                     0,
                 )
             issues = self._parse_issues(data.get("issues", []))
+            # 并入确定性规则检查（剧本结构 + 高风险镜头），LLM 可能漏检
+            issues.extend(self._structure_issues(request))
+            issues.extend(self._high_risk_scene_issues(request))
 
             result = QualityCheckResult(
                 project_id=request.project_id,
@@ -187,8 +191,83 @@ class QualityAgent(BaseAgent):
                 continue
         return items
 
+    def _structure_issues(self, request: QualityCheckRequest) -> list[QualityCheckItem]:
+        """确定性剧本结构检查：复用剧本层 validate_script_scenes 校验器。
+
+        scenes_per_episode 取各集实际分镜数的最大值（数量校验在剧本生成阶段已做，
+        此处聚焦 hook/cliffhanger/时长/景别/情绪密度等质量维度）。
+        """
+        if not request.scenes:
+            return []
+        scene_dicts = [s.model_dump() for s in request.scenes]
+        episodes = max(int(s.get("episode", 1)) for s in scene_dicts)
+        counts: dict[int, int] = {}
+        for s in scene_dicts:
+            ep = int(s.get("episode", 1))
+            counts[ep] = counts.get(ep, 0) + 1
+        raw_issues = validate_script_scenes(scene_dicts, episodes, max(counts.values()))
+        return [
+            QualityCheckItem(
+                category="structure",
+                severity="warning",
+                message=f"剧本结构问题: {msg}",
+                suggestion="回到剧本节点修正分镜结构（可重新生成触发自动返修）",
+            )
+            for msg in raw_issues
+        ]
+
+    def _high_risk_scene_issues(self, request: QualityCheckRequest) -> list[QualityCheckItem]:
+        """高风险镜头自动打标（AI 生成崩坏高发场景，建议人工复核）：
+
+        1. 多人同框（>5 名角色或人群关键词）：特征"串味"、六指穿模高发
+        2. 极端视角（大特写+手持 / 仰拍 / 俯拍 / 背面）：错误率显著高于常规镜头
+        3. 小配角跨集召回（出场 ≤3 镜但跨集）：跨集服饰一致性崩坏率高
+        """
+        issues: list[QualityCheckItem] = []
+        if not request.scenes:
+            return issues
+
+        crowd_keywords = ("人群", "众人", "围观", "群演", "人群之中")
+        char_names = [c.name for c in request.characters if c.name]
+        # 统计每个角色出场的集数与镜头数（用于小配角跨集召回判断）
+        char_episodes: dict[str, set[int]] = {n: set() for n in char_names}
+        char_scene_count: dict[str, int] = {n: 0 for n in char_names}
+
+        for s in request.scenes:
+            mentioned = [n for n in char_names if n in s.description or n in s.character_actions]
+            for n in mentioned:
+                char_episodes[n].add(s.episode)
+                char_scene_count[n] += 1
+
+            risk_reasons: list[str] = []
+            if len(mentioned) > 5 or any(k in s.description for k in crowd_keywords):
+                risk_reasons.append("多人同框（角色特征串味/手部穿模高发）")
+            extreme_keywords = ("仰拍", "俯拍", "鸟瞰", "背面转正", "大角度")
+            if (s.shot_type == "大特写" and s.camera_movement == "handheld") or any(
+                k in s.description for k in extreme_keywords
+            ):
+                risk_reasons.append("极端视角（跨镜一致性错误率高）")
+            if risk_reasons:
+                issues.append(QualityCheckItem(
+                    category="visual_risk",
+                    severity="warning",
+                    scene_id=s.scene_id,
+                    message=f"高风险镜头: {'；'.join(risk_reasons)}",
+                    suggestion="建议人工复核该镜头关键帧与视频，必要时提高生成质量档位或重抽",
+                ))
+
+        for name, eps in char_episodes.items():
+            if len(eps) >= 2 and char_scene_count[name] <= 3:
+                issues.append(QualityCheckItem(
+                    category="visual_risk",
+                    severity="info",
+                    message=f"小配角跨集召回: 角色「{name}」仅出场 {char_scene_count[name]} 镜但跨 {len(eps)} 集，服饰一致性崩坏率高",
+                    suggestion="建议在角色资产库中锁定该角色服装细节卡，跨集生成时强制引用",
+                ))
+        return issues
+
     def _fallback_check(self, request: QualityCheckRequest) -> QualityCheckResult:
-        """LLM 超时时的降级规则质检：字幕错别字 + 敏感词基础检测。"""
+        """LLM 超时时的降级规则质检：字幕错别字 + 敏感词基础检测 + 结构/高风险镜头。"""
         issues: list[QualityCheckItem] = []
         # 字幕错别字检测（字幕文本与台词对比）
         for sub in request.subtitles:
@@ -215,6 +294,9 @@ class QualityAgent(BaseAgent):
                         message=f"场景中检测到敏感词: {word}",
                         suggestion="确认是否需要修改相关内容",
                     ))
+        # 确定性规则检查：剧本结构 + 高风险镜头
+        issues.extend(self._structure_issues(request))
+        issues.extend(self._high_risk_scene_issues(request))
         score = 85 if not issues else 70
         return QualityCheckResult(
             project_id=request.project_id,
@@ -517,9 +599,7 @@ class VisualQualityAgent(BaseAgent):
 
             # 剥离推理标记（与 BaseAgent.call_llm 相同的容错逻辑，
             # 保留以兼容不支持 enable_thinking 的 VLM 服务）
-            if "</think>" in raw:
-                raw = raw.split("</think>", 1)[1]
-            raw = raw.replace("<think>", "").strip()
+            raw = strip_think_tags(raw)
             if raw.startswith("```"):
                 lines = raw.split("\n")[1:]
                 if lines and lines[-1].strip() == "```":

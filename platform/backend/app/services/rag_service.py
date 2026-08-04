@@ -10,9 +10,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,8 +26,12 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 from app.knowledge_base import KB_DIR
+from app.agents.base import strip_think_tags
 
 logger = logging.getLogger(__name__)
+
+# 嵌入模型加载失败熔断 TTL：外网不可达时避免逐场景重复超时（每次 ~130s）
+MODEL_LOAD_FAILURE_TTL_SECONDS = 600.0
 
 DEFAULT_EMBED_MODEL = "BAAI/bge-small-zh-v1.5"
 DEFAULT_TOP_K = 5
@@ -109,18 +115,27 @@ class RAGService:
         self._embeddings: np.ndarray | None = None
         self._embedding_model: TextEmbedding | None = None
         self._initialized = False
+        self._model_load_failed_at: float | None = None
 
     # ------------------------------------------------------------------
     # 初始化与缓存
     # ------------------------------------------------------------------
+
     def _init_model(self) -> None:
-        """懒加载嵌入模型，避免导入即耗时。"""
+        """懒加载嵌入模型，避免导入即耗时。加载失败后熔断 TTL 内直接抛错。"""
         if self._embedding_model is not None:
             return
+        if self._model_load_failed_at is not None:
+            if time.time() - self._model_load_failed_at < MODEL_LOAD_FAILURE_TTL_SECONDS:
+                raise RuntimeError(
+                    f"嵌入模型 {self.model_name} 此前加载失败，熔断中（TTL 内不再重试）"
+                )
+            self._model_load_failed_at = None  # TTL 已过，允许重试
         try:
             logger.info("Loading embedding model: %s", self.model_name)
             self._embedding_model = TextEmbedding(model_name=self.model_name)
         except Exception as e:
+            self._model_load_failed_at = time.time()
             logger.error("Failed to load embedding model %s: %s", self.model_name, e)
             raise RuntimeError(f"无法加载嵌入模型 {self.model_name}: {e}") from e
 
@@ -251,6 +266,18 @@ class RAGService:
     def _ensure_initialized(self) -> None:
         if not self._initialized:
             self.initialize()
+
+    def _warm_up(self) -> None:
+        """线程内预热：初始化索引并加载嵌入模型。
+
+        缓存命中时 initialize() 不会加载模型（_embedding_model 为 None），
+        首个 search() 会在事件循环内触发 _init_model() 同步下载/加载模型，
+        外网不可达时阻塞事件循环 ~130s（2026-08-04 core 实测全接口冻结）。
+        因此预热必须显式补加载模型。
+        """
+        self._ensure_initialized()
+        if self._entries:
+            self._init_model()
 
     def search(
         self,
@@ -435,7 +462,10 @@ class RAGService:
             包含 optimized_positive、optimized_negative、style_notes、tags、
             lora_recommendations 的字典。若 LLM 调用失败，返回基于检索结果的兜底结果。
         """
-        self._ensure_initialized()
+        # 首次初始化需加载嵌入模型（外网不可达时可能阻塞 ~130s），放到线程避免冻结事件循环；
+        # 注意必须同时预热模型——缓存命中时 initialize() 不加载模型，
+        # 否则下方 search() 会在事件循环内同步加载模型（core 实测全接口冻结）
+        await asyncio.to_thread(self._warm_up)
 
         # 1. 构建检索 query
         query = user_prompt
@@ -494,8 +524,8 @@ class RAGService:
         lora_recommendations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """解析 LLM 返回的 JSON，失败则回退。"""
-        # 去除可能的 markdown 代码块
-        cleaned = content.strip()
+        # 剥离思维链，再去除可能的 markdown 代码块
+        cleaned = strip_think_tags(content)
         if cleaned.startswith("```"):
             cleaned = "\n".join(cleaned.split("\n")[1:])
             if cleaned.endswith("```"):
