@@ -153,8 +153,8 @@ async def agent_assist(request: AgentAssistRequest) -> AgentResponse:
     user_msg += "\n请直接输出处理后的文本："
 
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(base_url=settings.exo_base_url, api_key=settings.exo_api_key or "not-needed")
+        from app.agents.base import get_shared_llm_client
+        client = get_shared_llm_client()
         resp = await client.chat.completions.create(
             model=settings.exo_model_glm52,
             messages=[

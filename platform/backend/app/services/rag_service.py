@@ -22,11 +22,10 @@ from typing import Any
 import json_repair
 import numpy as np
 from fastembed import TextEmbedding
-from openai import AsyncOpenAI
 
 from app.config import settings
 from app.knowledge_base import KB_DIR
-from app.agents.base import strip_think_tags
+from app.agents.base import get_shared_llm_client, strip_think_tags
 
 logger = logging.getLogger(__name__)
 
@@ -500,7 +499,7 @@ class RAGService:
             user_msg += f"额外要求：{extra_instruction}\n"
 
         try:
-            client = AsyncOpenAI(base_url=settings.exo_base_url, api_key=settings.exo_api_key or "not-needed")
+            client = get_shared_llm_client()
             resp = await client.chat.completions.create(
                 model=settings.exo_model_glm52,
                 messages=[

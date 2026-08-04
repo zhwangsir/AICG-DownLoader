@@ -2,6 +2,71 @@
 
 > 本文件按时间倒序记录每次回归验证的命令、结果与关键代码片段。
 
+## 2026-08-04 M9.7 共享 LLM 客户端单例（连接池泄漏修复）
+
+### 变更摘要
+
+- **问题**：M9.6 事件循环审计延伸——发现三处游离调用点每次请求新建 `AsyncOpenAI`（隐式新建 httpx 连接池）且从不关闭：①`ai_optimizer.optimize_content`（前端「智能体辅助」高频路径，每个可编辑字段润色/扩写/精简/改写都走这里）；②`rag_service.optimize_prompt`；③`drama.py` 智能体辅助端点。高频调用下累积泄漏 socket，且每次重建 TCP 连接徒增延迟。
+- **修复**：`base.py` 新增 `get_shared_llm_client()` 懒加载单例（共享 httpx.AsyncClient，`trust_env=False` 与 BaseAgent 一致）+ `close_shared_llm_client()`；三处调用点全部改为复用；`main.lifespan` shutdown 阶段统一关闭共享连接池；`rag_service` 移除无用 `AsyncOpenAI` import。
+- **测试**：`test_base.py` 新增 `TestSharedLLMClient` 3 用例（单例复用 / close 后可重新懒加载防残留失效引用 / 未初始化 close 幂等）；`test_rag_service.py` 4 处打桩由 `AsyncOpenAI` 改为 `get_shared_llm_client`。
+- **回归**：全量 426/426 passed，覆盖率 84.33%（≥80% 达标）。
+
+### 关键代码片段
+
+#### 1. 共享客户端单例（`platform/backend/app/agents/base.py`）
+
+```python
+_shared_http: httpx.AsyncClient | None = None
+_shared_llm: AsyncOpenAI | None = None
+
+
+def get_shared_llm_client() -> AsyncOpenAI:
+    """返回进程级共享 AsyncOpenAI 客户端（懒加载，连接池复用）。"""
+    global _shared_http, _shared_llm
+    if _shared_llm is None:
+        # trust_env=False 与 BaseAgent 一致，避免系统代理拦截内网地址
+        _shared_http = httpx.AsyncClient(timeout=600.0, trust_env=False)
+        _shared_llm = AsyncOpenAI(
+            base_url=settings.exo_base_url,
+            api_key=settings.exo_api_key or "not-needed",
+            http_client=_shared_http,
+        )
+    return _shared_llm
+
+
+async def close_shared_llm_client() -> None:
+    """关闭共享客户端连接池（应用关闭时由 lifespan 调用）。"""
+    global _shared_http, _shared_llm
+    if _shared_http is not None:
+        await _shared_http.aclose()
+    _shared_http = None
+    _shared_llm = None
+```
+
+#### 2. lifespan 统一清理（`platform/backend/app/main.py`）
+
+```python
+for a in agents:
+    try:
+        await a.aclose()
+    except Exception:
+        logger.warning("关闭 Agent HTTP 客户端失败: %s", a.name, exc_info=True)
+# 关闭模块级共享 LLM 客户端连接池（ai_optimizer/rag_service/智能体辅助复用）
+try:
+    await close_shared_llm_client()
+except Exception:
+    logger.warning("关闭共享 LLM 客户端失败", exc_info=True)
+```
+
+### 回归结果
+
+| 项目 | 命令 | 结果 |
+|------|------|------|
+| 后端全量 | `pytest tests/ -q` | **426/426 passed**（覆盖率 84.33%） |
+| 新增用例 | `TestSharedLLMClient` | 3 用例全绿 |
+
+---
+
 ## 2026-08-04 M9.6 core E2E 复验 + 事件循环冻结热修复（P0）
 
 ### 变更摘要

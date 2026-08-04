@@ -1,6 +1,6 @@
 {
   "project": "AICG-DownLoader-main",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "last_updated": "2026-08-04",
   "description": "ComfyUI 模型下载器 + AI 短剧生成平台。里程碑状态追踪文件，记录历史交付与当前会话优先级任务进度。",
   "milestones": {
@@ -382,6 +382,21 @@
             "platform/backend/app/main.py"
           ],
           "notes": "core 复跑全链路时发现两个 P0：①RAG 嵌入模型在事件循环内同步加载（缓存命中时 initialize() 不加载模型，首个 search() 触发 fastembed 同步下载，HF 不可达阻塞 ~130s 致全接口冻结，py-spy 实锤）→ 新增 _warm_up() 显式预热模型并经 asyncio.to_thread 执行；②HF_ENDPOINT=hf-mirror.com 后 Xet 分块重建仍 401（cas-server.xethub.hf.co 不走镜像）→ main.py 顶部 import 前 setdefault HF_ENDPOINT + HF_HUB_DISABLE_XET=1。修复后 core 两次全链路 E2E 均 passed:true（8 步全绿，RAG 0 失败，成片正常产出，quality 85）；本地全量回归 423/423（84.29%，新增 TestWarmUp 3 回归用例防复发）；AI-Omni ASR 转写实测恢复（带时间轴 segments）"
+        },
+        {
+          "id": "M9.7",
+          "name": "共享 LLM 客户端单例（连接池泄漏修复）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/base.py",
+            "platform/backend/app/agents/ai_optimizer.py",
+            "platform/backend/app/services/rag_service.py",
+            "platform/backend/app/routers/drama.py",
+            "platform/backend/app/main.py",
+            "platform/backend/tests/unit/test_base.py",
+            "platform/backend/tests/unit/test_rag_service.py"
+          ],
+          "notes": "审计发现三处游离调用点（ai_optimizer.optimize_content 智能体辅助高频路径 / rag_service.optimize_prompt / drama 智能体辅助端点）每次请求新建 AsyncOpenAI（隐式新建 httpx 连接池）且从不关闭：高频下累积泄漏 socket，每次重建 TCP 连接徒增延迟。base.py 新增 get_shared_llm_client() 懒加载单例（trust_env=False 与 BaseAgent 一致）+ close_shared_llm_client()，三处全部改复用；main.lifespan shutdown 统一关闭。test_base 新增 TestSharedLLMClient 3 用例（单例复用/close 后可重新懒加载/未初始化 close 幂等）；test_rag_service 4 处打桩由 AsyncOpenAI 改为 get_shared_llm_client。全量回归 426/426（84.33%）"
         }
       ]
     }

@@ -86,7 +86,7 @@ class TestWarmUp:
         monkeypatch.setattr(service, "_warm_up", fake_warm_up)
         monkeypatch.setattr(service, "search", MagicMock(return_value=[]))
 
-        with patch("app.services.rag_service.AsyncOpenAI", side_effect=RuntimeError("no llm")):
+        with patch("app.services.rag_service.get_shared_llm_client", side_effect=RuntimeError("no llm")):
             result = await service.optimize_prompt("测试提示词", domain="image")
 
         assert called["warm_up"] == 1
@@ -197,7 +197,7 @@ class TestRAGServiceOptimize:
         ]
         fake_client.chat.completions.create = AsyncMock(return_value=fake_response)
 
-        with patch("app.services.rag_service.AsyncOpenAI", return_value=fake_client):
+        with patch("app.services.rag_service.get_shared_llm_client", return_value=fake_client):
             result = await service.optimize_prompt("主角看手机", domain="image")
 
         assert result["optimized_positive"] == "cinematic close-up"
@@ -221,7 +221,7 @@ class TestRAGServiceOptimize:
         fake_search = MagicMock(return_value=[service._entries[0].to_dict()])
         monkeypatch.setattr(service, "search", fake_search)
 
-        with patch("app.services.rag_service.AsyncOpenAI", side_effect=RuntimeError("LLM 失败")):
+        with patch("app.services.rag_service.get_shared_llm_client", side_effect=RuntimeError("LLM 失败")):
             result = await service.optimize_prompt("test", domain="image")
 
         assert result["fallback"] is True
@@ -355,7 +355,7 @@ class TestRAGServiceGenreTrope:
         ]
         fake_client.chat.completions.create = AsyncMock(return_value=fake_response)
 
-        with patch("app.services.rag_service.AsyncOpenAI", return_value=fake_client):
+        with patch("app.services.rag_service.get_shared_llm_client", return_value=fake_client):
             result = await service.optimize_prompt("总裁把女主逼到墙角", domain="video")
 
         assert result["retrieved_count"] == 1

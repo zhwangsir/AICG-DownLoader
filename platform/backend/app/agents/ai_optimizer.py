@@ -13,9 +13,8 @@ import logging
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
 
-from app.agents.base import strip_think_tags
+from app.agents.base import get_shared_llm_client, strip_think_tags
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -118,10 +117,7 @@ async def optimize_content(
     user_msg += "\n请直接输出优化后的内容，不要解释。"
 
     try:
-        client = AsyncOpenAI(
-            base_url=settings.exo_base_url,
-            api_key=settings.exo_api_key or "not-needed",
-        )
+        client = get_shared_llm_client()
         resp = await client.chat.completions.create(
             model=settings.exo_model_glm52,
             messages=[

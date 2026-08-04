@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import app.agents.base as base_module
 from app.agents.base import BaseAgent, _strip_markdown
 
 
@@ -19,6 +20,38 @@ class TestStripMarkdown:
 
     def test_with_language_tag(self):
         assert _strip_markdown("```python\nprint(1)\n```") == "print(1)"
+
+
+class TestSharedLLMClient:
+    """M9.7 回归：游离调用点（ai_optimizer/rag_service/智能体辅助）必须复用
+    进程级共享 AsyncOpenAI 客户端，而非每次请求新建连接池（socket 泄漏 + TCP 重建延迟）。
+    close 后必须可重新懒加载，避免 lifespan shutdown 后残留失效引用。"""
+
+    def teardown_method(self):
+        # 每个用例后重置单例，避免跨测试污染
+        base_module._shared_http = None
+        base_module._shared_llm = None
+
+    def test_get_shared_client_returns_singleton(self):
+        c1 = base_module.get_shared_llm_client()
+        c2 = base_module.get_shared_llm_client()
+        assert c1 is c2
+        assert base_module._shared_http is not None
+
+    async def test_close_resets_singleton(self):
+        c1 = base_module.get_shared_llm_client()
+        await base_module.close_shared_llm_client()
+        assert base_module._shared_http is None
+        assert base_module._shared_llm is None
+        # 关闭后可重新懒加载新实例
+        c2 = base_module.get_shared_llm_client()
+        assert c2 is not c1
+        await base_module.close_shared_llm_client()
+
+    async def test_close_is_idempotent_when_never_used(self):
+        # 未初始化时调用 close 不应抛错
+        await base_module.close_shared_llm_client()
+        assert base_module._shared_llm is None
 
 
 class TestBaseAgentInit:

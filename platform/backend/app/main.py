@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.agents.base import close_shared_llm_client
 from app.agents.character_agent import character_agent
 from app.agents.edit_agent import edit_agent
 from app.agents.lip_sync_agent import lip_sync_agent
@@ -88,6 +89,11 @@ async def lifespan(app: FastAPI):
             await a.aclose()
         except Exception:
             logger.warning("关闭 Agent HTTP 客户端失败: %s", a.name, exc_info=True)
+    # 关闭模块级共享 LLM 客户端连接池（ai_optimizer/rag_service/智能体辅助复用）
+    try:
+        await close_shared_llm_client()
+    except Exception:
+        logger.warning("关闭共享 LLM 客户端失败", exc_info=True)
 
 
 app = FastAPI(

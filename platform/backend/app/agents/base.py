@@ -36,6 +36,40 @@ def strip_think_tags(text: str) -> str:
     return text.replace("<think>", "").strip()
 
 
+# ---------------------------------------------------------------------------
+# 模块级共享 LLM 客户端
+# ---------------------------------------------------------------------------
+# ai_optimizer / rag_service / drama 智能体辅助等游离调用点此前每次请求都新建
+# AsyncOpenAI（隐式新建 httpx 连接池）且从不关闭：高频路径下累积泄漏 socket，
+# 且每次重建 TCP 连接徒增延迟。这里提供懒加载单例，复用同一连接池，
+# 由 main.lifespan shutdown 阶段统一 close_shared_llm_client()。
+_shared_http: httpx.AsyncClient | None = None
+_shared_llm: AsyncOpenAI | None = None
+
+
+def get_shared_llm_client() -> AsyncOpenAI:
+    """返回进程级共享 AsyncOpenAI 客户端（懒加载，连接池复用）。"""
+    global _shared_http, _shared_llm
+    if _shared_llm is None:
+        # trust_env=False 与 BaseAgent 一致，避免系统代理拦截内网地址
+        _shared_http = httpx.AsyncClient(timeout=600.0, trust_env=False)
+        _shared_llm = AsyncOpenAI(
+            base_url=settings.exo_base_url,
+            api_key=settings.exo_api_key or "not-needed",
+            http_client=_shared_http,
+        )
+    return _shared_llm
+
+
+async def close_shared_llm_client() -> None:
+    """关闭共享客户端连接池（应用关闭时由 lifespan 调用）。"""
+    global _shared_http, _shared_llm
+    if _shared_http is not None:
+        await _shared_http.aclose()
+    _shared_http = None
+    _shared_llm = None
+
+
 class BaseAgent:
     """所有 Agent 的基类，提供 LLM 调用和 ComfyUI 调用能力。
 
