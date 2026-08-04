@@ -2,6 +2,64 @@
 
 > 本文件按时间倒序记录每次回归验证的命令、结果与关键代码片段。
 
+## 2026-08-04 M9.8 RAG 六路检索线程化（事件循环卡顿修复）
+
+### 变更摘要
+
+- **问题**：M9.6 事件循环审计再延伸——`optimize_prompt` 在 `_warm_up` 线程化后，仍在事件循环内直接同步调用 6 路 `search()`；`search()` 内部 `self._embedding_model.embed()` 为 fastembed ONNX 同步推理（CPU 每路 ~20-100ms），六路串行累积数百 ms 卡顿，`pipeline_orchestrator` 逐场景调用时放大（N 场景 × 6 路 × 推理耗时）。
+- **修复**：新增 `_retrieve_multi()` 同步辅助方法（覆盖 style/shot/example/negative/method/genre_trope 六类检索），`optimize_prompt` 改为 `await asyncio.to_thread(self._retrieve_multi, query, domain, style_hint)`；公开同步接口 `search()` 签名不变（测试与直调场景不受影响）。
+- **测试**：`test_rag_service.py` 新增 2 用例——①`test_optimize_prompt_retrieves_via_thread`：守卫检索必须经 `_retrieve_multi` 线程入口（事件循环内 0 次 search）；②`test_retrieve_multi_calls_six_categories`：六类检索全覆盖。
+- **回归**：全量 428/428 passed，覆盖率 84.32%（≥80% 达标）。
+
+### 关键代码片段
+
+#### 1. 线程化检索（`platform/backend/app/services/rag_service.py`）
+
+```python
+# 2. 多路检索：风格 + 镜头 + 示例 + 负面 + 方法 + 类型片叙事模板。
+# search() 内部含 fastembed ONNX 同步推理（CPU 每路 ~20-100ms），
+# 六路串行在事件循环内执行会累积数百 ms 卡顿（pipeline 逐场景调用时放大），
+# 故整体放线程执行。
+(
+    style_results,
+    shot_results,
+    example_results,
+    negative_results,
+    method_results,
+    trope_results,
+) = await asyncio.to_thread(
+    self._retrieve_multi, query, domain, style_hint
+)
+```
+
+#### 2. 六路同步检索辅助方法
+
+```python
+def _retrieve_multi(self, query, domain, style_hint):
+    """六路同步检索（风格/镜头/示例/负面/方法/类型片模板）。
+
+    search() 内部含 fastembed ONNX 同步推理，必须由调用方放入线程执行
+    （optimize_prompt 经 asyncio.to_thread 调用本方法），避免阻塞事件循环。
+    """
+    return (
+        self.search(query, category="style", domain=domain, style=style_hint, top_k=2),
+        self.search(query, category="shot", domain=domain, top_k=2),
+        self.search(query, category="example", domain=domain, style=style_hint, top_k=2),
+        self.search(query, category="negative", domain=domain, top_k=2),
+        self.search(query, category="method", domain=domain, top_k=2),
+        self.search(query, category="genre_trope", domain=domain, style=style_hint, top_k=2),
+    )
+```
+
+### 回归结果
+
+| 项目 | 命令 | 结果 |
+|------|------|------|
+| 后端全量 | `pytest tests/ -q` | **428/428 passed**（覆盖率 84.32%） |
+| 新增用例 | `TestWarmUp` 扩展 | 2 用例全绿 |
+
+---
+
 ## 2026-08-04 M9.7 共享 LLM 客户端单例（连接池泄漏修复）
 
 ### 变更摘要

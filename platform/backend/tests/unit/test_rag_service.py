@@ -92,6 +92,47 @@ class TestWarmUp:
         assert called["warm_up"] == 1
         assert result["fallback"] is True
 
+    async def test_optimize_prompt_retrieves_via_thread(self, monkeypatch, tmp_path):
+        """M9.8 回归守卫：六路 search() 含 fastembed ONNX 同步推理（CPU 每路 ~20-100ms），
+        必须经 _retrieve_multi 由 asyncio.to_thread 放入线程执行；
+        若回退为事件循环内直接调 search()，pipeline 逐场景调用会累积数百 ms 卡顿。"""
+        service = self._make_service(tmp_path)
+        service._initialized = True
+        service._entries = []
+        called = {"retrieve_multi": 0}
+        search_calls: list[str] = []
+
+        def fake_retrieve_multi(query, domain, style_hint):
+            called["retrieve_multi"] += 1
+            return ([], [], [], [], [], [])
+
+        def fake_search(query, category=None, domain=None, style=None, top_k=None):
+            search_calls.append(category or "")
+            return []
+
+        monkeypatch.setattr(service, "_retrieve_multi", fake_retrieve_multi)
+        monkeypatch.setattr(service, "search", fake_search)
+
+        with patch("app.services.rag_service.get_shared_llm_client", side_effect=RuntimeError("no llm")):
+            await service.optimize_prompt("测试提示词", domain="image")
+
+        # 必须走 _retrieve_multi 线程入口，而非事件循环内直接 search()
+        assert called["retrieve_multi"] == 1
+        assert search_calls == []
+
+    def test_retrieve_multi_calls_six_categories(self, monkeypatch, tmp_path):
+        """_retrieve_multi 必须覆盖六类知识库检索。"""
+        service = self._make_service(tmp_path)
+        categories: list[str] = []
+
+        def fake_search(query, category=None, domain=None, style=None, top_k=None):
+            categories.append(category or "")
+            return []
+
+        monkeypatch.setattr(service, "search", fake_search)
+        service._retrieve_multi("q", "image", None)
+        assert categories == ["style", "shot", "example", "negative", "method", "genre_trope"]
+
 
 class TestKnowledgeEntry:
     def test_to_embed_text(self):

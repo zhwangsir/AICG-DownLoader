@@ -339,6 +339,33 @@ class RAGService:
             results.append(item)
         return results
 
+    def _retrieve_multi(
+        self,
+        query: str,
+        domain: str,
+        style_hint: str | None,
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        """六路同步检索（风格/镜头/示例/负面/方法/类型片模板）。
+
+        search() 内部含 fastembed ONNX 同步推理，必须由调用方放入线程执行
+        （optimize_prompt 经 asyncio.to_thread 调用本方法），避免阻塞事件循环。
+        """
+        return (
+            self.search(query, category="style", domain=domain, style=style_hint, top_k=2),
+            self.search(query, category="shot", domain=domain, top_k=2),
+            self.search(query, category="example", domain=domain, style=style_hint, top_k=2),
+            self.search(query, category="negative", domain=domain, top_k=2),
+            self.search(query, category="method", domain=domain, top_k=2),
+            self.search(query, category="genre_trope", domain=domain, style=style_hint, top_k=2),
+        )
+
     def get_styles(self) -> list[dict[str, Any]]:
         """获取所有风格条目，用于前端下拉选择。"""
         self._ensure_initialized()
@@ -471,13 +498,20 @@ class RAGService:
         if style_hint:
             query = f"{style_hint} {user_prompt}"
 
-        # 2. 多路检索：风格 + 镜头 + 示例 + 负面 + 方法 + 类型片叙事模板
-        style_results = self.search(query, category="style", domain=domain, style=style_hint, top_k=2)
-        shot_results = self.search(query, category="shot", domain=domain, top_k=2)
-        example_results = self.search(query, category="example", domain=domain, style=style_hint, top_k=2)
-        negative_results = self.search(query, category="negative", domain=domain, top_k=2)
-        method_results = self.search(query, category="method", domain=domain, top_k=2)
-        trope_results = self.search(query, category="genre_trope", domain=domain, style=style_hint, top_k=2)
+        # 2. 多路检索：风格 + 镜头 + 示例 + 负面 + 方法 + 类型片叙事模板。
+        # search() 内部含 fastembed ONNX 同步推理（CPU 每路 ~20-100ms），
+        # 六路串行在事件循环内执行会累积数百 ms 卡顿（pipeline 逐场景调用时放大），
+        # 故整体放线程执行。
+        (
+            style_results,
+            shot_results,
+            example_results,
+            negative_results,
+            method_results,
+            trope_results,
+        ) = await asyncio.to_thread(
+            self._retrieve_multi, query, domain, style_hint
+        )
 
         # 去重合并
         seen_ids: set[str] = set()

@@ -1,6 +1,6 @@
 {
   "project": "AICG-DownLoader-main",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "last_updated": "2026-08-04",
   "description": "ComfyUI 模型下载器 + AI 短剧生成平台。里程碑状态追踪文件，记录历史交付与当前会话优先级任务进度。",
   "milestones": {
