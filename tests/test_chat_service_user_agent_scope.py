@@ -1,10 +1,27 @@
 import json
 import os
+import sys
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+# 测试环境桩：hermes 插件的 tools.registry 依赖（真实 SDK 不在测试环境安装）。
+# 必须在收集期（本模块按字母序先于 test_hermes_dashbox_plugin/test_mcp_ce_owner
+# 导入）注册 JSON 序列化版桩，否则那两个模块的恒等桩会让本文件的
+# json.loads(plugin._handle_*(...)) 拿到 dict 报 TypeError（顺序敏感型失败）。
+if "tools.registry" not in sys.modules:
+    _tools_pkg = types.ModuleType("tools")
+    _registry = types.ModuleType("tools.registry")
+    _registry.tool_result = lambda value: json.dumps(value, ensure_ascii=False)
+    _registry.tool_error = lambda message: json.dumps(
+        {"ok": False, "error": str(message)}, ensure_ascii=False
+    )
+    _tools_pkg.registry = _registry
+    sys.modules.setdefault("tools", _tools_pkg)
+    sys.modules["tools.registry"] = _registry
 
 from novelvideo.api.routes import chat as chat_routes
 from novelvideo.chat import backend_sdk
