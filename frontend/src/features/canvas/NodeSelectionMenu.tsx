@@ -334,6 +334,21 @@ export function NodeSelectionMenu({
     };
   }, [handleClose]);
 
+  // Esc 关闭（浏览器实测 P1：此前 Esc 无效，菜单按钮保持 pressed 只能点空白关）
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        handleClose();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [handleClose]);
+
   useEffect(() => {
     if (!activeSkillProvider) {
       return;

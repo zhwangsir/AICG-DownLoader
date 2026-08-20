@@ -17,6 +17,7 @@ import {
   BackgroundVariant,
   ConnectionMode,
   SelectionMode,
+  getViewportForBounds,
   useNodesInitialized,
   useReactFlow,
   useStoreApi,
@@ -1064,6 +1065,8 @@ export function Canvas({
   const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
   const pendingFocusNodeId = useCanvasStore((state) => state.pendingFocusNodeId);
   const clearPendingFocus = useCanvasStore((state) => state.clearPendingFocus);
+  const pendingFitViewNodeIds = useCanvasStore((state) => state.pendingFitViewNodeIds);
+  const clearPendingFitView = useCanvasStore((state) => state.clearPendingFitView);
   const requestFocusNode = useCanvasStore((state) => state.requestFocusNode);
   const deleteEdge = useCanvasStore((state) => state.deleteEdge);
   const deleteNode = useCanvasStore((state) => state.deleteNode);
@@ -1342,6 +1345,56 @@ export function Canvas({
     });
     clearPendingFocus();
   }, [pendingFocusNodeId, nodes, reactFlowInstance, clearPendingFocus]);
+
+  // 多节点 fitView 请求（一键插入流水线后展示整条链）。
+  // 不用 reactFlowInstance.fitView({nodes})：RF 内部 getFitViewNodes 按
+  // measured 硬性过滤节点，低缩放档 LOD shell 是 0x0、measured 永不写入，
+  // 全部目标节点被剔除 → 视口纹丝不动（2026-08-20 浏览器实测两层踩坑）。
+  // 改为手动算 bbox（逻辑尺寸回退）+ getViewportForBounds + setViewport。
+  useEffect(() => {
+    if (!pendingFitViewNodeIds) return;
+    const targets = nodes.filter((node) => pendingFitViewNodeIds.includes(node.id));
+    if (targets.length === 0) {
+      clearPendingFitView();
+      return;
+    }
+    const container = wrapperRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const node of targets) {
+      const width =
+        node.measured?.width ??
+        (typeof node.width === 'number' ? node.width : DEFAULT_NODE_WIDTH);
+      const height =
+        node.measured?.height ??
+        (typeof node.height === 'number' ? node.height : 240);
+      minX = Math.min(minX, node.position.x);
+      minY = Math.min(minY, node.position.y);
+      maxX = Math.max(maxX, node.position.x + width);
+      maxY = Math.max(maxY, node.position.y + height);
+    }
+    if (!Number.isFinite(minX)) {
+      clearPendingFitView();
+      return;
+    }
+
+    const viewport = getViewportForBounds(
+      { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+      rect.width,
+      rect.height,
+      0.1,
+      1,
+      0.15,
+    );
+    reactFlowInstance.setViewport(viewport, { duration: 300 });
+    clearPendingFitView();
+  }, [pendingFitViewNodeIds, nodes, reactFlowInstance, clearPendingFitView]);
 
   // 低缩放档（10% 之类）下新节点在屏幕上只有几十像素、深色面板贴深色背景，
   // 创建成功也近乎不可见，用户会以为「没创建上」。所有「凭空新建节点」的入口

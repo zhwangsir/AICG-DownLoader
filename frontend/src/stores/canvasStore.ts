@@ -161,6 +161,8 @@ interface CanvasState {
   hoveredNodeId: string | null;
   /** 一次性的视口聚焦请求：Canvas 监听到后会 setCenter 然后清掉。 */
   pendingFocusNodeId: string | null;
+  /** 一次性的多节点 fitView 请求（如一键插入流水线后展示整条链）。 */
+  pendingFitViewNodeIds: string[] | null;
   activeToolDialog: ActiveToolDialog | null;
   history: CanvasHistoryState;
   dragHistorySnapshot: CanvasHistorySnapshot | null;
@@ -363,6 +365,9 @@ interface CanvasState {
   /** 请求将视口聚焦到目标节点；Canvas 处理完会通过 clearPendingFocus 复位。 */
   requestFocusNode: (nodeId: string) => void;
   clearPendingFocus: () => void;
+  /** 请求 fitView 到一组节点；Canvas 处理完会通过 clearPendingFitView 复位。 */
+  requestFitViewNodes: (nodeIds: string[]) => void;
+  clearPendingFitView: () => void;
 
   openToolDialog: (dialog: ActiveToolDialog) => void;
   closeToolDialog: () => void;
@@ -1254,6 +1259,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   activeOverlayNodeId: null,
   hoveredNodeId: null,
   pendingFocusNodeId: null,
+  pendingFitViewNodeIds: null,
   activeToolDialog: null,
   history: { past: [], future: [] },
   dragHistorySnapshot: null,
@@ -2040,9 +2046,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     ];
     const store = get();
     // 兜底落点：现有节点包围盒右侧；空画布放原点。
-    // 离屏残留防御：bbox 最右超出 4000px 视为历史测试残留（E2E 实测踩过
-    // x=22000+ 残留把新链排到视口外、onlyRenderVisibleElements 裁剪后视觉
-    // 上「点击无反应」），此时回退原点而非追随残留。
+    // 全量 bbox 右侧落位，永不叠死（2026-08-20 浏览器实测：此前 4000px
+    // 「残留阈值」判定错误——链宽 4240px，首次插入后 maxX 必然超阈值，
+    // 后续每次插入都落在同一位置逐位叠死）。历史上的「排到视口外找不到」
+    // 问题已由插入后的自动 fitView 解决，无需阈值豁免。
     let baseX = 0;
     let baseY = 0;
     if (store.nodes.length > 0) {
@@ -2053,10 +2060,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         maxX = Math.max(maxX, n.position.x + size.width);
         minY = Math.min(minY, n.position.y);
       }
-      if (maxX <= 4000) {
-        baseX = maxX + 80;
-        baseY = Math.max(0, Math.min(minY, 2000));
-      }
+      baseX = maxX + 80;
+      baseY = Math.max(0, Math.min(minY, 2000));
     }
     const startX = origin?.x ?? baseX;
     const startY = origin?.y ?? baseY;
@@ -2069,6 +2074,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     for (let i = 1; i < ids.length; i += 1) {
       store.addEdge(ids[i - 1], ids[i]);
     }
+    // 插入即所见：fitView 展示整条新链（浏览器实测 P1——插入后视口停在
+    // 原处，8 节点只有 4 个可见，首用用户误以为只插入了一部分）
+    store.requestFitViewNodes(ids);
     return ids[0] ?? null;
   },
 
@@ -3875,6 +3883,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   clearPendingFocus: () => {
     set({ pendingFocusNodeId: null });
+  },
+
+  requestFitViewNodes: (nodeIds) => {
+    set({ pendingFitViewNodeIds: nodeIds.length > 0 ? nodeIds : null });
+  },
+
+  clearPendingFitView: () => {
+    set({ pendingFitViewNodeIds: null });
   },
 
   openToolDialog: (dialog) => {
