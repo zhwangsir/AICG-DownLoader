@@ -23,11 +23,6 @@ guards = ["ee-terms"]
 reason = "规则文件自身列出全部禁用包名"
 
 [[skip]]
-path = ".github/workflows/ee-terms.yml"
-guards = ["ee-terms"]
-reason = "工作流注释举例说明所禁包名"
-
-[[skip]]
 path = "ce-allowlist.toml"
 guards = ["ee-terms"]
 reason = "本白名单可能在 reason 中引用禁用包名做说明，预防自我命中"
@@ -63,11 +58,6 @@ guards = ["ee-terms"]
 reason = "cp-port 检查脚本自身列出禁用包名作为检测目标"
 
 [[skip]]
-path = ".github/workflows/ce-import-lint.yml"
-guards = ["ee-terms"]
-reason = "工作流注释举例说明所禁包名"
-
-[[skip]]
 path = "tests/test_ce_imports_lint.py"
 guards = ["ee-terms"]
 reason = "import-lint 测试 docstring/数据引用禁用包名"
@@ -82,11 +72,6 @@ reason = "cp-port 测试数据引用禁用包名"
 path = "scripts/lint_banned_words.py"
 guards = ["banned-words"]
 reason = "品牌词规则文件自身会提到所禁措辞"
-
-[[skip]]
-path = ".github/workflows/banned-words.yml"
-guards = ["banned-words"]
-reason = "工作流注释说明该门禁的是品牌措辞"
 
 [[skip]]
 path = "frontend/THIRD-PARTY-LICENSES.txt"

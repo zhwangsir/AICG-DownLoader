@@ -9,9 +9,7 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).parents[1]
 COMPOSE_FILES = (
     "docker-compose.yml",
-    "docker-compose.release.yml",
     "docker-compose.selfhosted.yml",
-    "docker-compose.selfhosted.release.yml",
 )
 
 

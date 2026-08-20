@@ -215,8 +215,5 @@ env-override = "ST_SPLAT_TRANSFORM_BIN"
 [tool.hatch.build.targets.wheel]
 packages = ["src/novelvideo"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/novelvideo/release-notes.md" = "novelvideo/release-notes.md"
-
 [tool.hatch.metadata]
 allow-direct-references = true

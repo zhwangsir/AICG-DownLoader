@@ -40,7 +40,6 @@ import {
   useMyBuddyCompanionController,
 } from "@/features/companion/use-mybuddy-companion-controller";
 import { useRewardEventsStore } from "@/features/rewards/reward-events-store";
-import { openVersionUpdateDialog } from "@/features/version-update/version-update-events";
 
 /** 气泡可见时长按事件种类对齐宠物动作时长（成功/失败动画结束时气泡同步收尾），
  * 与 Piko 气泡共用同一组淡出节奏（{@link BUBBLE_FADE_OUT_MS}）。 */
@@ -502,14 +501,6 @@ export function MyBuddyCompanion() {
             <option value="single">{t("myBuddy.debug.chestSingle")}</option>
             <option value="batch">{t("myBuddy.debug.chestBatch")}</option>
           </select>
-          <button
-            type="button"
-            className="mybuddy-companion-debug-button"
-            data-tone="neutral"
-            onClick={openVersionUpdateDialog}
-          >
-            {t("myBuddy.debug.triggerUpdateDialog")}
-          </button>
         </div>
       )}
       {/* 整页任意定位的浮动容器（fixed，相对视口）。形象/气泡/拖拽把手都在其中。 */}

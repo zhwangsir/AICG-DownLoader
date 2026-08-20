@@ -7173,10 +7173,11 @@ async def _ee_media_model_catalog(media_type: str) -> list[dict[str, Any]] | Non
         if is_ce_effective():
             mode = get_effective_newapi_config().mode
             if mode == MODE_CUSTOM:
-                return _merge_media_model_catalog_defaults(
+                merged = _merge_media_model_catalog_defaults(
                     _static_media_model_catalog(media_type),
                     get_ce_media_model_catalog(media_type, include_disabled=True),
                 )
+                return await _filter_catalog_by_gateway_registry(merged)
             if mode == MODE_HYBRID:
                 local = get_ce_media_model_catalog(
                     media_type,
@@ -7196,6 +7197,40 @@ def _static_media_model_catalog(media_type: str) -> list[dict[str, Any]]:
     from novelvideo.model_gateway_settings import get_official_media_model_catalog
 
     return get_official_media_model_catalog(media_type)
+
+
+async def _filter_catalog_by_gateway_registry(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """custom 模式下按生效网关 /models 注册清单过滤目录，保证名实相符。
+
+    provider=comfyui 的本地映射条目不经网关注册表，始终保留；
+    注册清单未知（网关不可达）时 fail-open 原样返回，避免清空目录。
+    """
+    from novelvideo.model_gateway_settings import (
+        gateway_model_registered,
+        get_gateway_registered_models,
+    )
+
+    registered = await get_gateway_registered_models()
+    if registered is None:
+        return entries
+    kept: list[dict[str, Any]] = []
+    for entry in entries:
+        provider = str(entry.get("provider") or entry.get("providerId") or "").strip()
+        if provider == "comfyui":
+            kept.append(entry)
+            continue
+        names = [
+            str(entry.get(key) or "")
+            for key in ("catalogId", "id", "apiModel", "gatewayModel")
+        ]
+        aliases = entry.get("aliases")
+        if isinstance(aliases, list):
+            names.extend(str(alias) for alias in aliases)
+        if gateway_model_registered(names, registered):
+            kept.append(entry)
+    return kept
 
 
 def _merge_media_model_catalog_defaults(

@@ -366,3 +366,116 @@ def test_models_list(client):
         "happyhorse-1.0", "index-tts-2",
     ]:
         assert expected in ids
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 生成前预检（/object_info 权重文件名核验）
+# ---------------------------------------------------------------------------
+
+def _reset_preflight_caches():
+    main._object_info_cache.clear()
+    main._ltx_nodes_check = False
+
+
+def _object_info_with_ckpts(ckpt_names: list[str], extra: dict | None = None):
+    """object_info 伪数据：CheckpointLoaderSimple 带 ckpt_name 选项清单。"""
+    info: dict[str, Any] = {
+        "CheckpointLoaderSimple": {
+            "input": {"required": {"ckpt_name": [ckpt_names]}}
+        },
+    }
+    if extra:
+        info.update(extra)
+    return info
+
+
+def test_preflight_sdxl_missing_checkpoint(make_client, client):
+    """object_info 清单无配置 ckpt → 502 缺失权重明细，不提交 /prompt。"""
+    _reset_preflight_caches()
+    calls = {"prompt": 0}
+
+    def _prompt(method, url, kwargs):
+        calls["prompt"] += 1
+        return FakeResp(json_data={"prompt_id": "pid-1"})
+
+    make_client([
+        ("GET", "/object_info", lambda m, u, k: FakeResp(json_data=_object_info_with_ckpts(["other.safetensors"]))),
+        ("POST", "/prompt", _prompt),
+    ])
+    resp = client.post("/v1/images/generations", json={"model": "LingShan-G2", "prompt": "一只猫"})
+    assert resp.status_code == 502
+    body = resp.json()
+    assert "缺失权重" in json.dumps(body, ensure_ascii=False)
+    assert main.SDXL_CHECKPOINT in json.dumps(body, ensure_ascii=False)
+    assert calls["prompt"] == 0  # 未提交生成
+
+
+def test_preflight_sdxl_pass_and_cached(make_client, client):
+    """ckpt 在清单中 → 放行生成；第二次请求命中 TTL 缓存不再拉 object_info。"""
+    _reset_preflight_caches()
+    captured: dict[str, Any] = {}
+    oi_calls = {"n": 0}
+
+    def _object_info(method, url, kwargs):
+        oi_calls["n"] += 1
+        return FakeResp(json_data=_object_info_with_ckpts([main.SDXL_CHECKPOINT]))
+
+    routes = _image_routes(captured) + [("GET", "/object_info", _object_info)]
+    make_client(routes)
+    resp1 = client.post("/v1/images/generations", json={"model": "LingShan-G2", "prompt": "猫"})
+    assert resp1.status_code == 200
+    resp2 = client.post("/v1/images/generations", json={"model": "LingShan-G2", "prompt": "狗"})
+    assert resp2.status_code == 200
+    assert oi_calls["n"] == 1  # TTL 缓存生效
+
+
+def test_preflight_object_info_unreachable_fail_open(make_client, client):
+    """object_info 不可达 → fail-open 不阻断（仅告警），生成照常。"""
+    _reset_preflight_caches()
+    captured: dict[str, Any] = {}
+    # _image_routes 不含 /object_info → FakeClient 抛 AssertionError → 被 fail-open 捕获
+    make_client(_image_routes(captured))
+    resp = client.post("/v1/images/generations", json={"model": "LingShan-G2", "prompt": "猫"})
+    assert resp.status_code == 200
+    assert captured["workflow"]["1"]["inputs"]["ckpt_name"] == main.SDXL_CHECKPOINT
+
+
+def test_preflight_ltx_missing_transformer(make_client, client):
+    """LTX 节点齐（过 _verify_ltx_nodes）但 transformer 不在 ckpt 清单 → 502。"""
+    _reset_preflight_caches()
+
+    def _object_info(method, url, kwargs):
+        info = _object_info_with_ckpts(["not-the-transformer.safetensors"])
+        for name in main.LTX_REQUIRED_NODES:
+            info.setdefault(name, {})
+        return FakeResp(json_data=info)
+
+    make_client([("GET", "/object_info", _object_info)])
+    resp = client.post("/v1/video/generations", json={
+        "model": "seedance-2.0", "prompt": "空镜", "duration": 4,
+    })
+    assert resp.status_code == 502
+    assert main.LTX_TRANSFORMER_NAME in json.dumps(resp.json(), ensure_ascii=False)
+
+
+def test_preflight_ltx_unknown_field_no_false_positive(make_client, client):
+    """LTX 节点定义无 ckpt 选项清单（空 input）→ 不误报，正常提交。"""
+    _reset_preflight_caches()
+    captured: dict[str, Any] = {}
+
+    def _object_info(method, url, kwargs):
+        # 节点存在但 input 为空（无选项清单可比对）
+        return FakeResp(json_data={name: {} for name in main.LTX_REQUIRED_NODES})
+
+    def _prompt(method, url, kwargs):
+        captured["workflow"] = kwargs["json"]["prompt"]
+        return FakeResp(json_data={"prompt_id": "vp-1"})
+
+    make_client([
+        ("GET", "/object_info", _object_info),
+        ("POST", "/prompt", _prompt),
+    ])
+    resp = client.post("/v1/video/generations", json={
+        "model": "seedance-2.0", "prompt": "空镜", "duration": 4,
+    })
+    assert resp.status_code == 200

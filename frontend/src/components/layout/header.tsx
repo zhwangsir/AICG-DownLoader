@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright (c) 2026 ClaymoreLab
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Link, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
-  Bell,
   Bolt,
   Camera,
   Check,
@@ -25,7 +24,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { CreditBalanceBadge } from "@/components/layout/credit-balance-badge";
-import { NotificationDrawer } from "@/components/notifications/notification-drawer";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import {
   PetGalleryDialog,
@@ -37,11 +35,6 @@ import { useAppStore } from "@/stores/app-store";
 import { authRequired, isCeRuntime } from "@/lib/runtime-config";
 import { resetUserSessionState } from "@/lib/reset-region-state";
 import { useModelGatewayConfig } from "@/lib/queries/model-gateway";
-import { useReleaseNotifications } from "@/lib/queries/release-notifications";
-import {
-  markUpgradeSeen,
-  shouldShowUpgradeNudge,
-} from "@/lib/release-notification-state";
 import {
   ProjectHeaderNavigation,
   ProjectSwitcher,
@@ -54,8 +47,6 @@ export function Header() {
   const params = useParams({ strict: false }) as { project?: string };
   const [companionOpen, setCompanionOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [notificationOpen, setNotificationOpen] = useState(false);
-  const [releaseNotificationStateVersion, setReleaseNotificationStateVersion] = useState(0);
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
   const [accountPanelVisible, setAccountPanelVisible] = useState(false);
@@ -93,10 +84,6 @@ export function Header() {
     ? "zh"
     : "en";
   const modelGatewayConfig = useModelGatewayConfig(ceRuntime);
-  const releaseNotifications = useReleaseNotifications(i18n.resolvedLanguage ?? i18n.language);
-  const releaseFeed = releaseNotifications.data?.data;
-  void releaseNotificationStateVersion;
-  const hasUnreadNotification = shouldShowUpgradeNudge(releaseFeed);
   const gatewayConfig = modelGatewayConfig.data?.data;
   const hasSettingsWarning = Boolean(
     ceRuntime &&
@@ -196,17 +183,6 @@ export function Header() {
     setLanguage(lang);
   };
 
-  const openNotifications = () => {
-    closeAccountPanelNow();
-    markUpgradeSeen(releaseFeed?.latest_tag);
-    setReleaseNotificationStateVersion((version) => version + 1);
-    setNotificationOpen(true);
-  };
-
-  const handleUpgradeStateChange = useCallback(() => {
-    setReleaseNotificationStateVersion((version) => version + 1);
-  }, []);
-
   const openAvatarDialog = () => {
     closeAccountPanelNow();
     setAvatarDialogOpen(true);
@@ -280,23 +256,6 @@ export function Header() {
             </div>
           ) : null}
           <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="group/notification relative size-[32px] text-sidebar-foreground/82 transition-colors duration-150 ease-[var(--ease-out-quint)] hover:bg-white/[0.05] hover:text-white aria-expanded:bg-white/[0.05] aria-expanded:text-white"
-            aria-label={t("header.notifications")}
-            aria-expanded={notificationOpen}
-            onClick={openNotifications}
-          >
-            <Bell className="size-[17px]" />
-            {hasUnreadNotification ? (
-              <span
-                className="absolute right-[8px] top-[8px] size-1 rounded-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.72)]"
-                aria-hidden="true"
-              />
-            ) : null}
-          </Button>
-          <Button
             id="mybuddy-companion-entry"
             type="button"
             variant="ghost"
@@ -368,11 +327,6 @@ export function Header() {
         currentPet={companionPet}
         currentAccessory={pikoAccessory}
         onConfirm={handleCompanionConfirm}
-      />
-      <NotificationDrawer
-        open={notificationOpen}
-        onOpenChange={setNotificationOpen}
-        onUpgradeStateChange={handleUpgradeStateChange}
       />
       <AvatarUploadDialog
         avatarInitial={avatarInitial}

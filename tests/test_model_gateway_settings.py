@@ -13,7 +13,6 @@ from httpx import Response
 
 from novelvideo import config
 from novelvideo import model_gateway_settings
-from novelvideo import official_media_catalog_remote
 from novelvideo.api.routes import freezone as freezone_routes
 from novelvideo.api.routes import model_gateway
 from novelvideo.official_defaults import OFFICIAL_NEWAPI_BASE_URL
@@ -1527,303 +1526,37 @@ def test_enable_official_gateway_route_switches_mode_when_enabled(
     )
 
 
-def test_official_media_catalog_preferences_and_remote_update(monkeypatch, tmp_path):
-    _isolate_settings_db(monkeypatch, tmp_path)
-    source_url = "https://catalog.example.test/official_media_models.json"
-    monkeypatch.setenv("OFFICIAL_MEDIA_CATALOG_URL", source_url)
-    payload = {
-        "version": 1,
-        "catalogVersion": "2026.08.14.2",
-        "name": "Test official media models",
-        "mediaModels": {
-            "test-video": {
-                "provider": "newapi",
-                "upstreamModel": "test-video",
-                "mediaType": "video",
-                "label": "Test Video",
-                "enabled": True,
-                "sortOrder": 10,
-                "config": {
-                    "request": {
-                        "endpoint": "video/generations",
-                        "parameters": [],
-                    }
-                },
-            }
-        },
-    }
-    app = FastAPI()
-    app.include_router(model_gateway.router)
-    client = TestClient(app)
-
-    initial = client.get("/model-gateway/official/media-catalog")
-    enabled = client.post(
-        "/model-gateway/official/media-catalog/preferences",
-        json={"autoUpdate": True},
-    )
-    with respx.mock:
-        respx.get(source_url).mock(return_value=Response(200, json=payload))
-        checked = client.post("/model-gateway/official/media-catalog/check")
-    current = client.get("/model-gateway/official/media-catalog")
-
-    assert initial.status_code == 200
-    assert initial.json()["data"]["autoUpdate"] is False
-    assert initial.json()["data"]["source"] == "bundled"
-    assert enabled.json()["data"]["autoUpdate"] is True
-    assert checked.status_code == 200, checked.text
-    assert checked.json()["data"]["updated"] is True
-    assert current.json()["data"]["source"] == "remote"
-    assert current.json()["data"]["catalogVersion"] == "2026.08.14.2"
-    assert current.json()["data"]["modelCount"] == 1
-
-
-def test_official_media_catalog_defaults_to_dramaclaw_download_bucket(monkeypatch):
-    monkeypatch.delenv("OFFICIAL_MEDIA_CATALOG_MANIFEST_URL", raising=False)
-    monkeypatch.delenv("OFFICIAL_MEDIA_CATALOG_URL", raising=False)
-
-    assert official_media_catalog_remote._remote_source() == (
-        "https://dramaclaw-dl.oss-cn-chengdu.aliyuncs.com/"
-        "official-media-catalog/manifest.json",
-        True,
-    )
-
-
-def test_official_media_catalog_manifest_verifies_hash_and_revalidates_etag(
-    monkeypatch, tmp_path
-):
-    _isolate_settings_db(monkeypatch, tmp_path)
-    manifest_url = "https://catalog.example.test/official-media-catalog/manifest.json"
-    monkeypatch.setenv("OFFICIAL_MEDIA_CATALOG_MANIFEST_URL", manifest_url)
-    payload = {
-        "version": 1,
-        "catalogVersion": "2026.08.14.3",
-        "name": "Test official media models",
-        "mediaModels": {
-            "test-video": {
-                "provider": "newapi",
-                "upstreamModel": "test-video",
-                "mediaType": "video",
-                "label": "Test Video",
-                "enabled": True,
-                "sortOrder": 10,
-                "config": {
-                    "request": {
-                        "endpoint": "video/generations",
-                        "parameters": [],
-                    }
-                },
-            }
-        },
-    }
-    canonical = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    digest = hashlib.sha256(canonical).hexdigest()
-    catalog_path = f"catalogs/{digest}.json"
-    catalog_url = f"https://catalog.example.test/official-media-catalog/{catalog_path}"
-    manifest = {
-        "schemaVersion": 1,
-        "catalogVersion": payload["catalogVersion"],
-        "revision": "a" * 40,
-        "publishedAt": "2026-08-07T12:00:00Z",
-        "sha256": digest,
-        "path": catalog_path,
-    }
-    app = FastAPI()
-    app.include_router(model_gateway.router)
-    client = TestClient(app)
-
-    with respx.mock:
-        manifest_route = respx.get(manifest_url).mock(
-            side_effect=[
-                Response(200, json=manifest, headers={"etag": '"release-1"'}),
-                Response(304, headers={"etag": '"release-1"'}),
-            ]
-        )
-        catalog_route = respx.get(catalog_url).mock(
-            return_value=Response(200, content=canonical)
-        )
-        installed = client.post("/model-gateway/official/media-catalog/check")
-        unchanged = client.post("/model-gateway/official/media-catalog/check")
-
-    assert installed.status_code == 200, installed.text
-    installed_data = installed.json()["data"]
-    assert installed_data["updated"] is True
-    assert installed_data["source"] == "remote"
-    assert installed_data["revision"] == "a" * 40
-    assert installed_data["publishedAt"] == "2026-08-07T12:00:00Z"
-    assert installed_data["sha256"] == digest
-    assert installed_data["remoteUrl"] == manifest_url
-    assert installed_data["lastError"] == ""
-    assert unchanged.status_code == 200, unchanged.text
-    assert unchanged.json()["data"]["updated"] is False
-    assert len(catalog_route.calls) == 1
-    assert len(manifest_route.calls) == 2
-    assert manifest_route.calls[1].request.headers["if-none-match"] == '"release-1"'
-
-
-def test_official_media_catalog_manifest_rejects_hash_mismatch(monkeypatch, tmp_path):
-    _isolate_settings_db(monkeypatch, tmp_path)
-    manifest_url = "https://catalog.example.test/releases/manifest.json"
-    monkeypatch.setenv("OFFICIAL_MEDIA_CATALOG_MANIFEST_URL", manifest_url)
-    bundled = json.loads(
-        Path(model_gateway_settings.__file__)
-        .with_name("official_media_models.json")
-        .read_text(encoding="utf-8")
-    )
-    payload = {**bundled, "catalogVersion": "2026.08.07.2"}
-    actual_digest = hashlib.sha256(
-        json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-    ).hexdigest()
-    manifest = {
-        "schemaVersion": 1,
-        "catalogVersion": payload["catalogVersion"],
-        "revision": "b" * 40,
-        "publishedAt": "2026-08-07T12:00:00Z",
-        "sha256": "0" * 64,
-        "path": f"catalogs/{'0' * 64}.json",
-    }
-    app = FastAPI()
-    app.include_router(model_gateway.router)
-    client = TestClient(app)
-
-    with respx.mock:
-        respx.get(manifest_url).mock(return_value=Response(200, json=manifest))
-        respx.get(
-            f"https://catalog.example.test/releases/catalogs/{'0' * 64}.json"
-        ).mock(return_value=Response(200, json=payload))
-        response = client.post("/model-gateway/official/media-catalog/check")
-
-    assert response.status_code == 502
-    assert "SHA256" in response.json()["detail"]
-    status = client.get("/model-gateway/official/media-catalog").json()["data"]
-    assert status["source"] == "bundled"
-    assert "SHA256" in status["lastError"]
-    assert actual_digest != manifest["sha256"]
-
-
-def test_official_media_catalog_manifest_rejects_absolute_content_url():
-    with pytest.raises(ValueError, match="path"):
-        official_media_catalog_remote.validate_official_media_catalog_manifest(
-            {
-                "schemaVersion": 1,
-                "catalogVersion": "2026.08.07.1",
-                "revision": "c" * 40,
-                "publishedAt": "2026-08-07T12:00:00Z",
-                "sha256": "d" * 64,
-                "path": "https://attacker.example/catalog.json",
-            }
-        )
-
-
-def test_official_media_catalog_rejects_downgrade(monkeypatch, tmp_path):
-    _isolate_settings_db(monkeypatch, tmp_path)
-    source_url = "https://catalog.example.test/official_media_models.json"
-    monkeypatch.setenv("OFFICIAL_MEDIA_CATALOG_URL", source_url)
-    bundled = json.loads(
-        Path(model_gateway_settings.__file__)
-        .with_name("official_media_models.json")
-        .read_text(encoding="utf-8")
-    )
-    downgraded = {**bundled, "catalogVersion": "2026.08.05.9"}
-    app = FastAPI()
-    app.include_router(model_gateway.router)
-    client = TestClient(app)
-
-    with respx.mock:
-        route = respx.get(source_url)
-        route.mock(return_value=Response(200, json=downgraded))
-        downgrade_response = client.post(
-            "/model-gateway/official/media-catalog/check"
-        )
-
-    assert downgrade_response.status_code == 502
-    assert "downgrade" in downgrade_response.json()["detail"]
-    status = client.get("/model-gateway/official/media-catalog").json()["data"]
-    assert status["source"] == "bundled"
-
-
-def test_official_media_catalog_rejects_reused_version_with_different_content(
-    monkeypatch, tmp_path
-):
+def test_official_media_catalog_status_is_bundled_and_static(monkeypatch, tmp_path):
     _isolate_settings_db(monkeypatch, tmp_path)
     bundled = json.loads(
         Path(model_gateway_settings.__file__)
         .with_name("official_media_models.json")
         .read_text(encoding="utf-8")
     )
-    changed = {**bundled, "name": "Changed without a version bump"}
-
-    with pytest.raises(ValueError, match="version already exists"):
-        model_gateway_settings.install_official_media_catalog(
-            changed,
-            source_url="https://catalog.example.test/official_media_models.json",
-        )
-
-    cache_path = Path(config.STATE_DIR) / "local" / "official_media_models.json"
-    assert not cache_path.exists()
-
-
-def test_official_media_catalog_rejects_invalid_model_before_cache_write(
-    monkeypatch, tmp_path
-):
-    _isolate_settings_db(monkeypatch, tmp_path)
-    source_url = "https://catalog.example.test/official_media_models.json"
-    monkeypatch.setenv("OFFICIAL_MEDIA_CATALOG_URL", source_url)
-    payload = {
-        "version": 1,
-        "catalogVersion": "2026.08.06.2",
-        "mediaModels": {
-            "broken-video": {
-                "provider": "newapi",
-                "upstreamModel": "broken-video",
-                "mediaType": "video",
-                "sortOrder": "not-a-number",
-                "config": {
-                    "request": {
-                        "endpoint": "video/generations",
-                        "parameters": [],
-                    }
-                },
-            }
-        },
-    }
     app = FastAPI()
     app.include_router(model_gateway.router)
     client = TestClient(app)
 
-    with respx.mock:
-        respx.get(source_url).mock(return_value=Response(200, json=payload))
-        response = client.post("/model-gateway/official/media-catalog/check")
-
-    assert response.status_code == 502
-    assert "sortOrder must be an integer" in response.json()["detail"]
-    cache_path = Path(config.STATE_DIR) / "local" / "official_media_models.json"
-    assert not cache_path.exists()
-    assert client.get("/model-gateway/official/media-catalog").json()["data"][
-        "source"
-    ] == "bundled"
-
-
-def test_official_media_catalog_ignores_cache_older_than_bundle(monkeypatch, tmp_path):
-    _isolate_settings_db(monkeypatch, tmp_path)
-    bundled = json.loads(
-        Path(model_gateway_settings.__file__)
-        .with_name("official_media_models.json")
-        .read_text(encoding="utf-8")
-    )
-    cached = json.loads(json.dumps(bundled))
-    cached["catalogVersion"] = "2026.08.05.9"
-    cache_path = Path(config.STATE_DIR) / "local" / "official_media_models.json"
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(cached), encoding="utf-8")
-
+    response = client.get("/model-gateway/official/media-catalog")
     status = model_gateway_settings.get_official_media_catalog_update_status()
 
-    assert status["source"] == "bundled"
-    assert status["catalogVersion"] == bundled["catalogVersion"]
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data == status
+    assert data["autoUpdate"] is False
+    assert data["source"] == "bundled"
+    assert data["catalogVersion"] == str(bundled["catalogVersion"])
+    assert data["modelCount"] == len(bundled["mediaModels"])
+    assert data["lastCheckedAt"] == ""
+    assert data["revision"] == ""
+    assert data["publishedAt"] == ""
+    assert data["remoteUrl"] == ""
+    assert data["lastError"] == ""
+    assert data["sha256"] == hashlib.sha256(
+        json.dumps(bundled, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
 
 
 def test_save_official_gateway_route_persists_user_registered_key(
@@ -3618,6 +3351,29 @@ def test_media_relay_status_prefers_database_config(monkeypatch, tmp_path):
     assert status["configured"] is True
 
 
+def test_media_relay_status_local_http_configured_without_oss_credentials(
+    monkeypatch, tmp_path
+):
+    """local_http relay 零配置可用（默认落盘目录+公共前缀），不查 OSS/Cloudinary 凭据。"""
+    _isolate_settings_db(monkeypatch, tmp_path)
+    save_media_relay_config(provider="local_http", ttl_seconds=1800)
+
+    status = model_gateway._media_relay_status()
+
+    assert status["provider"] == "local_http"
+    assert status["configured"] is True
+
+
+def test_media_relay_status_env_local_http_configured(monkeypatch, tmp_path):
+    _isolate_settings_db(monkeypatch, tmp_path)
+    monkeypatch.setattr(config, "MEDIA_RELAY_PROVIDER", "local_http")
+
+    status = model_gateway._media_relay_status()
+
+    assert status["provider"] == "local_http"
+    assert status["configured"] is True
+
+
 def test_ee_media_relay_ignores_ce_database_config(monkeypatch, tmp_path):
     _isolate_settings_db(monkeypatch, tmp_path)
     save_media_relay_config(
@@ -3641,3 +3397,211 @@ def test_ee_media_relay_ignores_ce_database_config(monkeypatch, tmp_path):
     assert status["endpoint"] == "ee.endpoint"
     assert status["bucket"] == "ee-bucket"
     assert status["configured"] is True
+
+
+# ---------------------------------------------------------------------------
+# 网关注册清单（CE custom 模式名实对齐）
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_gateway_registered_models_fetch_cache_and_invalidate(
+    monkeypatch, tmp_path
+):
+    _isolate_settings_db(monkeypatch, tmp_path)
+    save_custom_newapi_gateway(
+        base_url="http://127.0.0.1:8790", api_key="sk-x", activate=True
+    )
+    model_gateway_settings.invalidate_gateway_registered_models_cache()
+    route = respx.get("http://127.0.0.1:8790/v1/models").mock(
+        return_value=Response(
+            200,
+            json={
+                "data": [
+                    {"id": "LingShan-G2"},
+                    {"id": "seedance-2.0"},
+                    {"name": "no-id-field"},
+                ]
+            },
+        )
+    )
+
+    first = await model_gateway_settings.get_gateway_registered_models()
+
+    assert first == {"LingShan-G2", "seedance-2.0"}
+    assert route.calls[0].request.headers["Authorization"] == "Bearer sk-x"
+    # TTL 内第二次调用命中缓存，不再发请求
+    assert await model_gateway_settings.get_gateway_registered_models() == first
+    assert route.call_count == 1
+    # force_refresh 绕过缓存
+    assert (
+        await model_gateway_settings.get_gateway_registered_models(force_refresh=True)
+        == first
+    )
+    assert route.call_count == 2
+    # invalidate 后重新拉取
+    model_gateway_settings.invalidate_gateway_registered_models_cache()
+    assert await model_gateway_settings.get_gateway_registered_models() == first
+    assert route.call_count == 3
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_gateway_registered_models_fail_open_and_non_custom(
+    monkeypatch, tmp_path
+):
+    _isolate_settings_db(monkeypatch, tmp_path)
+    set_model_gateway_mode(MODE_OFFICIAL)
+    model_gateway_settings.invalidate_gateway_registered_models_cache()
+    route = respx.route(method="GET", url__regex=r"http://.*/v1/models")
+
+    assert await model_gateway_settings.get_gateway_registered_models() is None
+    assert not route.called
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_gateway_registered_models_gateway_error_fail_open(
+    monkeypatch, tmp_path
+):
+    _isolate_settings_db(monkeypatch, tmp_path)
+    save_custom_newapi_gateway(
+        base_url="http://127.0.0.1:8790", api_key="sk-x", activate=True
+    )
+    model_gateway_settings.invalidate_gateway_registered_models_cache()
+    # 网关 500 → None（fail-open），失败同样进 TTL 缓存
+    models_route = respx.get("http://127.0.0.1:8790/v1/models").mock(
+        return_value=Response(500)
+    )
+    assert await model_gateway_settings.get_gateway_registered_models() is None
+    assert await model_gateway_settings.get_gateway_registered_models() is None
+    assert models_route.call_count == 1
+
+
+def test_gateway_model_registered_prefix_stripping():
+    from novelvideo.model_gateway_settings import gateway_model_registered
+
+    registered = {"seedance-2.0", "LingShan-G2"}
+    assert gateway_model_registered(["newapi_seedance-2.0"], registered)
+    assert gateway_model_registered(["", "LingShan-G2"], registered)
+    assert not gateway_model_registered(["seedream-4.5"], registered)
+    assert not gateway_model_registered([], registered)
+    assert not gateway_model_registered(["newapi_"], registered)
+
+
+@pytest.mark.asyncio
+async def test_filter_catalog_by_gateway_registry(monkeypatch):
+    entries = [
+        {
+            "catalogId": "LingShan-G2",
+            "id": "LingShan-G2",
+            "provider": "newapi",
+            "apiModel": "LingShan-G2",
+            "gatewayModel": "LingShan-G2",
+        },
+        {
+            "catalogId": "seedream-4.5",
+            "id": "seedream-4.5",
+            "provider": "newapi",
+            "apiModel": "seedream-4.5",
+            "gatewayModel": "seedream-4.5",
+        },
+        {
+            "catalogId": "MiniMax-H3-local",
+            "id": "MiniMax-H3-local",
+            "provider": "comfyui",
+            "apiModel": "MiniMax-H3-local",
+            "gatewayModel": "MiniMax-H3-local",
+        },
+        {
+            "catalogId": "seedance-2.0",
+            "id": "seedance-2.0",
+            "provider": "newapi",
+            "apiModel": "newapi_seedance-2.0",
+            "gatewayModel": "seedance-2.0",
+        },
+    ]
+
+    async def fake_registered(*, force_refresh: bool = False):
+        return {"LingShan-G2", "seedance-2.0"}
+
+    monkeypatch.setattr(
+        model_gateway_settings, "get_gateway_registered_models", fake_registered
+    )
+    kept = await freezone_routes._filter_catalog_by_gateway_registry(entries)
+    # 未注册的 seedream-4.5 被过滤；comfyui 本地映射始终保留；newapi_ 前缀可命中
+    assert [entry["catalogId"] for entry in kept] == [
+        "LingShan-G2",
+        "MiniMax-H3-local",
+        "seedance-2.0",
+    ]
+
+    async def unknown(*, force_refresh: bool = False):
+        return None
+
+    monkeypatch.setattr(
+        model_gateway_settings, "get_gateway_registered_models", unknown
+    )
+    # 清单未知（网关不可达）→ fail-open 原样返回
+    assert await freezone_routes._filter_catalog_by_gateway_registry(entries) == entries
+
+
+@pytest.mark.asyncio
+async def test_filter_video_backend_options_by_gateway(monkeypatch, tmp_path):
+    _isolate_settings_db(monkeypatch, tmp_path)
+    save_custom_newapi_gateway(
+        base_url="http://127.0.0.1:8790", api_key="sk-x", activate=True
+    )
+    from novelvideo.api.routes import generation
+
+    options = generation._api_video_backend_options()
+    assert "newapi_seedance-2.0" in {item.value for item in options}
+    assert "newapi_seedance-1.5-pro" in {item.value for item in options}
+
+    async def fake_registered(*, force_refresh: bool = False):
+        return {"seedance-2.0", "MiniMax-H3"}
+
+    monkeypatch.setattr(
+        model_gateway_settings, "get_gateway_registered_models", fake_registered
+    )
+    kept = await generation._filter_video_backend_options_by_gateway(options)
+    # 网关只注册了 seedance-2.0 → 其余 Seedance 变体全部隐藏
+    assert {item.value for item in kept} == {"newapi_seedance-2.0"}
+
+    # comfyui provider 的本地映射不经网关注册表，始终保留
+    save_newapi_media_model_mappings(
+        {
+            "wan-i2v": {
+                "provider": "comfyui",
+                "mediaType": "video",
+                "upstreamModel": "wan-i2v",
+                "enabled": True,
+            }
+        }
+    )
+    options_with_comfyui = generation._api_video_backend_options()
+    kept_with_comfyui = await generation._filter_video_backend_options_by_gateway(
+        options_with_comfyui
+    )
+    assert {item.value for item in kept_with_comfyui} == {
+        "newapi_seedance-2.0",
+        "newapi_wan-i2v",
+    }
+
+    # 清单未知 → fail-open 原样返回
+    async def unknown(*, force_refresh: bool = False):
+        return None
+
+    monkeypatch.setattr(
+        model_gateway_settings, "get_gateway_registered_models", unknown
+    )
+    assert (
+        await generation._filter_video_backend_options_by_gateway(options) == options
+    )
+
+    # 非 custom 模式 → 不过滤
+    set_model_gateway_mode(MODE_OFFICIAL)
+    assert (
+        await generation._filter_video_backend_options_by_gateway(options) == options
+    )

@@ -17,23 +17,16 @@
       "title": "页面加载失败",
       "description": "请刷新页面后重试。"
     },
-    "versionUpdate": {
-      "title": "🎉 新功能已上线",
-      "confirm": "我知道了",
-      "empty": "当前版本暂无更新说明"
-    },
     "logoHomeTooltip": "点击返回项目管理中心"
   },
   "loginCinematic": {
     "moreInfo": "更多信息"
   },
   "header": {
-    "partyFounding105": "庆祝建党105周年",
     "settings": "设置",
     "settingsWithWarning": "设置，有未配置项",
     "settingsWarningBubble": "有未配置项",
     "dismissSettingsWarningBubble": "关闭未配置提醒",
-    "notifications": "通知",
     "account": {
       "open": "打开个人信息",
       "changeAvatar": "更换头像",
@@ -51,17 +44,6 @@
         "saving": "保存中…",
         "error": "头像上传失败，请重试"
       }
-    }
-  },
-  "notifications": {
-    "title": "通知中心",
-    "close": "关闭通知中心",
-    "empty": "暂无通知",
-    "upgrade": {
-      "title": "有新版本 {{version}} 可用",
-      "body": "上游已发布新版本，可打开发布页查看并升级。",
-      "open": "去更新",
-      "skip": "跳过此版本"
     }
   },
   "myBuddy": {
@@ -113,7 +95,6 @@
       "chestTrigger": "触发宝箱",
       "chestSingle": "单宝箱",
       "chestBatch": "多宝箱",
-      "triggerUpdateDialog": "触发更新弹窗",
       "states": {
         "running": "运行中气泡",
         "success": "成功气泡",
@@ -4029,7 +4010,78 @@
     "secretSavedPlaceholder": "已保存 · {{preview}}（重新输入可替换）",
     "pages": {
       "models": "模型与渠道",
-      "storage": "媒体存储"
+      "storage": "媒体存储",
+      "library": "模型库"
+    },
+    "library": {
+      "loading": "加载中…",
+      "tabs": {
+        "nas": "本地模型",
+        "download": "下载"
+      },
+      "nas": {
+        "searchPlaceholder": "搜索模型名称 / 路径…",
+        "refresh": "重新扫描",
+        "typeFilter": "类型过滤",
+        "allTypes": "全部",
+        "empty": "未发现模型。确认 NAS 已挂载且模型目录已配置。",
+        "loadFailed": "模型库加载失败，请检查后端服务。",
+        "total": "共 {{count}} 个模型",
+        "toggleMark": "切换 NSFW 标记",
+        "markNsfw": "标记为 NSFW",
+        "markSfw": "标记为全年龄（覆盖关键词判定）",
+        "clearMark": "清除手动标记（回退关键词判定）"
+      },
+      "download": {
+        "searchPlaceholder": "搜索 Civitai 模型…",
+        "search": "搜索",
+        "searchFailed": "搜索失败，请稍后重试。",
+        "noResults": "无匹配结果",
+        "version": "版本文件",
+        "targetDir": "目标目录",
+        "start": "下载",
+        "startFailed": "下载启动失败",
+        "tasks": "下载任务",
+        "noTasks": "暂无下载任务",
+        "cancel": "取消下载",
+        "status": {
+          "pending": "排队中",
+          "running": "下载中",
+          "done": "已完成",
+          "error": "失败",
+          "canceled": "已取消"
+        }
+      },
+      "nsfw": {
+        "button": "NSFW 内容（R18）",
+        "locked": "已隐藏",
+        "unlocked": "R18",
+        "title": "NSFW 内容（R18）",
+        "r18Warning": "以下内容包含 R18 成人向内容，仅适合年满 18 岁的用户。确认后继续，本地模型库与 Civitai 下载将显示 NSFW 条目。",
+        "r18Enabled": "R18 成人向内容当前已显示。可随时隐藏，隐藏后模型库与下载将过滤 NSFW 条目。",
+        "confirmR18": "我已年满 18 岁，显示 R18 内容",
+        "hideR18": "隐藏 R18 内容",
+        "failed": "操作失败，请重试"
+      },
+      "picker": {
+        "button": "选择模型文件",
+        "empty": "（未选择）",
+        "searchPlaceholder": "搜索文件名…",
+        "noCandidates": "库中无该类型模型",
+        "notInLibrary": "当前文件名不在模型库中"
+      },
+      "refs": {
+        "title": "模型引用（{{count}}）",
+        "node": "节点{{id}}",
+        "preflight": "体检",
+        "present": "在位",
+        "missing": "缺失",
+        "invalidJson": "JSON 尚未解析成功，模型引用面板暂不可用。",
+        "noRefs": "该工作流未引用模型文件（无 loader 节点）。",
+        "preflightOk": "体检通过：{{total}} 个模型引用全部在位。",
+        "preflightMissing": "体检：{{present}}/{{total}} 在位，缺失：{{names}}",
+        "goToDownload": "去下载"
+      }
     },
     "modelConfig": {
       "title": "模型配置",
@@ -4073,13 +4125,7 @@
         "mediaCatalogSources": {
           "bundled": "应用内置",
           "remote": "在线更新"
-        },
-        "mediaCatalogAutoUpdate": "自动更新官方模型列表",
-        "mediaCatalogAutoUpdateHint": "后台定时检查，并在打开设置时立即应用兼容的模型目录更新。",
-        "mediaCatalogCheckNow": "立即检查更新",
-        "mediaCatalogUpdated": "官方媒体模型列表已更新。",
-        "mediaCatalogUpToDate": "官方媒体模型列表已是最新版本。",
-        "mediaCatalogCheckFailed": "检查官方媒体模型列表失败，请稍后重试。"
+        }
       },
       "custom": {
         "description": "CE 使用本机 SQLite NewAPI。DashBox 会自动连接数据库、创建运行令牌并启用本地渠道。",

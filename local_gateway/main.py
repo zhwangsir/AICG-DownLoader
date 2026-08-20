@@ -89,6 +89,7 @@ LOGICAL_MODELS = [
     "seedance-1.0-pro-fast",
     "seedance-2.0",
     "happyhorse-1.0",
+    "MiniMax-H3",
     "index-tts-2",
 ]
 
@@ -497,6 +498,91 @@ async def _submit_comfyui(client: httpx.AsyncClient, base_url: str, workflow: di
     return prompt_id
 
 
+# ---------------------------------------------------------------------------
+# 生成前预检：权重文件名核验（/object_info 选项清单，TTL 缓存，fail-open）
+# ---------------------------------------------------------------------------
+
+# loader 节点 class_type → 携带权重文件名的 input 字段（与 novelvideo.model_library 同步维护）
+LOADER_FILE_FIELDS: dict[str, tuple[str, ...]] = {
+    "CheckpointLoaderSimple": ("ckpt_name",),
+    "LoraLoader": ("lora_name",),
+    "LoraLoaderModelOnly": ("lora_name",),
+    "VAELoader": ("vae_name",),
+    "LTXVAudioVAELoader": ("vae_name",),
+    "CLIPLoader": ("clip_name",),
+    "DualCLIPLoader": ("clip_name",),
+    "CLIPVisionLoader": ("clip_name",),
+    "UNETLoader": ("unet_name",),
+    "LTXAVTextEncoderLoader": ("text_encoder", "ckpt_name"),
+    "IPAdapterModelLoader": ("ipadapter_file",),
+    "UpscaleModelLoader": ("model_name",),
+    "LatentUpscaleModelLoader": ("model_name",),
+    "ControlNetLoader": ("control_net_name",),
+}
+
+_OBJECT_INFO_TTL = 60.0
+_object_info_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+async def _object_info(client: httpx.AsyncClient, base_url: str) -> dict[str, Any] | None:
+    """拉取并缓存 /object_info；不可达返回 None（预检 fail-open，不阻断生成）。"""
+    now = time.time()
+    cached = _object_info_cache.get(base_url)
+    if cached and now - cached[0] < _OBJECT_INFO_TTL:
+        return cached[1]
+    try:
+        resp = await client.get(f"{base_url}/object_info", timeout=10.0)
+        if resp.status_code != 200:
+            logger.warning("预检: %s /object_info status=%s（跳过权重核验）", base_url, resp.status_code)
+            return None
+        info = resp.json()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("预检: %s /object_info 不可达: %s（跳过权重核验）", base_url, e)
+        return None
+    _object_info_cache[base_url] = (now, info)
+    return info
+
+
+def _node_file_choices(node_info: dict[str, Any], field: str) -> set[str]:
+    """从 object_info 节点定义提取某 input 字段的候选文件名清单。"""
+    inputs = node_info.get("input") or {}
+    for section in ("required", "optional"):
+        spec = inputs.get(section, {}).get(field)
+        if isinstance(spec, (list, tuple)) and spec and isinstance(spec[0], (list, tuple)):
+            return {str(x) for x in spec[0]}
+    return set()
+
+
+async def _preflight_workflow(client: httpx.AsyncClient, base_url: str, workflow: dict[str, Any]) -> list[str]:
+    """核验 workflow 引用的权重文件名在 ComfyUI 实例可用；返回缺失明细（空=通过）。
+
+    /object_info 不可达或字段无选项清单时 fail-open（不误报），只在有清单且不命中时报缺。
+    """
+    info = await _object_info(client, base_url)
+    if info is None:
+        return []
+    missing: list[str] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "")
+        fields = LOADER_FILE_FIELDS.get(class_type)
+        if not fields:
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        node_info = info.get(class_type) or {}
+        for field in fields:
+            value = inputs.get(field)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            choices = _node_file_choices(node_info, field)
+            if choices and value.strip() not in choices:
+                missing.append(f"节点{node_id}({class_type}.{field}): {value.strip()}")
+    return missing
+
+
 def _extract_output_media(outputs: dict[str, Any], base_url: str) -> tuple[str, str] | None:
     """从 ComfyUI outputs 提取首个媒体文件 URL，返回 (url, kind)。"""
     for node_output in outputs.values():
@@ -629,6 +715,9 @@ async def _generate_image(body: dict[str, Any], reference_url: str = "") -> dict
             except Exception as e:  # noqa: BLE001
                 logger.warning("IPAdapter 参考图注入失败，回退普通文生图: %s", e)
         try:
+            missing = await _preflight_workflow(client, COMFYUI_LB_URL, workflow)
+            if missing:
+                return _error_response(f"SDXL 生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
             prompt_id = await _submit_comfyui(client, COMFYUI_LB_URL, workflow)
         except Exception as e:  # noqa: BLE001
             return _error_response(f"SDXL 工作流提交失败: {e}", 502)
@@ -734,13 +823,13 @@ async def _verify_ltx_nodes(client: httpx.AsyncClient) -> str:
 
 
 def _select_video_backend(body: dict[str, Any]) -> str:
-    """路由：VIDEO_BACKEND 强制 > happyhorse 模型名 > 时长>15s > generate_audio → H3，否则 LTX。"""
+    """路由：VIDEO_BACKEND 强制 > happyhorse/minimax-h3 模型名 > 时长>15s > generate_audio → H3，否则 LTX。"""
     if VIDEO_BACKEND_FORCE in ("h3", "ltx"):
         return VIDEO_BACKEND_FORCE
     model = str(body.get("model") or "").lower()
     duration = float(body.get("duration") or 5)
     generate_audio = bool(body.get("generate_audio"))
-    if "happyhorse" in model or duration > 15 or generate_audio:
+    if "happyhorse" in model or "minimax-h3" in model or duration > 15 or generate_audio:
         return "h3"
     return "ltx"
 
@@ -785,6 +874,9 @@ async def video_generations(request: Request) -> Response:
                     seed=random.randint(0, 2**32 - 1), filename_prefix=f"dc_video_{task_id[-8:]}",
                     first_image_name=first_name, last_image_name=last_name,
                 )
+                missing = await _preflight_workflow(client, H3_BASE_URL, workflow)
+                if missing:
+                    return _error_response(f"H3 生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
                 task["prompt_id"] = await _submit_comfyui(client, H3_BASE_URL, workflow)
             else:
                 node_err = await _verify_ltx_nodes(client)
@@ -802,6 +894,9 @@ async def video_generations(request: Request) -> Response:
                     seed=random.randint(0, 2**32 - 1), filename_prefix=f"dc_video_{task_id[-8:]}",
                     first_image_name=first_name, last_image_name=last_name,
                 )
+                missing = await _preflight_workflow(client, LTX_BASE_URL, workflow)
+                if missing:
+                    return _error_response(f"LTX 生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
                 task["prompt_id"] = await _submit_comfyui(client, LTX_BASE_URL, workflow)
         task["status"] = "queued"
     except Exception as e:  # noqa: BLE001

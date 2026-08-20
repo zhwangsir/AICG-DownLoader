@@ -58,6 +58,11 @@ def refresh_model_gateway_runtime() -> dict[str, Any]:
         raise RuntimeError("model gateway runtime refresh is only available in CE")
 
     from novelvideo import config as app_config
+    from novelvideo.model_gateway_settings import (
+        invalidate_gateway_registered_models_cache,
+    )
+
+    invalidate_gateway_registered_models_cache()
 
     gateway = get_effective_newapi_config(
         official_base_url=app_config.OFFICIAL_NEWAPI_BASE_URL,

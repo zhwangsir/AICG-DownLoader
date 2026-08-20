@@ -8,7 +8,6 @@ import os
 import threading
 import time
 from collections import Counter
-from contextlib import suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -279,18 +278,6 @@ def create_app() -> FastAPI:
                 except Exception:
                     logger.exception("WAL migration sweep failed (non-fatal)")
 
-            from novelvideo.official_media_catalog_remote import (
-                run_official_media_catalog_updater,
-            )
-            from novelvideo.shared.runtime_env import is_ce_effective
-
-            if is_ce_effective():
-                application.state.official_media_catalog_updater = (
-                    asyncio.create_task(
-                        run_official_media_catalog_updater(),
-                        name="official-media-catalog-updater",
-                    )
-                )
         except Exception:
             logger.exception("API startup failed while connecting to control-plane")
             raise
@@ -298,12 +285,6 @@ def create_app() -> FastAPI:
     @application.on_event("shutdown")
     async def shutdown() -> None:
         from novelvideo.ports.registry import PortNotRegistered, get_port
-
-        updater = getattr(application.state, "official_media_catalog_updater", None)
-        if updater is not None:
-            updater.cancel()
-            with suppress(asyncio.CancelledError):
-                await updater
 
         try:
             lifecycle = get_port("lifecycle")

@@ -15,6 +15,7 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  Package,
   Pencil,
   Plus,
   RotateCw,
@@ -41,6 +42,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ModelLibrarySection } from "@/components/settings/model-library-section";
+import { WorkflowRefsPanel } from "@/components/settings/workflow-refs-panel";
+import { useDownloadRequestStore } from "@/stores/downloadRequestStore";
 import { safeLocalStorageSet } from "@/lib/localStorageQuota";
 import { cn } from "@/lib/utils";
 import {
@@ -52,8 +56,6 @@ import {
 import {
   useModelGatewayConfig,
   useOfficialMediaCatalogStatus,
-  useSaveOfficialMediaCatalogPreferences,
-  useCheckOfficialMediaCatalog,
   useNewApiChannelTypes,
   useEnableOfficial,
   useEnableCustom,
@@ -107,7 +109,11 @@ const COMFY_WORKFLOW_MANAGED_CONFIG_KEY = "_dcManagedByWorkflow";
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { t } = useTranslation();
-  const [page, setPage] = useState<"models" | "storage">("models");
+  const [page, setPage] = useState<"models" | "storage" | "library">("models");
+  const pendingDownload = useDownloadRequestStore((s) => s.pending);
+  useEffect(() => {
+    if (open && pendingDownload) setPage("library");
+  }, [open, pendingDownload]);
   const statusQuery = useModelGatewayConfig(open);
   const settingsStatus = statusQuery.data?.data;
   const modelConfigured = Boolean(settingsStatus?.effective.configured);
@@ -190,9 +196,29 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </span>
               {pageStatus(mediaStorageConfigured, t("settings.pages.storage"))}
             </button>
+            <button
+              type="button"
+              aria-current={page === "library" ? "page" : undefined}
+              onClick={() => setPage("library")}
+              className={cn(
+                "relative flex h-10 items-center justify-center gap-2 rounded-md px-2 text-sm font-medium transition-colors sm:justify-start sm:px-3",
+                page === "library"
+                  ? "bg-white/[0.09] text-foreground"
+                  : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground",
+              )}
+            >
+              <Package className="size-4" aria-hidden />
+              <span className="hidden sm:inline">
+                {t("settings.pages.library")}
+              </span>
+            </button>
           </nav>
 
-          {page === "models" ? (
+          {page === "library" ? (
+            <div className="min-w-0 flex-1">
+              <ModelLibrarySection />
+            </div>
+          ) : page === "models" ? (
             <div className="min-w-0 flex-1">
               <ScrollArea className="h-full [&_[data-slot=scroll-area-scrollbar]]:!w-1 [&_[data-slot=scroll-area-scrollbar]]:!border-l-0 [&_[data-slot=scroll-area-scrollbar]]:!p-0">
                 <ModelConfigSection open={open && page === "models"} />
@@ -566,83 +592,12 @@ function OfficialGatewayPanel({
   const enableHybrid = useEnableHybrid();
   const saveOfficial = useSaveOfficialConfig();
   const mediaCatalogQuery = useOfficialMediaCatalogStatus();
-  const saveMediaCatalogPreferences = useSaveOfficialMediaCatalogPreferences();
-  const checkMediaCatalog = useCheckOfficialMediaCatalog();
-  const automaticCatalogCheckStarted = useRef(false);
 
   const [apiKey, setApiKey] = useState("");
   const [revealKey, setRevealKey] = useState(false);
   const apiKeyInputRef = useRef<HTMLInputElement>(null);
   const savedApiKeyPreview = official?.configured ? official.apiKeyPreview : "";
   const mediaCatalog = mediaCatalogQuery.data?.data;
-
-  const runMediaCatalogCheck = async (manual: boolean) => {
-    try {
-      const response = await checkMediaCatalog.mutateAsync();
-      if (!response.ok) {
-        if (manual) {
-          toast.error(
-            getResponseErrorMessage(
-              response,
-              t("settings.modelConfig.official.mediaCatalogCheckFailed"),
-            ),
-          );
-        }
-        return;
-      }
-      if (manual) {
-        toast.success(
-          t(
-            response.data.updated
-              ? "settings.modelConfig.official.mediaCatalogUpdated"
-              : "settings.modelConfig.official.mediaCatalogUpToDate",
-          ),
-        );
-      }
-    } catch (error) {
-      if (manual) {
-        toast.error(
-          await getRequestErrorMessage(
-            error,
-            t("settings.modelConfig.official.mediaCatalogCheckFailed"),
-          ),
-        );
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (
-      automaticCatalogCheckStarted.current ||
-      !mediaCatalog?.autoUpdate ||
-      checkMediaCatalog.isPending
-    )
-      return;
-    automaticCatalogCheckStarted.current = true;
-    void runMediaCatalogCheck(false);
-  }, [mediaCatalog?.autoUpdate, checkMediaCatalog.isPending]);
-
-  const handleMediaCatalogAutoUpdate = async () => {
-    const next = !mediaCatalog?.autoUpdate;
-    try {
-      const response = await saveMediaCatalogPreferences.mutateAsync(next);
-      if (!response.ok) {
-        toast.error(
-          getResponseErrorMessage(
-            response,
-            t("settings.modelConfig.requestFailed"),
-          ),
-        );
-      }
-    } catch (error) {
-      toast.error(
-        await getRequestErrorMessage(
-          error,
-          t("settings.modelConfig.requestFailed"),
-        ),
-      );
-    }
-  };
 
   const handleSave = async () => {
     // Password managers may update the DOM without firing React's onChange.
@@ -726,74 +681,20 @@ function OfficialGatewayPanel({
       </p>
 
       <div className="rounded-md border border-border/70 px-3 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground">
-              {t("settings.modelConfig.official.mediaCatalogTitle")}
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {mediaCatalog
-                ? t("settings.modelConfig.official.mediaCatalogStatus", {
-                    version: mediaCatalog.catalogVersion,
-                    count: mediaCatalog.modelCount,
-                    source: t(
-                      `settings.modelConfig.official.mediaCatalogSources.${mediaCatalog.source}`,
-                    ),
-                  })
-                : t("settings.modelConfig.loading")}
-            </p>
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => void runMediaCatalogCheck(true)}
-            disabled={
-              mediaCatalogQuery.isLoading || checkMediaCatalog.isPending
-            }
-          >
-            <RotateCw
-              className={cn(
-                "size-3.5",
-                checkMediaCatalog.isPending && "animate-spin",
-              )}
-            />
-            {t("settings.modelConfig.official.mediaCatalogCheckNow")}
-          </Button>
-        </div>
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-          <div>
-            <Label className="text-xs font-normal text-foreground">
-              {t("settings.modelConfig.official.mediaCatalogAutoUpdate")}
-            </Label>
-            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-              {t("settings.modelConfig.official.mediaCatalogAutoUpdateHint")}
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={mediaCatalog?.autoUpdate ?? false}
-            aria-label={t(
-              "settings.modelConfig.official.mediaCatalogAutoUpdate",
-            )}
-            disabled={!mediaCatalog || saveMediaCatalogPreferences.isPending}
-            onClick={() => void handleMediaCatalogAutoUpdate()}
-            className={cn(
-              "relative h-5 w-9 shrink-0 rounded-full border transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-              mediaCatalog?.autoUpdate
-                ? "border-primary bg-primary"
-                : "border-input bg-muted",
-            )}
-          >
-            <span
-              className={cn(
-                "absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
-                mediaCatalog?.autoUpdate ? "translate-x-4" : "translate-x-0",
-              )}
-            />
-          </button>
-        </div>
+        <p className="text-xs font-medium text-foreground">
+          {t("settings.modelConfig.official.mediaCatalogTitle")}
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {mediaCatalog
+            ? t("settings.modelConfig.official.mediaCatalogStatus", {
+                version: mediaCatalog.catalogVersion,
+                count: mediaCatalog.modelCount,
+                source: t(
+                  `settings.modelConfig.official.mediaCatalogSources.${mediaCatalog.source}`,
+                ),
+              })
+            : t("settings.modelConfig.loading")}
+        </p>
       </div>
 
       <div className="space-y-2.5">
@@ -5017,6 +4918,16 @@ function ComfyUIWorkflowsEditor({
                   "mt-1 resize-none font-mono text-xs transition-[height] duration-200",
                   isExpanded ? "h-[60vh] min-h-80" : "h-44",
                 )}
+              />
+              <WorkflowRefsPanel
+                draftText={text}
+                onRewrite={(nextText) => {
+                  setDrafts((current) => ({
+                    ...current,
+                    [workflowId]: nextText,
+                  }));
+                  commitWorkflow(workflowId, nextText);
+                }}
               />
             </div>
           );

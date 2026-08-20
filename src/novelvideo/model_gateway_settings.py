@@ -11,8 +11,6 @@ import hashlib
 import json
 import os
 import sqlite3
-import tempfile
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +24,6 @@ from novelvideo.official_defaults import (
     OFFICIAL_NEWAPI_BASE_URL,
 )
 from novelvideo.official_media_catalog_schema import (
-    catalog_version as _catalog_version,
     validate_official_media_catalog as _validate_official_media_catalog,
 )
 from novelvideo.shared.runtime_env import is_ce_effective
@@ -42,15 +39,6 @@ PLACEHOLDER_API_KEYS = {
     "your_api_key",
     "your_dc_key",
 }
-OFFICIAL_MEDIA_CATALOG_AUTO_UPDATE_KEY = "official_media_catalog_auto_update"
-OFFICIAL_MEDIA_CATALOG_LAST_CHECKED_KEY = "official_media_catalog_last_checked_at"
-OFFICIAL_MEDIA_CATALOG_REMOTE_URL_KEY = "official_media_catalog_remote_url"
-OFFICIAL_MEDIA_CATALOG_ETAG_KEY = "official_media_catalog_etag"
-OFFICIAL_MEDIA_CATALOG_REVISION_KEY = "official_media_catalog_revision"
-OFFICIAL_MEDIA_CATALOG_PUBLISHED_AT_KEY = "official_media_catalog_published_at"
-OFFICIAL_MEDIA_CATALOG_SHA256_KEY = "official_media_catalog_sha256"
-OFFICIAL_MEDIA_CATALOG_LAST_ERROR_KEY = "official_media_catalog_last_error"
-_OFFICIAL_MEDIA_CATALOG_WRITE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -567,12 +555,6 @@ def _official_media_catalog_bundle_path() -> Path:
     return Path(__file__).with_name("official_media_models.json")
 
 
-def _official_media_catalog_cache_path() -> Path:
-    from novelvideo import config
-
-    return Path(config.STATE_DIR) / "local" / "official_media_models.json"
-
-
 def _read_official_media_catalog(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -586,14 +568,6 @@ def _read_official_media_catalog(path: Path) -> dict[str, Any]:
 
 def _effective_official_media_catalog() -> tuple[dict[str, Any], str]:
     bundled = _read_official_media_catalog(_official_media_catalog_bundle_path())
-    cache_path = _official_media_catalog_cache_path()
-    if cache_path.is_file():
-        try:
-            cached = _read_official_media_catalog(cache_path)
-            if _catalog_version(cached) >= _catalog_version(bundled):
-                return cached, "remote"
-        except RuntimeError:
-            pass
     return bundled, "bundled"
 
 
@@ -605,127 +579,23 @@ def _official_media_catalog_digest(payload: dict[str, Any]) -> str:
 
 
 def get_official_media_catalog_update_status() -> dict[str, Any]:
-    settings = _read_all()
     payload, source = _effective_official_media_catalog()
     digest = _official_media_catalog_digest(payload)
-    metadata_matches = settings.get(OFFICIAL_MEDIA_CATALOG_SHA256_KEY) == digest
     return {
-        "autoUpdate": settings.get(OFFICIAL_MEDIA_CATALOG_AUTO_UPDATE_KEY, "0")
-        != "0",
+        "autoUpdate": False,
         "source": source,
         "schemaVersion": int(payload.get("version") or 1),
         "catalogVersion": str(
             payload.get("catalogVersion") or payload.get("version") or "1"
         ),
         "modelCount": len(payload["mediaModels"]),
-        "lastCheckedAt": settings.get(OFFICIAL_MEDIA_CATALOG_LAST_CHECKED_KEY, ""),
+        "lastCheckedAt": "",
         "sha256": digest,
-        "revision": (
-            settings.get(OFFICIAL_MEDIA_CATALOG_REVISION_KEY, "")
-            if metadata_matches
-            else ""
-        ),
-        "publishedAt": (
-            settings.get(OFFICIAL_MEDIA_CATALOG_PUBLISHED_AT_KEY, "")
-            if metadata_matches
-            else ""
-        ),
-        "remoteUrl": settings.get(OFFICIAL_MEDIA_CATALOG_REMOTE_URL_KEY, ""),
-        "lastError": settings.get(OFFICIAL_MEDIA_CATALOG_LAST_ERROR_KEY, ""),
+        "revision": str(payload.get("revision") or ""),
+        "publishedAt": str(payload.get("publishedAt") or ""),
+        "remoteUrl": "",
+        "lastError": "",
     }
-
-
-def save_official_media_catalog_auto_update(enabled: bool) -> dict[str, Any]:
-    _write_many({OFFICIAL_MEDIA_CATALOG_AUTO_UPDATE_KEY: "1" if enabled else "0"})
-    return get_official_media_catalog_update_status()
-
-
-def get_official_media_catalog_remote_etag(source_url: str) -> str:
-    settings = _read_all()
-    if settings.get(OFFICIAL_MEDIA_CATALOG_REMOTE_URL_KEY) != str(source_url).strip():
-        return ""
-    payload, _source = _effective_official_media_catalog()
-    if settings.get(OFFICIAL_MEDIA_CATALOG_SHA256_KEY) != _official_media_catalog_digest(
-        payload
-    ):
-        return ""
-    return settings.get(OFFICIAL_MEDIA_CATALOG_ETAG_KEY, "")
-
-
-def record_official_media_catalog_check(
-    *, source_url: str, etag: str = "", error: str = ""
-) -> dict[str, Any]:
-    values = {
-        OFFICIAL_MEDIA_CATALOG_LAST_CHECKED_KEY: _now_iso(),
-        OFFICIAL_MEDIA_CATALOG_REMOTE_URL_KEY: str(source_url or "").strip(),
-        OFFICIAL_MEDIA_CATALOG_LAST_ERROR_KEY: str(error or "").strip()[:500],
-        OFFICIAL_MEDIA_CATALOG_ETAG_KEY: str(etag or "").strip(),
-    }
-    _write_many(values)
-    return get_official_media_catalog_update_status()
-
-
-def install_official_media_catalog(
-    payload: dict[str, Any],
-    *,
-    source_url: str,
-    expected_sha256: str = "",
-    revision: str = "",
-    published_at: str = "",
-    etag: str = "",
-) -> tuple[bool, dict[str, Any]]:
-    validated = _validate_official_media_catalog(payload)
-    candidate_digest = _official_media_catalog_digest(validated)
-    normalized_expected_digest = str(expected_sha256 or "").strip().lower()
-    if normalized_expected_digest and candidate_digest != normalized_expected_digest:
-        raise ValueError("official media catalog SHA256 does not match manifest")
-    with _OFFICIAL_MEDIA_CATALOG_WRITE_LOCK:
-        current, _source = _effective_official_media_catalog()
-        candidate_version = _catalog_version(validated)
-        current_version = _catalog_version(current)
-        current_digest = _official_media_catalog_digest(current)
-        if candidate_version < current_version:
-            raise ValueError("official media catalog downgrade is not allowed")
-        if candidate_version == current_version and candidate_digest != current_digest:
-            raise ValueError(
-                "official media catalog version already exists with different content"
-            )
-        updated = candidate_digest != current_digest
-        if updated:
-            cache_path = _official_media_catalog_cache_path()
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path: Path | None = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    encoding="utf-8",
-                    dir=cache_path.parent,
-                    prefix=f".{cache_path.name}.",
-                    suffix=".tmp",
-                    delete=False,
-                ) as temporary:
-                    temporary.write(
-                        json.dumps(validated, ensure_ascii=False, indent=2) + "\n"
-                    )
-                    temporary.flush()
-                    os.fsync(temporary.fileno())
-                    temporary_path = Path(temporary.name)
-                temporary_path.replace(cache_path)
-            finally:
-                if temporary_path is not None:
-                    temporary_path.unlink(missing_ok=True)
-    _write_many(
-        {
-            OFFICIAL_MEDIA_CATALOG_LAST_CHECKED_KEY: _now_iso(),
-            OFFICIAL_MEDIA_CATALOG_REMOTE_URL_KEY: str(source_url or "").strip(),
-            OFFICIAL_MEDIA_CATALOG_ETAG_KEY: str(etag or "").strip(),
-            OFFICIAL_MEDIA_CATALOG_REVISION_KEY: str(revision or "").strip(),
-            OFFICIAL_MEDIA_CATALOG_PUBLISHED_AT_KEY: str(published_at or "").strip(),
-            OFFICIAL_MEDIA_CATALOG_SHA256_KEY: candidate_digest,
-            OFFICIAL_MEDIA_CATALOG_LAST_ERROR_KEY: "",
-        }
-    )
-    return updated, get_official_media_catalog_update_status()
 
 
 def get_official_media_model_mappings() -> dict[str, dict[str, Any]]:
@@ -970,6 +840,82 @@ def get_ce_newapi_config_for_mode(mode: str) -> EffectiveNewApiConfig:
         base_url=normalize_relay_base_url(OFFICIAL_NEWAPI_BASE_URL),
         api_key=db_official_api_key,
     )
+
+
+# ---------------------------------------------------------------------------
+# 生效网关 /models 注册清单（CE custom 模式专用，用于目录/下拉名实对齐）
+# ---------------------------------------------------------------------------
+
+_GATEWAY_MODELS_CACHE_TTL_SECONDS = 60.0
+_gateway_models_cache: tuple[float, str, set[str] | None] | None = None
+
+
+async def get_gateway_registered_models(*, force_refresh: bool = False) -> set[str] | None:
+    """查询 CE custom 生效网关 ``GET {base_url}/models`` 注册的模型名集合。
+
+    返回 ``None`` 表示未知（非 custom 模式 / 未配置 base_url / 网关不可达），
+    调用方必须 fail-open（不过滤），避免网关宕机时把目录清空。
+    结果按 (base_url, 60s TTL) 缓存；网关不可达同样缓存，防止每次请求都 hang 5s。
+    """
+    global _gateway_models_cache
+    config = get_effective_newapi_config()
+    if config.mode != MODE_CUSTOM or not config.base_url:
+        return None
+    import time
+
+    now = time.monotonic()
+    if not force_refresh and _gateway_models_cache is not None:
+        cached_at, cached_base, cached_models = _gateway_models_cache
+        if cached_base == config.base_url and now - cached_at < _GATEWAY_MODELS_CACHE_TTL_SECONDS:
+            return cached_models
+
+    models: set[str] | None = None
+    try:
+        import httpx
+
+        headers = (
+            {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
+        )
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{config.base_url}/models", headers=headers)
+        if resp.status_code == 200:
+            payload = resp.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if isinstance(data, list):
+                models = {
+                    str(item["id"])
+                    for item in data
+                    if isinstance(item, dict) and item.get("id")
+                }
+    except Exception:  # noqa: BLE001 - fail-open：网关不可达视为未知
+        models = None
+    _gateway_models_cache = (now, config.base_url, models)
+    return models
+
+
+def invalidate_gateway_registered_models_cache() -> None:
+    """网关配置变更后调用，丢弃注册清单缓存。"""
+    global _gateway_models_cache
+    _gateway_models_cache = None
+
+
+def gateway_model_registered(
+    names: list[str] | tuple[str, ...],
+    registered: set[str],
+    *,
+    strip_newapi_prefix: bool = True,
+) -> bool:
+    """候选名（catalogId/gatewayModel/aliases…）任一命中注册清单即视为在位。"""
+    for raw in names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        candidates = [name]
+        if strip_newapi_prefix and name.startswith("newapi_"):
+            candidates.append(name[len("newapi_"):])
+        if any(candidate in registered for candidate in candidates):
+            return True
+    return False
 
 
 def _int_setting(value: str | None, default: int) -> int:
@@ -1310,6 +1256,9 @@ def build_media_relay_status(
         and effective.cloudinary_api_key
         and effective.cloudinary_api_secret
     )
+    # local_http 本机 relay 零配置可用：默认落盘目录 + 默认公共前缀，
+    # 无需 OSS/Cloudinary 凭据（见 storage/media_relay.LocalHTTPRelay）。
+    local_http_configured = effective.provider == "local_http"
     return {
         "source": effective.source,
         "provider": effective.provider,
@@ -1323,7 +1272,9 @@ def build_media_relay_status(
         "cloudinaryApiSecretPreview": mask_secret(effective.cloudinary_api_secret),
         "apiFolder": effective.cloudinary_folder,
         "configured": (
-            cloudinary_configured
+            local_http_configured
+            if effective.provider == "local_http"
+            else cloudinary_configured
             if effective.provider == "cloudinary"
             else aliyun_configured
         ),

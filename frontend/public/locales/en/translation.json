@@ -17,23 +17,16 @@
       "title": "Page failed to load",
       "description": "Refresh the page and try again."
     },
-    "versionUpdate": {
-      "title": "New features are live",
-      "confirm": "Got it",
-      "empty": "No release notes for this version"
-    },
     "logoHomeTooltip": "Click to return to project management center"
   },
   "loginCinematic": {
     "moreInfo": "More information"
   },
   "header": {
-    "partyFounding105": "庆祝建党105周年",
     "settings": "Settings",
     "settingsWithWarning": "Settings, missing configuration",
     "settingsWarningBubble": "Missing setup",
     "dismissSettingsWarningBubble": "Dismiss missing setup reminder",
-    "notifications": "Notifications",
     "account": {
       "open": "Open account menu",
       "changeAvatar": "Change avatar",
@@ -51,17 +44,6 @@
         "saving": "Saving…",
         "error": "Avatar upload failed, please try again"
       }
-    }
-  },
-  "notifications": {
-    "title": "Notification Center",
-    "close": "Close notification center",
-    "empty": "No notifications",
-    "upgrade": {
-      "title": "New version {{version}} available",
-      "body": "A newer upstream release is available. Open the release page to review and upgrade.",
-      "open": "Update",
-      "skip": "Skip this version"
     }
   },
   "myBuddy": {
@@ -113,7 +95,6 @@
       "chestTrigger": "Trigger chest",
       "chestSingle": "Single chest",
       "chestBatch": "Batch chest",
-      "triggerUpdateDialog": "Trigger update dialog",
       "states": {
         "running": "Running bubble",
         "success": "Success bubble",
@@ -4029,7 +4010,78 @@
     "secretSavedPlaceholder": "Saved · {{preview}} (enter a new value to replace)",
     "pages": {
       "models": "Models & Channels",
-      "storage": "Media Storage"
+      "storage": "Media Storage",
+      "library": "Model Library"
+    },
+    "library": {
+      "loading": "Loading…",
+      "tabs": {
+        "nas": "Local Models",
+        "download": "Download"
+      },
+      "nas": {
+        "searchPlaceholder": "Search model name / path…",
+        "refresh": "Rescan",
+        "typeFilter": "Type filter",
+        "allTypes": "All",
+        "empty": "No models found. Check NAS mount and model roots.",
+        "loadFailed": "Failed to load model library. Check backend service.",
+        "total": "{{count}} models",
+        "toggleMark": "Toggle NSFW mark",
+        "markNsfw": "Mark as NSFW",
+        "markSfw": "Mark as all-ages (overrides keyword)",
+        "clearMark": "Clear manual mark (fall back to keyword)"
+      },
+      "download": {
+        "searchPlaceholder": "Search Civitai models…",
+        "search": "Search",
+        "searchFailed": "Search failed. Please retry later.",
+        "noResults": "No results",
+        "version": "Version file",
+        "targetDir": "Target directory",
+        "start": "Download",
+        "startFailed": "Failed to start download",
+        "tasks": "Download Tasks",
+        "noTasks": "No download tasks",
+        "cancel": "Cancel download",
+        "status": {
+          "pending": "Queued",
+          "running": "Downloading",
+          "done": "Done",
+          "error": "Failed",
+          "canceled": "Canceled"
+        }
+      },
+      "nsfw": {
+        "button": "NSFW content (R18)",
+        "locked": "Hidden",
+        "unlocked": "R18",
+        "title": "NSFW Content (R18)",
+        "r18Warning": "The following content is R18 adult material intended for users aged 18 and above. Once confirmed, the local model library and Civitai downloads will show NSFW entries.",
+        "r18Enabled": "R18 adult content is currently visible. You can hide it anytime; NSFW entries will then be filtered from the library and downloads.",
+        "confirmR18": "I am 18 or older, show R18 content",
+        "hideR18": "Hide R18 content",
+        "failed": "Operation failed. Please retry."
+      },
+      "picker": {
+        "button": "Select model file",
+        "empty": "(none)",
+        "searchPlaceholder": "Search filename…",
+        "noCandidates": "No models of this type in library",
+        "notInLibrary": "Current filename is not in the library"
+      },
+      "refs": {
+        "title": "Model references ({{count}})",
+        "node": "Node {{id}}",
+        "preflight": "Preflight",
+        "present": "present",
+        "missing": "missing",
+        "invalidJson": "Model reference panel unavailable until the JSON parses.",
+        "noRefs": "This workflow references no model files (no loader nodes).",
+        "preflightOk": "Preflight passed: all {{total}} model references present.",
+        "preflightMissing": "Preflight: {{present}}/{{total}} present, missing: {{names}}",
+        "goToDownload": "Download"
+      }
     },
     "modelConfig": {
       "title": "Model Config",
@@ -4073,13 +4125,7 @@
         "mediaCatalogSources": {
           "bundled": "Bundled",
           "remote": "Online update"
-        },
-        "mediaCatalogAutoUpdate": "Automatically update official models",
-        "mediaCatalogAutoUpdateHint": "Check periodically in the background and apply compatible updates immediately when Settings opens.",
-        "mediaCatalogCheckNow": "Check for updates",
-        "mediaCatalogUpdated": "The official media model catalog was updated.",
-        "mediaCatalogUpToDate": "The official media model catalog is up to date.",
-        "mediaCatalogCheckFailed": "Could not check the official media model catalog. Try again later."
+        }
       },
       "custom": {
         "description": "CE uses a local SQLite-backed NewAPI. DashBox connects the database, creates a runtime token, and enables the local channel automatically.",

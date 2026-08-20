@@ -1,41 +1,24 @@
 # Security Policy
 
-Thanks for helping keep DashBox and its users safe.
-
-## Supported versions
-
-| Branch / release | Status |
-|------------------|--------|
-| `main`           | Actively maintained &mdash; fixes land here first |
-| Latest tagged release | Patched as needed |
-| Older releases   | No guaranteed fixes &mdash; please upgrade |
+DashBox is a local-final fork based on DramaClaw CE (Elastic License 2.0). It has
+no upstream update channel and no upstream security process — **all security
+issues are handled locally**.
 
 ## Reporting a problem
 
-**Please do not open a public issue for security reports.** Public disclosure
-before a fix ships puts every self-hosted deployment at risk.
+Please do not disclose security issues publicly. Handle them locally with the
+repository owner/operators:
 
-Use either of the following private channels:
+- Fix in place, then verify with `uv run pytest tests/ -q`.
+- If the issue originates in the upstream DramaClaw CE codebase, note the
+  upstream provenance in the fix commit message for attribution tracking.
 
-- **Email:** `security@dramaclaw.ai`
-- **GitHub Security Advisory:** open a private advisory via
-  <https://github.com/dramaclaw/dramaclaw/security/advisories/new> &mdash; this
-  keeps the discussion scoped to project maintainers until a fix is ready.
-
-When reporting, please include:
+When triaging, please record:
 
 - The version or commit affected
 - A clear description of the issue and the impact you observed
 - Steps to reproduce (proof-of-concept snippets are welcome)
-- Any mitigations you've already found
-
-## What happens next
-
-- We aim to acknowledge new reports within **72 hours**.
-- We will agree a disclosure timeline with you &mdash; typically 30-90 days
-  between first contact and public advisory, depending on severity.
-- Once a fix ships, we publish a GitHub Security Advisory and credit the
-  reporter unless anonymity is preferred.
+- Any mitigations already applied
 
 ## Out of scope
 
@@ -43,9 +26,5 @@ The following are unlikely to be treated as security reports:
 
 - Issues that require physical access to the host
 - Self-inflicted resource exhaustion on a user's own self-hosted deployment
-- Findings in third-party model providers &mdash; please report those to the
+- Findings in third-party model providers — please report those to the
   provider directly
-- Content-moderation concerns &mdash; please use
-  [Discussions](https://github.com/dramaclaw/dramaclaw/discussions) instead
-
-Responsible reports make the project stronger. Thank you.

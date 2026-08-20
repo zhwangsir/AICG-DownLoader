@@ -1,10 +1,10 @@
-# gitleaks 配置 — dramaclaw-ce
+# gitleaks 配置 — dashbox
 # 默认规则 + 一条自定义规则：覆盖环境/配置文件中被赋真实值的凭据键
 #   （NEWAPI_API_KEY / *_PASSWORD / *_TOKEN / *_SECRET / *_API_KEY）。
 #   .py / 测试 / 文档 / .env.example 中的变量名引用与占位符默认放行。
-# 本地 pre-commit 钩子与 CI secret-scan 共用本配置。
+# 本地 pre-commit 钩子共用本配置。
 
-title = "dramaclaw-ce"
+title = "dashbox"
 
 [extend]
 useDefault = true

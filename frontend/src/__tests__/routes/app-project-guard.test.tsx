@@ -67,7 +67,6 @@ vi.mock("@/components/task-center/status-bar", () => ({ TaskStatusBar: () => nul
 vi.mock("@/components/task-center/panel", () => ({ TaskPanel: () => null }));
 vi.mock("@/features/companion/MyBuddyCompanion", () => ({ MyBuddyCompanion: () => null }));
 vi.mock("@/features/rewards/AccessoryUnlockPrompt", () => ({ AccessoryUnlockPrompt: () => null }));
-vi.mock("@/features/version-update/VersionUpdateDialog", () => ({ VersionUpdateDialog: () => null }));
 vi.mock("@/features/piko-mini-game/PikoInspirationStation", () => ({ PikoInspirationStation: () => null }));
 vi.mock("framer-motion", () => ({
   motion: {

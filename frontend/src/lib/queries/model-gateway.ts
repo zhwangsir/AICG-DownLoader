@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright (c) 2026 ClaymoreLab
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
 
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
@@ -303,7 +302,6 @@ const officialMediaCatalogQueryKey = [
   ...queryKeys.modelGateway(),
   "official-media-catalog",
 ] as const;
-const officialMediaCatalogStatusPollMs = 60_000;
 
 function fetchOfficialMediaCatalogStatus(signal?: AbortSignal) {
   return api
@@ -316,73 +314,6 @@ export function useOfficialMediaCatalogStatus(enabled = true) {
     queryKey: officialMediaCatalogQueryKey,
     queryFn: ({ signal }) => fetchOfficialMediaCatalogStatus(signal),
     enabled,
-  });
-}
-
-export function useOfficialMediaCatalogWatcher(enabled = true) {
-  const previousSha256 = useRef<string | null>(null);
-  const query = useQuery({
-    queryKey: officialMediaCatalogQueryKey,
-    queryFn: ({ signal }) => fetchOfficialMediaCatalogStatus(signal),
-    enabled,
-    refetchInterval: (current) =>
-      current.state.data?.data.autoUpdate === false
-        ? false
-        : officialMediaCatalogStatusPollMs,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-  });
-  const sha256 = query.data?.data.sha256.trim() ?? "";
-
-  useEffect(() => {
-    if (!sha256) return;
-    const previous = previousSha256.current;
-    previousSha256.current = sha256;
-    if (previous && previous !== sha256 && typeof window !== "undefined") {
-      window.dispatchEvent(new Event("media-model-catalog-updated"));
-    }
-  }, [sha256]);
-
-  return query;
-}
-
-export function useSaveOfficialMediaCatalogPreferences() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (autoUpdate: boolean) =>
-      api
-        .post("api/v1/model-gateway/official/media-catalog/preferences", {
-          json: { autoUpdate },
-          throwHttpErrors: false,
-        })
-        .json<OkResponse<OfficialMediaCatalogStatus> | ErrorResponse>(),
-    onSuccess: (response) => {
-      if (response.ok) {
-        qc.setQueryData(officialMediaCatalogQueryKey, response);
-      } else {
-        qc.invalidateQueries({ queryKey: officialMediaCatalogQueryKey });
-      }
-    },
-  });
-}
-
-export function useCheckOfficialMediaCatalog() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () =>
-      api
-        .post("api/v1/model-gateway/official/media-catalog/check", {
-          timeout: 20_000,
-          throwHttpErrors: false,
-        })
-        .json<OkResponse<OfficialMediaCatalogStatus> | ErrorResponse>(),
-    onSuccess: (response) => {
-      if (response.ok) {
-        qc.setQueryData(officialMediaCatalogQueryKey, response);
-      } else {
-        qc.invalidateQueries({ queryKey: officialMediaCatalogQueryKey });
-      }
-    },
   });
 }
 

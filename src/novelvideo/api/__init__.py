@@ -54,11 +54,11 @@ from novelvideo.api.routes import (  # noqa: E402
     ingest,
     model_gateway,
     model_credits,
+    model_library,
     pipeline,
     product_surfaces,
     projects,
     props,
-    release_notifications,
     scenes,
     scripts,
     styles,
@@ -115,8 +115,8 @@ api_router.include_router(styles.router, tags=["styles"])
 api_router.include_router(pipeline.router, tags=["pipeline"])
 api_router.include_router(model_gateway.router, tags=["model-gateway"])
 api_router.include_router(model_credits.router, tags=["model-credits"])
+api_router.include_router(model_library.router, tags=["model-library"])
 api_router.include_router(freezone.router)
-api_router.include_router(release_notifications.router, tags=["release-notifications"])
 _verification_routes_registered = False
 
 

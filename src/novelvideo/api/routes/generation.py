@@ -1638,6 +1638,44 @@ def _api_video_backend_options() -> list[VideoBackendOption]:
     return backend_options
 
 
+async def _filter_video_backend_options_by_gateway(
+    options: list[VideoBackendOption],
+) -> list[VideoBackendOption]:
+    """CE custom 模式下按生效网关 /models 注册清单过滤视频后端下拉。
+
+    comfyui provider 的本地映射模型不经网关注册表，始终保留；
+    注册清单未知（非 CE/custom 或网关不可达）时 fail-open 原样返回。
+    """
+    from novelvideo.shared.runtime_env import is_ce_effective
+
+    if not is_ce_effective():
+        return options
+    from novelvideo.model_gateway_settings import (
+        MODE_CUSTOM,
+        get_effective_newapi_config,
+        get_gateway_registered_models,
+        get_newapi_media_model_mappings,
+    )
+    from novelvideo.generators.video_generator import parse_newapi_video_backend
+
+    if get_effective_newapi_config().mode != MODE_CUSTOM:
+        return options
+    registered = await get_gateway_registered_models()
+    if registered is None:
+        return options
+    comfyui_models = {
+        model
+        for model, mapping in get_newapi_media_model_mappings().items()
+        if mapping.get("provider") == "comfyui"
+    }
+    kept: list[VideoBackendOption] = []
+    for option in options:
+        model = parse_newapi_video_backend(option.value)
+        if model and (model in comfyui_models or model in registered):
+            kept.append(option)
+    return kept
+
+
 @router.get("/projects/{project}/video-backends")
 async def get_video_backend_options(
     project: str,
@@ -1645,7 +1683,8 @@ async def get_video_backend_options(
 ):
     """Return video backend options shared with the NiceGUI render workbench."""
     await _resolve_generation_project(project, user, required_role="viewer")
-    return {"ok": True, "data": [item.model_dump() for item in _api_video_backend_options()]}
+    options = await _filter_video_backend_options_by_gateway(_api_video_backend_options())
+    return {"ok": True, "data": [item.model_dump() for item in options]}
 
 
 @router.get("/projects/{project}/render-settings")

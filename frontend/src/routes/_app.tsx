@@ -28,7 +28,6 @@ import { TaskStatusBar } from "@/components/task-center/status-bar";
 import { TaskPanel } from "@/components/task-center/panel";
 import { MyBuddyCompanion } from "@/features/companion/MyBuddyCompanion";
 import { AccessoryUnlockPrompt } from "@/features/rewards/AccessoryUnlockPrompt";
-import { VersionUpdateDialog } from "@/features/version-update/VersionUpdateDialog";
 import { PikoInspirationStation } from "@/features/piko-mini-game/PikoInspirationStation";
 import { ProductSurfaceUnavailable } from "@/components/product-surface-unavailable";
 import {
@@ -192,7 +191,6 @@ function AppLayout() {
             <Header />
             <MyBuddyCompanion />
             <AccessoryUnlockPrompt />
-            <VersionUpdateDialog />
             <PikoInspirationStation
               open={pikoStationOpen}
               onClose={() => setPikoStationOpen(false)}

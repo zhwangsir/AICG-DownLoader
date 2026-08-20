@@ -61,17 +61,6 @@ def get_lifecycle_port():
     return get_port("lifecycle")
 
 
-def get_release_feed_port():
-    try:
-        return get_port("release_feed")
-    except Exception as exc:
-        if exc.__class__.__name__ != "PortNotRegistered":
-            raise
-        from novelvideo.ports.local.release_feed import NoOpReleaseFeed
-
-        return NoOpReleaseFeed()
-
-
 def get_product_surface_access():
     return get_port("product_surface_access")
 
@@ -87,7 +76,6 @@ __all__ = [
     "get_project_registry",
     "get_provider_instrumentation",
     "get_product_surface_access",
-    "get_release_feed_port",
     "get_task_backend",
     "get_usage_meter",
 ]

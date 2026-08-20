@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -22,7 +21,6 @@ from novelvideo.model_gateway_settings import (
     normalize_api_key,
     parse_comfyui_channel_workflows,
     save_media_relay_config,
-    save_official_media_catalog_auto_update,
     save_official_newapi_key,
     save_custom_newapi_gateway,
     save_newapi_database_config,
@@ -33,9 +31,6 @@ from novelvideo.model_gateway_settings import (
     get_newapi_provider_channel,
     get_newapi_provider_channels,
     set_model_gateway_mode,
-)
-from novelvideo.official_media_catalog_remote import (
-    check_official_media_catalog_update,
 )
 from novelvideo.model_gateway_runtime import refresh_model_gateway_runtime
 from novelvideo.shared.runtime_env import is_ce_effective
@@ -146,10 +141,6 @@ def require_ce_gateway_management() -> None:
 
 class OfficialGatewayBody(BaseModel):
     new_api_api_key: str = Field(alias="newApiApiKey")
-
-
-class OfficialMediaCatalogPreferencesBody(BaseModel):
-    auto_update: bool = Field(alias="autoUpdate")
 
 
 class MediaRelayConfigBody(BaseModel):
@@ -490,30 +481,6 @@ async def get_official_media_catalog_status() -> dict[str, Any]:
     except PermissionError as exc:
         raise _permission_error(exc) from exc
     return {"ok": True, "data": get_official_media_catalog_update_status()}
-
-
-@router.post("/official/media-catalog/preferences")
-async def save_official_media_catalog_preferences(
-    body: OfficialMediaCatalogPreferencesBody,
-) -> dict[str, Any]:
-    try:
-        _require_ce_media_catalog_management()
-        status = save_official_media_catalog_auto_update(body.auto_update)
-    except PermissionError as exc:
-        raise _permission_error(exc) from exc
-    return {"ok": True, "data": status}
-
-
-@router.post("/official/media-catalog/check")
-async def check_official_media_catalog() -> dict[str, Any]:
-    try:
-        _require_ce_media_catalog_management()
-        updated, status = await check_official_media_catalog_update()
-    except PermissionError as exc:
-        raise _permission_error(exc) from exc
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"ok": True, "data": {**status, "updated": updated}}
 
 
 @router.post("/official/enable")
