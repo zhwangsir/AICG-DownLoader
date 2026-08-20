@@ -4,7 +4,7 @@
 > 前置条件：设置 → 模型库 → 完成 R18 确认（NSFW 条目才会显示）
 > 素材来源：Civitai 8 个热门 NSFW 视频作品的生成参数逆向（2026-08-17）
 > 工作流依据：本集群实跑验证过的 ComfyUI 模板（Wan 2.2 I2V / MiniMax H3 fl2va+ref2va）
-> 资源下载：22 项由并行任务执行中（当前 6/22 已入库），全部落地后统一验收
+> 资源下载：**22 项基准全部落地 ✅**（2026-08-17 三端 object_info 核验通过）；另经 civitai.red 调研扩充 **48 件**（Wan 44 / H3 4 + 修复 2），见第六节
 
 ---
 
@@ -179,6 +179,7 @@ H3 不吃 Wan 触发词骨架，用 `integrated_multimodal_description` 长段�
 
 ## 四、DashBox 实操流程
 
+0. **零装配起步（推荐）**：直接用现成预设 [`presets/nsfw/`](../../../presets/nsfw/README.md)——4 个按 8 个作品搭配做好的工作流 JSON（Wan×3 + H3×1），全部真机冒烟出片；粘贴进工作流编辑器改提示词与首帧即用
 1. **开 R18**：设置 → 模型库 → 「我已年满 18 岁」→ NSFW 条目可见（本批 LoRA 已按文件名自动标记；漏标可点行尾盾牌手动标记）
 2. **选渠道**：设置 → 模型配置 → 自定义（local_gateway）
 3. **出首帧**：画布/自由区 ComfyUI 渠道，SDXL NSFW 出图（或 Krea2）
@@ -191,7 +192,7 @@ H3 不吃 Wan 触发词骨架，用 `integrated_multimodal_description` 长段�
 
 ## 五、资源清单与下载状态（22 项）
 
-> ✅=已入库（6） ⏳=下载中（16，含 14 个需 Civitai token 的 401 资源） 验收在全部落地后统一进行
+> ✅=已入库（22/22，2026-08-17 核验：LB 三端 154 loras 一致、H3 :8195 共 25 loras）
 
 | 状态 | 资源 | 文件 | 大小 | 路线/侧 |
 |---|---|---|---|---|
@@ -203,19 +204,111 @@ H3 不吃 Wan 触发词骨架，用 `integrated_multimodal_description` 长段�
 | ✅ | M4CROM4STI4 胸物理 | wan22-m4crom4sti4-i2v-20epoc-high-k3nk | 293MB | A HIGH |
 | ✅ | POV Cumshot & Pullout | WAN-2.2-I2V-POV-Body-Cumshot-Pullout-HIGH-v1 | 585MB | A HIGH |
 | ✅ | DR34ML4Y LOW v2 | DR34ML4Y_I2V_14B_LOW_V2 | 293MB | A LOW（必备） |
-| ⏳ | Slop Twerk | slop_twerk_HighNoise_merged3_7_v2 | 293MB | A HIGH |
-| ⏳ | jfj Deepthroat | jfj-deepthroat-W22-I2V-HN | 220MB | A HIGH |
-| ⏳ | Close-Up Facial Cumshots | CloseUpFacialCum-v10_High | 293MB | A HIGH |
-| ⏳ | chasing blowjob | chasing_blowjob_wan22_v1.0_000001500_high_noise | 293MB | A HIGH |
-| ⏳ | H3 FL2VA INT8 Pruned | minimaxH3INT8INT4_fl2vaINT8Pruned | 20GB | B（同生产 fl2va 权重） |
-| ⏳ | H3 REF2VA INT8 Pruned | minimaxH3INT8INT4_ref2vaINT8Pruned | 20GB | B（ref2va 权重） |
-| ⏳ | H3 Turbo lightx2v v0.1 | minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy(_resized) | 300MB~1.9GB | B 加速 |
-| ⏳ | H3 Turbo larryvrh | minimax_h3_turbo_4step_comfy_pruned 等 7 变体 | 592MB | B 加速 |
-| ⏳ | H3 Innie Pussy | h3_musubi_v4-000040 | 284MB | B 部位 |
-| ⏳ | HMPussy v6 | hmpussy_v6_epoch30 | 597MB | B 部位 |
-| ⏳ | HMNSFW AIO V2 | HMNSFW_AIO_V2 | 296MB | B 底座 |
-| ⏳ | VBVR 推理 LoRA | VBVR_H3_attn_only | 31MB | B 增强 |
-| ⏳ | Krea2 Turbo FP8 | krea2TurboFP8_krea2TURBO | 12.3GB | 首帧 |
-| ⏳ | Krea2 LoRA ×3 | RealisticSnapshotKrea2 / cutifier_krea2 / realism_engine_krea2_v3.1 | 218MB~1.5GB | 首帧 |
+| ✅ | Slop Twerk | slop_twerk_HighNoise_merged3_7_v2 | 293MB | A HIGH |
+| ✅ | jfj Deepthroat | jfj-deepthroat-W22-I2V-HN | 220MB | A HIGH |
+| ✅ | Close-Up Facial Cumshots | CloseUpFacialCum-v10_High | 293MB | A HIGH |
+| ✅ | chasing blowjob | chasing_blowjob_wan22_v1.0_000001500_high_noise | 293MB | A HIGH |
+| ✅ | H3 FL2VA INT8 Pruned | minimaxH3INT8INT4_fl2vaINT8Pruned | 20GB | B（同生产 fl2va 权重） |
+| ✅ | H3 REF2VA INT8 Pruned | minimaxH3INT8INT4_ref2vaINT8Pruned | 20GB | B（ref2va 权重） |
+| ✅ | H3 Turbo lightx2v v0.1 | minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy(_resized) | 300MB~1.9GB | B 加速 |
+| ✅ | H3 Turbo larryvrh | minimax_h3_turbo_4step_comfy_pruned 等 7 变体 | 592MB | B 加速 |
+| ✅ | H3 Innie Pussy | h3_musubi_v4-000040 | 284MB | B 部位 |
+| ✅ | HMPussy v6 | hmpussy_v6_epoch30 | 597MB | B 部位 |
+| ✅ | HMNSFW AIO V2 | HMNSFW_AIO_V2 | 296MB | B 底座 |
+| ✅ | VBVR 推理 LoRA | VBVR_H3_attn_only | 31MB | B 增强 |
+| ✅ | Krea2 Turbo FP8 | krea2TurboFP8_krea2TURBO | 12.3GB | 首帧 |
+| ✅ | Krea2 LoRA ×3 | RealisticSnapshotKrea2 / cutifier_krea2 / realism_engine_krea2_v3.1 | 218MB~1.5GB | 首帧 |
 
 **注意**：Grok Imagine（139329388 用到）为闭源云端模型，无法自托管，已忽略；该作品的 H3 + Turbo 部分已覆盖。Krea2 为 KREA.ai 社区 FP8 优化权重（原 24.76GB BF16 → 12GB FP8），注意遵守 KREA 2 License。
+
+---
+
+## 六、扩充资源矩阵与融合方案（2026-08-17 调研新增）
+
+### 6.1 扩充清单（48 件，全部三端/H3 object_info 核验通过）
+
+**Wan 2.2 侧（44 件，NAS `Windows/.../models/loras`，LB 三端共享）：**
+
+| 主题 | 文件（双噪成对只列一个） | 触发词/备注 |
+|---|---|---|
+| POV 传教士 | `wan2.2_i2v_high/lownoise_pov_missionary_v1.0`（+T2V 双件） | `pov missionary`；I2V/T2V 全套 4 件 |
+| 女上位+反向 | `wan22.r3v3rs3_c0wg1rl-14b-High/Low-i2v_e70`（+T2V 双件 + 5B TI2V 两件） | `c0wg1rl`；6 件 |
+| 手口组合 | `WAN-2.2-I2V-HandjobBlowjobCombo-HIGH/LOW-v1` | 组合动作一件搞定 |
+| F4C3SPL4SH 射精 | `wan22-f4c3spl4sh-100epoc-high / 154epoc-low-k3nk` | K3NK 系，与 m4crom4sti4 同源 |
+| Anal | `wan22_i2v_anal_v1_high/low_noise` | — |
+| POV 女上位 | `WAN-2.2-I2V-POV-Cowgirl-HIGH/LOW-v1.0-fixed`（首选）+ v0.2/v0.1 双噪 | 用 v1.0-fixed |
+| POV 双人 blowjob | `WAN-2.2-I2V-Double-Blowjob-HIGH/LOW-v1` | 双人场景 |
+| DR34MJOB | `wan22-dr34mjob-*`（单/双/手） | DR34ML4Y 同作者，触发词风格一致 |
+| Assertive Cowgirl | `Wan22-I2V-HIGH/LOW-Hip_Slammin_Assertive_Cowgirl` | 强势女上位 |
+| 倒悬 | `reverse_suspended_congress_I2V/T2V_high/low` | I2V/T2V 4 件 |
+| Futanari | `Wan22_I2V_A14B_FutaTF_lora_v1 / v1-2 双噪`（4 件） | 变身题材；H3 版见下 |
+| 胸物理 | `BounceHighWan2_2` / `bounceV03-000084` | 与 m4crom4sti4 可叠加 |
+| 射精增强 | `Wan22_CumV3_High/Low` | CumV3 系列 |
+| 口交增强 | `deepthroat_v02` / `jfj-deepthroat-W22-I2V-HN`（jfj 版 401 受限未取，用 v02 替代） | — |
+| 指交 | `wan_fingering_pussy_i2v2.2hi/lo_v10` | `fingering` |
+| 综合 | `NaughtyTimes_pruned_r128_v2`（1.1GB r128 大 rank） | 多姿势综合 |
+| 其他已落地 | `slop_twerk_HighNoise_merged3_7_v2` / `CloseUpFacialCum-v10_High` / `chasing_blowjob_wan22_v1.0_000001500_high_noise` | — |
+
+**H3 侧（25 件全量，`toiv/comfyui-models/h3/loras`）：**
+
+| 类别 | 文件 |
+|---|---|
+| 底座 | `HMNSFW_AIO_V2`（`hmmotion`） |
+| 部位 | `h3_musubi_v4-000040` / `hmpussy_v6_epoch30` / `minimax_vag_000002500` / `vagassist_e40` |
+| 射精 | `epic_cumshots-MiniMaxH3-ALPHA-CUMSH0T` |
+| 姿势 | `riding_pose_H3_i2v_v1.0` / `stomach_bulge_H3_i2v_v1.0` / `SexGod-NaughtyTimes-lora-MINIMAXH3`（2.5GB 综合） |
+| 口交 | `deepthroat_v1`（H3 版 1.2GB） |
+| 题材 | `MiniMax-H3_Futa_Transformations_LoRA_V5.1` / `PlagueKind-tiddies-realismslider` / `minimax-h3-digicam`（Y2K 裸写实）/ `MiniMax-H3_RemoteOrgasm_v1`（高潮表情） |
+| 动作增强 | `VBVR_H3_attn_only`（推理增强，**非 NSFW 不标**）/ `MiniMax_H3_Combat_LoRA`（SFW 打斗也可用） |
+| 亲密 | `cxy_kiss_lora_h3_v01_step1500` / `H3_footjob_v0_step1000_fixed` |
+| 角色 | `AI_Girl_Fictional_Women_Series30/31_H3`（修复 401 坏文件 + 新增 31） |
+| 加速 | `minimax_h3_turbo_v4_step600_ema(_pruned)_comfyui` / `minimax_h3_turbo_4step_ema_ckpt850_pruned_comfyui` / `minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy` |
+
+**未获取（1 件）**：`MiniMax-H3_penis_coachbate_v1_8350` — Civitai **Early Access 付费墙**（需 Buzz），跳过；部位增强已有 musubi/vag/vagassist 三件覆盖。
+
+### 6.2 跨引擎同主题矩阵（融合核心）
+
+同一题材按「Wan 生态丰富度 vs H3 角色一致性」双轨选路：
+
+| 题材 | Wan 2.2 方案（LoRA 叠加序） | H3 方案 | 首选 |
+|---|---|---|---|
+| 常规动作 | DR34ML4Y(0.8低噪)+NSFW-22(0.8高噪)+姿势 LoRA(0.7~1.0) | HMNSFW_AIO_V2(0.8) | 平手；H3 要音画同出时胜 |
+| 口交 | chasing_blowjob + deepthroat_v02 + DR34MJOB | deepthroat_v1 | Wan（LoRA 选择多 3 倍） |
+| 射精 | CumV3 双噪 + F4C3SPL4SH + POV Pullout + CloseUpFacialCum | epic_cumshots ALPHA | Wan（可高低噪分层精细控制） |
+| 胸物理 | m4crom4sti4 + BounceHigh + bounceV03 | tiddies-realismslider | Wan（三件可叠加调强度） |
+| 部位特写 | hmpussy_v6 | h3_musubi + minimax_vag + vagassist | 平手 |
+| 女上位 | c0wg1rl 系 + POV Cowgirl + Assertive Cowgirl | riding_pose | Wan |
+| Futanari | FutaTF Wan 版（v1-2 新） | Futa V5.1 | 平手 |
+| 角色一致长镜 | （弱，靠首帧） | ref2va ≤9 参考图 + 任意内容 LoRA | **H3 碾压** |
+| 多姿势/综合 | NaughtyTimes r128 | SexGod-NaughtyTimes H3 版 | 平手 |
+| 亲密前戏 | Posing Nude + kissing 类 | cxy_kiss + footjob | 平手 |
+
+### 6.3 融合工作流（双引擎接力）
+
+**① 首尾帧桥接（角色一致 + Wan 生态兼得，推荐）**
+```
+Krea2/SDXL 出角色定妆首帧 → H3 ref2va（≤9 三视图锁角色，出 10-15s 主体镜头）
+  → 取末帧 → Wan I2V（末帧为首帧，挂题材 LoRA 出 5s 高潮/特写镜头）
+  → VHS_VideoCombine 拼接
+```
+要点：H3 出片取最后一帧用 VHS 的 `Get Last Frame` 或直接读 mp4 尾帧 PNG 化；Wan 段用 v1.0-fixed 系 LoRA 防爆。
+
+**② 音画分层（Wan 画面 + H3 音频思路）**
+Wan 2.2 无原生音频——需要音画同出的镜头一律走 H3；Wan 段落后期配 CosyVoice2 配音 + 音效库。
+
+**③ LoRA 叠加公式（防爆显存/崩坏上限）**
+```
+高噪侧: 底座(0.8) + 题材/姿势(0.7~1.0) + 部位(0.5~0.7，可选) + lightx2v 加速(1.0)  ≤4 层
+低噪侧: DR34ML4Y(0.8~1.0) + 题材配对低噪(0.7) + lightx2v low(1.0)                  ≤3 层
+```
+信号：糊/拖影 → 题材 LoRA 降 0.1~0.2；崩坏/多肢 → 部位 LoRA 撤掉；H3 侧内容 LoRA 一律 `LoraLoaderModelOnly` 串在 UNETLoader 后、Turbo 节点前。
+
+**④ 提示词分层模板（Wan 触发词骨架 + H3 自然段）**
+- Wan：`[触发词], [主体+运动动词], [镜头], [画质尾注]`（见 2.4 节）
+- H3：`integrated_multimodal_description` 一段式，ref2va 用 `<Picture 1>` 标签指认角色
+
+### 6.4 运维备忘
+
+- **下载链路**：Civitai 冷门文件 red 镜像 307 → `b2.civitai.com`（Backblaze，国内被墙）——**必须走本机 Clash 代理 `http://127.0.0.1:7897`**（批 6/7/8 实测 8MB/s）；401/Early Access 资源附 `?token=`（token 在团队密码库）
+- **NSFW 标记**：新文件落库后 DashBox 按文件名关键词自动标记（词表已扩至 40+：`cum/futa/naughty/bounce/cowgirl/fingering/orgasm/anal/handjob/boob/penis/vagina/creampie/ahegao/paizuri/tiddies/nipple/dr34mjob` 等）；VBVR 类推理增强 LoRA 不标记属预期；漏标用模型库行尾盾牌手动标记
+- **双库分工**：Wan/SDXL/Krea 权重 → `NAS/Windows/ComfyUI/ComfyUIModel/models`（LB 三端共享）；H3 权重 → `NAS/toiv/comfyui-models/h3`（:8195 实例经 extra_model_paths 挂载）；跨库复用（如 hmpussy_v6 双引擎可用）直接 `cp` 双写

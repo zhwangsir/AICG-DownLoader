@@ -9,6 +9,20 @@ import { GroupNode } from './GroupNode';
 import { ImageEditNode } from './ImageEditNode';
 import { ImageGenNode } from './ImageGenNode';
 import { ImageNode } from './ImageNode';
+import { NSFWFactoryAssetNode } from './NSFWFactoryAssetNode';
+import { NSFWFactoryAudioNode } from './NSFWFactoryAudioNode';
+import { NSFWFactoryComposeNode } from './NSFWFactoryComposeNode';
+import { NSFWFactoryInitNode } from './NSFWFactoryInitNode';
+import { NSFWFactoryQcNode } from './NSFWFactoryQcNode';
+import { NSFWFactoryScriptNode } from './NSFWFactoryScriptNode';
+import { NSFWFactoryShotNode } from './NSFWFactoryShotNode';
+import { NSFWFactoryStoryboardNode } from './NSFWFactoryStoryboardNode';
+import { NSFWImageGenNode } from './NSFWImageGenNode';
+import { NSFWDramaStudioNode } from './NSFWDramaStudioNode';
+import { NSFWScriptNode } from './NSFWScriptNode';
+import { NSFWStoryboardNode } from './NSFWStoryboardNode';
+import { NSFWVideoBatchNode } from './NSFWVideoBatchNode';
+import { NSFWVideoGenNode } from './NSFWVideoGenNode';
 import { Pano360ViewerNode } from './Pano360ViewerNode';
 import { ScriptNode } from './ScriptNode';
 import { SkillNode } from './SkillNode';
@@ -30,6 +44,20 @@ export const nodeTypes: NodeTypes = {
   groupNode: withLodShell('groupNode', GroupNode),
   imageGenNode: withLodShell('imageGenNode', ImageGenNode),
   imageNode: withLodShell('imageNode', ImageEditNode),
+  nsfwImageGenNode: withLodShell('nsfwImageGenNode', NSFWImageGenNode),
+  nsfwVideoGenNode: withLodShell('nsfwVideoGenNode', NSFWVideoGenNode),
+  nsfwScriptNode: withLodShell('nsfwScriptNode', NSFWScriptNode),
+  nsfwStoryboardNode: withLodShell('nsfwStoryboardNode', NSFWStoryboardNode),
+  nsfwVideoBatchNode: withLodShell('nsfwVideoBatchNode', NSFWVideoBatchNode),
+  nsfwDramaStudioNode: withLodShell('nsfwDramaStudioNode', NSFWDramaStudioNode),
+  nsfwFactoryInitNode: withLodShell('nsfwFactoryInitNode', NSFWFactoryInitNode),
+  nsfwFactoryScriptNode: withLodShell('nsfwFactoryScriptNode', NSFWFactoryScriptNode),
+  nsfwFactoryAssetNode: withLodShell('nsfwFactoryAssetNode', NSFWFactoryAssetNode),
+  nsfwFactoryStoryboardNode: withLodShell('nsfwFactoryStoryboardNode', NSFWFactoryStoryboardNode),
+  nsfwFactoryShotNode: withLodShell('nsfwFactoryShotNode', NSFWFactoryShotNode),
+  nsfwFactoryAudioNode: withLodShell('nsfwFactoryAudioNode', NSFWFactoryAudioNode),
+  nsfwFactoryComposeNode: withLodShell('nsfwFactoryComposeNode', NSFWFactoryComposeNode),
+  nsfwFactoryQcNode: withLodShell('nsfwFactoryQcNode', NSFWFactoryQcNode),
   pano360ViewerNode: withLodShell('pano360ViewerNode', Pano360ViewerNode),
   scriptNode: withLodShell('scriptNode', ScriptNode),
   skillNode: withLodShell('skillNode', SkillNode),
@@ -43,4 +71,4 @@ export const nodeTypes: NodeTypes = {
   videoStoryNode: withLodShell('videoStoryNode', VideoStoryNode),
 };
 
-export { AudioNode, BeatContextNode, GroupNode, ImageEditNode, ImageGenNode, ImageNode, Pano360ViewerNode, ScriptNode, SkillNode, StoryboardGenNode, StoryboardNode, TextAnnotationNode, ThreeDWorldNode, UploadNode, VideoComposeNode, VideoNode, VideoStoryNode };
+export { AudioNode, BeatContextNode, GroupNode, ImageEditNode, ImageGenNode, ImageNode, NSFWDramaStudioNode, NSFWFactoryAssetNode, NSFWFactoryAudioNode, NSFWFactoryComposeNode, NSFWFactoryInitNode, NSFWFactoryQcNode, NSFWFactoryScriptNode, NSFWFactoryShotNode, NSFWFactoryStoryboardNode, NSFWImageGenNode, NSFWScriptNode, NSFWStoryboardNode, NSFWVideoBatchNode, NSFWVideoGenNode, Pano360ViewerNode, ScriptNode, SkillNode, StoryboardGenNode, StoryboardNode, TextAnnotationNode, ThreeDWorldNode, UploadNode, VideoComposeNode, VideoNode, VideoStoryNode };

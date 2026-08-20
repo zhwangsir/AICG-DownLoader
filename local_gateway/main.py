@@ -56,9 +56,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://192.168.71.84:8000/v1").rstrip("/")
 EMBEDDING_BASE_URL = os.getenv("LOCAL_EMBEDDING_BASE_URL", "http://192.168.71.127:9302/v1").rstrip("/")
 COMFYUI_LB_URL = os.getenv("LOCAL_COMFYUI_LB_URL", "http://192.168.71.127:8188").rstrip("/")
-COMFYUI_LB_BACKEND_URLS = os.getenv("LOCAL_COMFYUI_LB_BACKEND_URLS", "")
+# LB 三后端直连清单（2026-08-17 固化）：参考图上传必须覆盖全部后端——LB /upload
+# 轮询单实例而 /prompt 加权随机选实例，只传 LB 入口时约 2/3 概率 LoadImage 在
+# 另一后端找不到文件（Invalid image file → 502，画布 R18 节点实测复现）。
+COMFYUI_LB_BACKEND_URLS = os.getenv(
+    "LOCAL_COMFYUI_LB_BACKEND_URLS",
+    "http://192.168.71.127:8189,http://192.168.71.115:8188,http://192.168.71.114:8193",
+)
 H3_BASE_URL = os.getenv("LOCAL_H3_BASE_URL", "http://192.168.71.127:8195").rstrip("/")
 LTX_BASE_URL = os.getenv("LOCAL_LTX_BASE_URL", "http://192.168.71.127:8198").rstrip("/")
+# Krea2 专用实例（workstation GPU0 ComfyUI :8189 直连，不经 LB——TE 只在本地）
+KREA2_BASE_URL = os.getenv("LOCAL_KREA2_BASE_URL", "http://192.168.71.127:8189").rstrip("/")
 TTS_BASE_URL = os.getenv("LOCAL_TTS_BASE_URL", "http://192.168.71.127:9200").rstrip("/")
 VIDEO_BACKEND_FORCE = os.getenv("VIDEO_BACKEND", "").strip().lower()  # "h3" / "ltx" 强制指定
 GATEWAY_HOST = os.getenv("LOCAL_GATEWAY_HOST", "127.0.0.1")
@@ -148,6 +156,61 @@ SDXL_WORKFLOW_TEMPLATE: dict[str, Any] = {
     },
     "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
     "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "dc_image"}},
+}
+
+# ---------------------------------------------------------------------------
+# Flux 完整 checkpoint 工作流（flux1-dev-fp8 系：单文件含 diffusion+clip_l+t5+vae，
+# CheckpointLoaderSimple 可加载；采样链按 Flux dev 范式 cfg=1.0 + FluxGuidance）。
+# 与 SDXL 链的差别：EmptySD3LatentImage 潜空间 + FluxGuidance 3.5 + euler/simple。
+# ---------------------------------------------------------------------------
+
+FLUX_WORKFLOW_TEMPLATE: dict[str, Any] = {
+    "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "flux1-dev-fp8.safetensors"}},
+    "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["1", 1]}},
+    "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["1", 1]}},
+    # Flux 的引导强度走 conditioning（3.5 = dev 官方推荐），cfg 恒 1.0
+    "4": {"class_type": "FluxGuidance", "inputs": {"conditioning": ["2", 0], "guidance": 3.5}},
+    "5": {"class_type": "EmptySD3LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+    "6": {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": 0, "steps": 20, "cfg": 1.0,
+            "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
+            "model": ["1", 0], "positive": ["4", 0], "negative": ["3", 0], "latent_image": ["5", 0],
+        },
+    },
+    "7": {"class_type": "VAEDecode", "inputs": {"samples": ["6", 0], "vae": ["1", 2]}},
+    "8": {"class_type": "SaveImage", "inputs": {"images": ["7", 0], "filename_prefix": "dc_flux"}},
+}
+
+# ---------------------------------------------------------------------------
+# Krea2 工作流模板（2026-08-18 真机核验，官方 image_krea2_turbo_t2i 模板链路：
+# UNETLoader + CLIPLoader(type=krea2, Qwen3-VL-4B 编码器) + VAELoader(qwen_image_vae,
+# latent_format=Wan21) + KSampler(8 步/cfg1/euler/simple, turbo 蒸馏) +
+# ConditioningZeroOut 负条件。注意不是 gemma3——sd.py 明确 Krea2 走 Qwen3-VL-4B。
+# ---------------------------------------------------------------------------
+
+KREA2_UNET_NAME = os.getenv("LOCAL_KREA2_UNET", "krea2TurboFP8_krea2TURBO.safetensors")
+KREA2_TEXT_ENCODER = os.getenv("LOCAL_KREA2_TEXT_ENCODER", "qwen3vl_4b_fp8_scaled.safetensors")
+KREA2_VAE = os.getenv("LOCAL_KREA2_VAE", "qwen_image_vae.safetensors")
+
+KREA2_WORKFLOW_TEMPLATE: dict[str, Any] = {
+    "1": {"class_type": "UNETLoader", "inputs": {"unet_name": KREA2_UNET_NAME, "weight_dtype": "default"}},
+    "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": KREA2_TEXT_ENCODER, "type": "krea2", "device": "default"}},
+    "3": {"class_type": "VAELoader", "inputs": {"vae_name": KREA2_VAE}},
+    "4": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
+    "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
+    "6": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+    "7": {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": 0, "steps": 8, "cfg": 1.0,
+            "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
+            "model": ["1", 0], "positive": ["4", 0], "negative": ["5", 0], "latent_image": ["6", 0],
+        },
+    },
+    "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
+    "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "dc_krea2"}},
 }
 
 # IPAdapter 参考图锚定节点（参照 storyboard_agent.IPADAPTER_ANCHOR_NODES）
@@ -302,14 +365,60 @@ def _build_sdxl_workflow(
     height: int,
     seed: int,
     filename_prefix: str,
+    checkpoint: str = "",
 ) -> dict[str, Any]:
     wf = json.loads(json.dumps(SDXL_WORKFLOW_TEMPLATE))
+    if checkpoint:
+        wf["1"]["inputs"]["ckpt_name"] = checkpoint
     wf["2"]["inputs"]["text"] = prompt
     wf["3"]["inputs"]["text"] = negative_prompt
     wf["4"]["inputs"]["width"] = width
     wf["4"]["inputs"]["height"] = height
     wf["5"]["inputs"]["seed"] = seed
     wf["7"]["inputs"]["filename_prefix"] = filename_prefix
+    return wf
+
+
+def _build_flux_workflow(
+    *,
+    prompt: str,
+    negative_prompt: str,
+    width: int,
+    height: int,
+    seed: int,
+    filename_prefix: str,
+    checkpoint: str = "",
+) -> dict[str, Any]:
+    wf = json.loads(json.dumps(FLUX_WORKFLOW_TEMPLATE))
+    if checkpoint:
+        wf["1"]["inputs"]["ckpt_name"] = checkpoint
+    wf["2"]["inputs"]["text"] = prompt
+    # Flux cfg=1.0 下 negative 不参与引导，仅占连线位
+    wf["3"]["inputs"]["text"] = negative_prompt
+    wf["5"]["inputs"]["width"] = width
+    wf["5"]["inputs"]["height"] = height
+    wf["6"]["inputs"]["seed"] = seed
+    wf["8"]["inputs"]["filename_prefix"] = filename_prefix
+    return wf
+
+
+def _build_krea2_workflow(
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    seed: int,
+    filename_prefix: str,
+    unet_name: str = "",
+) -> dict[str, Any]:
+    wf = json.loads(json.dumps(KREA2_WORKFLOW_TEMPLATE))
+    if unet_name:
+        wf["1"]["inputs"]["unet_name"] = unet_name
+    wf["4"]["inputs"]["text"] = prompt
+    wf["6"]["inputs"]["width"] = width
+    wf["6"]["inputs"]["height"] = height
+    wf["7"]["inputs"]["seed"] = seed
+    wf["9"]["inputs"]["filename_prefix"] = filename_prefix
     return wf
 
 
@@ -701,46 +810,69 @@ async def _generate_image(body: dict[str, Any], reference_url: str = "") -> dict
     seed = random.randint(0, 2**32 - 1)
     prefix = f"dc_img_{uuid.uuid4().hex[:8]}"
 
-    workflow = _build_sdxl_workflow(
-        prompt=prompt, negative_prompt=negative,
-        width=width, height=height, seed=seed, filename_prefix=prefix,
-    )
+    workflow_kind = str(body.get("workflow") or "sdxl").strip().lower()
+    if workflow_kind == "krea2":
+        # Krea2 turbo（UNETLoader + Qwen3-VL-4B + qwen_image_vae）：cfg=1
+        # 蒸馏链，negative 不参与（ConditioningZeroOut 占位）
+        workflow = _build_krea2_workflow(
+            prompt=prompt,
+            width=width, height=height, seed=seed, filename_prefix=prefix,
+            unet_name=str(body.get("checkpoint") or ""),
+        )
+    elif workflow_kind == "flux":
+        # Flux 完整 checkpoint（flux1-dev-fp8 系）：走 Flux 采样链
+        workflow = _build_flux_workflow(
+            prompt=prompt, negative_prompt=negative,
+            width=width, height=height, seed=seed, filename_prefix=prefix,
+            checkpoint=str(body.get("checkpoint") or ""),
+        )
+    else:
+        workflow = _build_sdxl_workflow(
+            prompt=prompt, negative_prompt=negative,
+            width=width, height=height, seed=seed, filename_prefix=prefix,
+            checkpoint=str(body.get("checkpoint") or ""),
+        )
+
+    # Krea2 权重（unet 12.9GB + Qwen3-VL-4B TE 5.2GB）只在 workstation 本地
+    # models 目录，pc01/pc02 走 NAS 根没有 TE——直连 GPU0 实例，不入 LB 池
+    comfy_base = KREA2_BASE_URL if workflow_kind == "krea2" else COMFYUI_LB_URL
 
     async with _http() as client:
-        # 参考图：上传 + IPAdapter 注入；失败回退普通文生图（不阻断）
-        if reference_url:
+        # 参考图：上传 + IPAdapter 注入（仅 SDXL 链；Flux/Krea2 链无 IPAdapter
+        # 配套权重，注入会预检失败）；失败回退普通文生图（不阻断）
+        if reference_url and workflow_kind == "sdxl":
             try:
-                image_name = await _upload_image_to_comfyui(client, COMFYUI_LB_URL, reference_url)
+                image_name = await _upload_image_to_comfyui(client, comfy_base, reference_url)
                 workflow = _inject_ipadapter(workflow, image_name)
             except Exception as e:  # noqa: BLE001
                 logger.warning("IPAdapter 参考图注入失败，回退普通文生图: %s", e)
         try:
-            missing = await _preflight_workflow(client, COMFYUI_LB_URL, workflow)
+            missing = await _preflight_workflow(client, comfy_base, workflow)
             if missing:
-                return _error_response(f"SDXL 生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
-            prompt_id = await _submit_comfyui(client, COMFYUI_LB_URL, workflow)
+                return _error_response(f"生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
+            prompt_id = await _submit_comfyui(client, comfy_base, workflow)
         except Exception as e:  # noqa: BLE001
-            return _error_response(f"SDXL 工作流提交失败: {e}", 502)
+            return _error_response(f"{workflow_kind} 工作流提交失败: {e}", 502)
 
         # 轮询 /history 取图
         deadline = time.time() + IMAGE_POLL_TIMEOUT
         image_url = ""
         while time.time() < deadline:
-            hist = await client.get(f"{COMFYUI_LB_URL}/history/{prompt_id}")
+            hist = await client.get(f"{comfy_base}/history/{prompt_id}")
             if hist.status_code == 200:
                 entry = hist.json().get(prompt_id)
                 if entry:
                     status = entry.get("status") or {}
                     if status.get("status_str") == "error" or (status.get("completed") is False and status.get("status_str") == "error"):
                         msgs = status.get("messages") or []
-                        return _error_response(f"SDXL 执行失败: {msgs}", 502)
-                    found = _extract_output_media(entry.get("outputs") or {}, COMFYUI_LB_URL)
+                        return _error_response(f"{workflow_kind} 执行失败: {msgs}", 502)
+                    found = _extract_output_media(entry.get("outputs") or {}, comfy_base)
                     if found:
                         image_url = found[0]
                         break
             await asyncio.sleep(1.0)
         if not image_url:
-            return _error_response(f"SDXL 生成超时（{IMAGE_POLL_TIMEOUT}s）", 504)
+            return _error_response(f"{workflow_kind} 生成超时（{IMAGE_POLL_TIMEOUT}s）", 504)
 
         img = await client.get(image_url)
         if img.status_code != 200 or not img.content:

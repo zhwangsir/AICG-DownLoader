@@ -199,6 +199,8 @@ interface CanvasState {
     data?: Partial<CanvasNodeData>
   ) => string;
   addEdge: (source: string, target: string) => string | null;
+  /** R18 制作工厂：一次插入 8 工序节点并左到右串联（返回链首节点 id）。 */
+  spawnR18FactoryPipeline: (origin?: { x: number; y: number }) => string | null;
   addEdgeWithData: (
     source: string,
     target: string,
@@ -847,6 +849,15 @@ const FALLBACK_NODE_SIZES: Partial<Record<string, { width: number; height: numbe
   [CANVAS_NODE_TYPES.textAnnotation]: { width: 440, height: 320 },
   [CANVAS_NODE_TYPES.audio]: { width: 480, height: 210 },
   [CANVAS_NODE_TYPES.upload]: { width: 320, height: 350 },
+  // R18 制作工厂 8 工序（与组件内 DEFAULT_WIDTH/HEIGHT 对齐）
+  [CANVAS_NODE_TYPES.nsfwFactoryInit]: { width: 460, height: 420 },
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: { width: 460, height: 460 },
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: { width: 480, height: 460 },
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: { width: 560, height: 460 },
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: { width: 480, height: 460 },
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: { width: 460, height: 460 },
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: { width: 480, height: 460 },
+  [CANVAS_NODE_TYPES.nsfwFactoryQc]: { width: 480, height: 460 },
 };
 
 function getNodeSize(node: CanvasNode): { width: number; height: number } {
@@ -2012,6 +2023,53 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
 
     return edgeId;
+  },
+
+  spawnR18FactoryPipeline: (origin) => {
+    // 8 工序链（与 nodeRegistry 白名单一一对应；分镜表在资产前——
+    // 数字资产按已确认分镜的具体镜头内容生成参考图）
+    const chain: CanvasNodeType[] = [
+      CANVAS_NODE_TYPES.nsfwFactoryInit,
+      CANVAS_NODE_TYPES.nsfwFactoryScript,
+      CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+      CANVAS_NODE_TYPES.nsfwFactoryAsset,
+      CANVAS_NODE_TYPES.nsfwFactoryShot,
+      CANVAS_NODE_TYPES.nsfwFactoryAudio,
+      CANVAS_NODE_TYPES.nsfwFactoryCompose,
+      CANVAS_NODE_TYPES.nsfwFactoryQc,
+    ];
+    const store = get();
+    // 兜底落点：现有节点包围盒右侧；空画布放原点。
+    // 离屏残留防御：bbox 最右超出 4000px 视为历史测试残留（E2E 实测踩过
+    // x=22000+ 残留把新链排到视口外、onlyRenderVisibleElements 裁剪后视觉
+    // 上「点击无反应」），此时回退原点而非追随残留。
+    let baseX = 0;
+    let baseY = 0;
+    if (store.nodes.length > 0) {
+      let maxX = -Infinity;
+      let minY = Infinity;
+      for (const n of store.nodes) {
+        const size = getNodeSize(n);
+        maxX = Math.max(maxX, n.position.x + size.width);
+        minY = Math.min(minY, n.position.y);
+      }
+      if (maxX <= 4000) {
+        baseX = maxX + 80;
+        baseY = Math.max(0, Math.min(minY, 2000));
+      }
+    }
+    const startX = origin?.x ?? baseX;
+    const startY = origin?.y ?? baseY;
+    const STEP = 540; // 节点宽 + 60 间距
+    const ids: string[] = [];
+    for (let i = 0; i < chain.length; i += 1) {
+      const id = store.addNode(chain[i], { x: startX + i * STEP, y: startY });
+      ids.push(id);
+    }
+    for (let i = 1; i < ids.length; i += 1) {
+      store.addEdge(ids[i - 1], ids[i]);
+    }
+    return ids[0] ?? null;
   },
 
   addEdgeWithData: (source, target, data, options) => {

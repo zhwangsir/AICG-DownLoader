@@ -7,6 +7,7 @@
 import {
   Download,
   HardDrive,
+  ImagePlus,
   Loader2,
   Lock,
   LockOpen,
@@ -29,11 +30,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
+import { ModelNamePicker } from "@/components/settings/model-name-picker";
 import { cn } from "@/lib/utils";
 import { useDownloadRequestStore } from "@/stores/downloadRequestStore";
 import {
   useCancelModelDownload,
   useCivitaiSearch,
+  useGenerateImage,
   useModelDownloadTasks,
   useModelLibrary,
   useNsfwMarks,
@@ -102,7 +106,7 @@ async function requestErrorMessage(error: unknown, fallback: string): Promise<st
 
 export function ModelLibrarySection() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"nas" | "download">("nas");
+  const [tab, setTab] = useState<"nas" | "download" | "studio">("nas");
   const [gateOpen, setGateOpen] = useState(false);
   const nsfwQuery = useNsfwStatus();
   const nsfwEnabled = nsfwQuery.data?.data?.nsfw_enabled ?? false;
@@ -153,6 +157,21 @@ export function ModelLibrarySection() {
             <Download className="size-3.5" aria-hidden />
             {t("settings.library.tabs.download")}
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "studio"}
+            onClick={() => setTab("studio")}
+            className={cn(
+              "flex h-8 items-center gap-1.5 rounded px-3 text-sm font-medium transition-colors",
+              tab === "studio"
+                ? "bg-white/[0.09] text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <ImagePlus className="size-3.5" aria-hidden />
+            {t("settings.library.tabs.studio")}
+          </button>
         </div>
         <div className="ml-auto">
           <Button
@@ -183,6 +202,8 @@ export function ModelLibrarySection() {
 
       {tab === "nas" ? (
         <NasModelList nsfwEnabled={nsfwEnabled} />
+      ) : tab === "studio" ? (
+        <ImageStudioTab />
       ) : (
         <ModelDownloadTab prefill={prefill} />
       )}
@@ -654,6 +675,166 @@ function TaskStatusBadge({ status }: { status: ModelDownloadTask["status"] }) {
     <Badge variant={item.cls as "default"} className="text-[10px]">
       {item.label}
     </Badge>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 生图测试台（checkpoint 选择 + 提示词 → local_gateway 出图）
+// ---------------------------------------------------------------------------
+
+const STUDIO_SIZES = [
+  { value: "832x1216", key: "sizePortrait" },
+  { value: "1216x832", key: "sizeLandscape" },
+  { value: "1024x1024", key: "sizeSquare" },
+] as const;
+
+function ImageStudioTab() {
+  const { t } = useTranslation();
+  const [checkpoint, setCheckpoint] = useState("majicMIX realistic 麦橘写实_v7.safetensors");
+  const [prompt, setPrompt] = useState("");
+  const [negative, setNegative] = useState(
+    "lowres, bad anatomy, bad hands, deformed, worst quality, watermark, text",
+  );
+  const [size, setSize] = useState("832x1216");
+  const [error, setError] = useState("");
+  const generate = useGenerateImage();
+
+  const b64 = (generate.data?.ok ? generate.data.data.data?.[0]?.b64_json : undefined) ?? "";
+  const canSubmit = prompt.trim().length > 0 && checkpoint.trim().length > 0;
+
+  const submit = async () => {
+    setError("");
+    if (!canSubmit) {
+      setError(t("settings.library.studio.emptyPrompt"));
+      return;
+    }
+    try {
+      await generate.mutateAsync({
+        prompt: prompt.trim(),
+        negative_prompt: negative.trim(),
+        checkpoint: checkpoint.trim(),
+        size,
+      });
+    } catch (e) {
+      setError(await requestErrorMessage(e, t("settings.library.studio.nsfwBlocked")));
+    }
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="studio-checkpoint">
+            {t("settings.library.studio.checkpoint")}
+          </label>
+          <ModelNamePicker
+            value={checkpoint}
+            onChange={setCheckpoint}
+            expectedTypes={["checkpoints"]}
+            ariaLabel={t("settings.library.studio.checkpoint")}
+            getOptionDisabledReason={(entry) =>
+              entry.sdxl_incompatible
+                ? (entry.sdxl_incompatible_reason ?? "不兼容 SDXL 工作流")
+                : null
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            {t("settings.library.studio.size")}
+          </span>
+          <div className="flex gap-1 rounded-md bg-white/[0.05] p-0.5" id="studio-size">
+            {STUDIO_SIZES.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                aria-selected={size === s.value}
+                onClick={() => setSize(s.value)}
+                className={cn(
+                  "h-8 flex-1 rounded px-2 text-xs font-medium transition-colors",
+                  size === s.value
+                    ? "bg-white/[0.09] text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t(`settings.library.studio.${s.key}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground" htmlFor="studio-prompt">
+          {t("settings.library.studio.prompt")}
+        </label>
+        <Textarea
+          id="studio-prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={t("settings.library.studio.promptPlaceholder")}
+          rows={3}
+          className="text-xs"
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground" htmlFor="studio-negative">
+          {t("settings.library.studio.negative")}
+        </label>
+        <Textarea
+          id="studio-negative"
+          value={negative}
+          onChange={(e) => setNegative(e.target.value)}
+          placeholder={t("settings.library.studio.negativePlaceholder")}
+          rows={2}
+          className="text-xs"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void submit()}
+          disabled={generate.isPending}
+          className="gap-1.5"
+        >
+          {generate.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          ) : (
+            <ImagePlus className="size-3.5" aria-hidden />
+          )}
+          {generate.isPending
+            ? t("settings.library.studio.generating")
+            : t("settings.library.studio.generate")}
+        </Button>
+        {b64 && (
+          <a
+            href={`data:image/png;base64,${b64}`}
+            download={`studio_${Date.now()}.png`}
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            {t("settings.library.studio.download")}
+          </a>
+        )}
+        {error && (
+          <span className="text-xs text-red-400" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+
+      {b64 && (
+        <div className="mt-1 overflow-hidden rounded-md border border-border">
+          <img
+            src={`data:image/png;base64,${b64}`}
+            alt={t("settings.library.studio.result")}
+            className="max-h-[50vh] w-full object-contain"
+          />
+        </div>
+      )}
+    </div>
   );
 }
 

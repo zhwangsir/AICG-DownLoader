@@ -31,6 +31,13 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/lib/queries/model-library", () => ({
+  useNsfwStatus: () => ({
+    data: { ok: true, data: { nsfw_enabled: false } },
+    isLoading: false,
+  }),
+}));
+
 describe("NodeSelectionMenu", () => {
   it("shows standalone shot context in the add-node menu", () => {
     render(

@@ -202,6 +202,92 @@ describe("ModelLibrarySection — NSFW（R18 确认）", () => {
   });
 });
 
+describe("ModelLibrarySection — 生图测试台", () => {
+  it("切到生图台：渲染底模选择/提示词/尺寸/生成按钮", async () => {
+    server.use(mockNsfw({ nsfw_enabled: false }), mockLibrary([ENTRY], ["checkpoints"]));
+    const user = userEvent.setup();
+    render(<ModelLibrarySection />, { wrapper });
+    await user.click(
+      await screen.findByRole("tab", { name: /settings.library.tabs.studio/ }),
+    );
+    expect(screen.getByLabelText(/settings.library.studio.checkpoint/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/settings.library.studio.prompt/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/settings.library.studio.negative/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /settings.library.studio.generate/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("空提示词点生成：本地校验拦截，不发请求", async () => {
+    server.use(mockNsfw({ nsfw_enabled: false }), mockLibrary([ENTRY], ["checkpoints"]));
+    let posted = false;
+    server.use(
+      http.post(`${BASE}/generate-image`, () => {
+        posted = true;
+        return HttpResponse.json({ ok: true, data: { data: [] } });
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ModelLibrarySection />, { wrapper });
+    await user.click(
+      await screen.findByRole("tab", { name: /settings.library.tabs.studio/ }),
+    );
+    await user.click(screen.getByRole("button", { name: /settings.library.studio.generate/ }));
+    expect(await screen.findByText("settings.library.studio.emptyPrompt")).toBeInTheDocument();
+    expect(posted).toBe(false);
+  });
+
+  it("填提示词生成：POST 带底模与尺寸，返回 b64 后展示图片与下载", async () => {
+    server.use(mockNsfw({ nsfw_enabled: false }), mockLibrary([ENTRY], ["checkpoints"]));
+    let captured: Record<string, unknown> | null = null;
+    server.use(
+      http.post(`${BASE}/generate-image`, async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ ok: true, data: { data: [{ b64_json: "QUJD" }] } });
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ModelLibrarySection />, { wrapper });
+    await user.click(
+      await screen.findByRole("tab", { name: /settings.library.tabs.studio/ }),
+    );
+    await user.type(screen.getByLabelText(/settings.library.studio.prompt/), "1girl, test");
+    await user.click(screen.getByRole("button", { name: /settings.library.studio.generate/ }));
+    const img = await screen.findByAltText("settings.library.studio.result");
+    expect(img).toHaveAttribute("src", "data:image/png;base64,QUJD");
+    expect(screen.getByText("settings.library.studio.download")).toBeInTheDocument();
+    expect(captured).toMatchObject({
+      prompt: "1girl, test",
+      checkpoint: "majicMIX realistic 麦橘写实_v7.safetensors",
+      size: "832x1216",
+    });
+  });
+
+  it("后端 403（R18 拦截）：错误信息透传", async () => {
+    server.use(mockNsfw({ nsfw_enabled: false }), mockLibrary([ENTRY], ["checkpoints"]));
+    server.use(
+      http.post(
+        `${BASE}/generate-image`,
+        () =>
+          new HttpResponse(
+            JSON.stringify({ detail: "所选底模为 NSFW 内容，请先在模型库开启 R18" }),
+            { status: 403, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<ModelLibrarySection />, { wrapper });
+    await user.click(
+      await screen.findByRole("tab", { name: /settings.library.tabs.studio/ }),
+    );
+    await user.type(screen.getByLabelText(/settings.library.studio.prompt/), "1girl");
+    await user.click(screen.getByRole("button", { name: /settings.library.studio.generate/ }));
+    expect(
+      await screen.findByText("所选底模为 NSFW 内容，请先在模型库开启 R18"),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("ModelLibrarySection — 下载页签", () => {
   const SEARCH_RESULT = {
     items: [

@@ -33,6 +33,13 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/lib/queries/model-library", () => ({
+  useNsfwStatus: () => ({
+    data: { ok: true, data: { nsfw_enabled: false } },
+    isLoading: false,
+  }),
+}));
+
 describe("CanvasAddNodePanel", () => {
   it("shows standalone shot context in the quick add panel", async () => {
     const user = userEvent.setup();

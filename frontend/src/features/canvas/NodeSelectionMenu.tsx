@@ -29,7 +29,10 @@ import {
   CanvasMenuSectionHeader,
   CANVAS_MENU_ICON_CELL_CLASS,
   CANVAS_MENU_ROW_CLASS,
+  canvasMenuIconMap,
 } from '@/features/canvas/ui/canvas-node-menu-shared';
+import { nodeCatalog } from '@/features/canvas/application/nodeCatalog';
+import { useCanvasStore } from '@/stores/canvasStore';
 
 interface NodeSelectionMenuProps {
   position: { x: number; y: number };
@@ -169,9 +172,35 @@ export function NodeSelectionMenu({
       },
     ];
 
+    // 固定目录之外 allowedTypes（R18 单件工具、工厂链式候选等）按注册表
+    // label/icon 通用渲染——否则这些候选被静默丢弃，菜单回落成全量网格，
+    // 工序节点的「+」链式引导就断了（2026-08-19 深度精简回归实测）。
+    const coveredTypes = new Set<CanvasNodeType>([
+      CANVAS_NODE_TYPES.textAnnotation,
+      CANVAS_NODE_TYPES.imageGen,
+      CANVAS_NODE_TYPES.imageEdit,
+      CANVAS_NODE_TYPES.upload,
+      CANVAS_NODE_TYPES.video,
+      CANVAS_NODE_TYPES.audio,
+      CANVAS_NODE_TYPES.script,
+      CANVAS_NODE_TYPES.pano360Viewer,
+      CANVAS_NODE_TYPES.threeDWorld,
+    ]);
+    for (const type of allowedTypeSet) {
+      if (coveredTypes.has(type)) continue;
+      const definition = nodeCatalog.getDefinition(type);
+      if (!definition) continue;
+      items.push({
+        key: type,
+        label: t(definition.menuLabelKey),
+        Icon: canvasMenuIconMap[definition.menuIcon] ?? Image,
+        type,
+      });
+    }
+
     const enabled = items.filter((item) => !item.disabled && item.type);
     return enabled.length > 0 ? enabled : null;
-  }, [allowedTypeSet]);
+  }, [allowedTypeSet, t]);
 
   const skillGroups = useMemo(() => {
     if (!skillItems || skillItems.length === 0) {
@@ -395,6 +424,12 @@ export function NodeSelectionMenu({
                 onSelectNode={(type, clientPosition) => {
                   handleClose();
                   setTimeout(() => onSelect(type, clientPosition), UI_POPOVER_TRANSITION_MS + 10);
+                }}
+                onSpawnR18Pipeline={() => {
+                  handleClose();
+                  setTimeout(() => {
+                    useCanvasStore.getState().spawnR18FactoryPipeline();
+                  }, UI_POPOVER_TRANSITION_MS + 10);
                 }}
               />
               {onSelectSkill && skillGroups.length > 0 && (

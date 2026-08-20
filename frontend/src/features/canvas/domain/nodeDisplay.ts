@@ -25,6 +25,20 @@ export const DEFAULT_NODE_DISPLAY_NAME: Record<CanvasNodeType, string> = {
   [CANVAS_NODE_TYPES.pano360Viewer]: '360° 全景查看器',
   [CANVAS_NODE_TYPES.threeDWorld]: '3D 世界',
   [CANVAS_NODE_TYPES.skill]: '技能',
+  [CANVAS_NODE_TYPES.nsfwImageGen]: 'R18 图片',
+  [CANVAS_NODE_TYPES.nsfwVideoGen]: 'R18 视频',
+  [CANVAS_NODE_TYPES.nsfwScript]: 'R18 剧本',
+  [CANVAS_NODE_TYPES.nsfwStoryboard]: 'R18 分镜',
+  [CANVAS_NODE_TYPES.nsfwVideoBatch]: 'R18 出片',
+  [CANVAS_NODE_TYPES.nsfwDramaStudio]: 'R18 短剧工厂',
+  [CANVAS_NODE_TYPES.nsfwFactoryInit]: '工厂①立项定位',
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: '工厂②剧本工程',
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: '工厂③分镜表',
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: '工厂④数字资产',
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: '工厂⑤镜头视频',
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: '工厂⑥音频制作',
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: '工厂⑦后期合成',
+  [CANVAS_NODE_TYPES.nsfwFactoryQc]: '工厂⑧质检预览',
 };
 
 export const EXPORT_RESULT_DISPLAY_NAME: Record<ExportImageNodeResultKind, string> = {

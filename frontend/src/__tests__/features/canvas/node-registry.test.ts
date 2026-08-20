@@ -13,6 +13,7 @@ import {
   isUpstreamConnectionAllowed,
   DOWNSTREAM_SPAWN_WHITELIST,
   UPSTREAM_SPAWN_WHITELIST,
+  MENU_HIDDEN_NODE_TYPES,
 } from "@/features/canvas/domain/nodeRegistry";
 
 describe("canvas node registry", () => {
@@ -171,5 +172,55 @@ describe("连线菜单候选", () => {
     expect(getDownstreamSpawnTypes(CANVAS_NODE_TYPES.imageGen)).not.toContain(
       CANVAS_NODE_TYPES.audio,
     );
+  });
+});
+
+describe("菜单隐藏集（R18 深度精简）", () => {
+  it("普通节点的「+」候选不含旧三件套与工厂单工序", () => {
+    // textAnnotation 无下游白名单 → 回落路径，应过滤 11 个隐藏类型。
+    const fromText = getDownstreamSpawnTypes(CANVAS_NODE_TYPES.textAnnotation);
+    for (const hidden of [
+      CANVAS_NODE_TYPES.nsfwScript,
+      CANVAS_NODE_TYPES.nsfwStoryboard,
+      CANVAS_NODE_TYPES.nsfwVideoBatch,
+      CANVAS_NODE_TYPES.nsfwFactoryInit,
+      CANVAS_NODE_TYPES.nsfwFactoryShot,
+      CANVAS_NODE_TYPES.nsfwFactoryQc,
+    ]) {
+      expect(fromText).not.toContain(hidden);
+    }
+    // 保留的入口（单件工具 + 快进工厂）仍在。
+    expect(fromText).toContain(CANVAS_NODE_TYPES.nsfwImageGen);
+    expect(fromText).toContain(CANVAS_NODE_TYPES.nsfwDramaStudio);
+  });
+
+  it("无 origin 回落同样过滤隐藏节点", () => {
+    expect(getDownstreamSpawnTypes(undefined)).not.toContain(CANVAS_NODE_TYPES.nsfwScript);
+    expect(getDownstreamSpawnTypes(undefined)).not.toContain(CANVAS_NODE_TYPES.nsfwFactoryInit);
+  });
+
+  it("工厂链上工序的「+」仍能 spawn 下一道工序（白名单路径不过隐藏集）", () => {
+    expect(getDownstreamSpawnTypes(CANVAS_NODE_TYPES.nsfwFactoryInit)).toEqual([
+      CANVAS_NODE_TYPES.nsfwFactoryScript,
+    ]);
+    // 分镜表（③）的嫡系下游：数字资产（④）与镜头（⑤，允许跳过资产生成）
+    expect(getDownstreamSpawnTypes(CANVAS_NODE_TYPES.nsfwFactoryStoryboard)).toEqual([
+      CANVAS_NODE_TYPES.nsfwFactoryAsset,
+      CANVAS_NODE_TYPES.nsfwFactoryShot,
+    ]);
+    // 数字资产（④）的嫡系上游是分镜表（③）；镜头（⑤）可从资产或分镜表接入
+    expect(getUpstreamSpawnTypes(CANVAS_NODE_TYPES.nsfwFactoryAsset)[0]).toBe(
+      CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+    );
+    expect(getUpstreamSpawnTypes(CANVAS_NODE_TYPES.nsfwFactoryShot)).toEqual([
+      CANVAS_NODE_TYPES.nsfwFactoryAsset,
+      CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+    ]);
+  });
+
+  it("隐藏集不包含保留入口", () => {
+    expect(MENU_HIDDEN_NODE_TYPES.has(CANVAS_NODE_TYPES.nsfwImageGen)).toBe(false);
+    expect(MENU_HIDDEN_NODE_TYPES.has(CANVAS_NODE_TYPES.nsfwVideoGen)).toBe(false);
+    expect(MENU_HIDDEN_NODE_TYPES.has(CANVAS_NODE_TYPES.nsfwDramaStudio)).toBe(false);
   });
 });

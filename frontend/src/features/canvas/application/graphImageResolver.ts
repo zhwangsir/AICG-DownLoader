@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright (c) 2026 ClaymoreLab
 import {
+  CANVAS_NODE_TYPES,
   isExportImageNode,
   isImageEditNode,
   isUploadNode,
@@ -36,6 +37,17 @@ export function extractUpstreamImages(node: CanvasNode | undefined): string[] {
 
   if (isUploadNode(node) || isImageEditNode(node) || isExportImageNode(node)) {
     return node.data.imageUrl ? [node.data.imageUrl] : [];
+  }
+
+  // 图片生成类节点（普通/R18）产出图同样可作为下游首帧/参考图——
+  // 曾漏配导致「图片节点连线到 R18 视频节点后连线无效」（提取不到
+  // 产出图，按钮持续禁用），2026-08-17 修复。
+  if (
+    node.type === CANVAS_NODE_TYPES.imageGen
+    || node.type === CANVAS_NODE_TYPES.nsfwImageGen
+  ) {
+    const url = node.data.imageUrl;
+    return typeof url === 'string' && url.length > 0 ? [url] : [];
   }
 
   return [];

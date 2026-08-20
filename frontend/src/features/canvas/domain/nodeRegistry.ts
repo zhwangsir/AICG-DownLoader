@@ -13,6 +13,20 @@ import {
   type GroupNodeData,
   type ImageEditNodeData,
   type ImageGenNodeData,
+  type NSFWImageGenNodeData,
+  type NSFWDramaStudioNodeData,
+  type NSFWScriptNodeData,
+  type NSFWStoryboardNodeData,
+  type NSFWVideoBatchNodeData,
+  type NSFWVideoGenNodeData,
+  type NSFWFactoryInitNodeData,
+  type NSFWFactoryScriptNodeData,
+  type NSFWFactoryAssetNodeData,
+  type NSFWFactoryStoryboardNodeData,
+  type NSFWFactoryShotNodeData,
+  type NSFWFactoryAudioNodeData,
+  type NSFWFactoryComposeNodeData,
+  type NSFWFactoryQcNodeData,
   type Pano360ViewerNodeData,
   type ScriptNodeData,
   type SkillNodeData,
@@ -34,7 +48,7 @@ import {
 } from '../ui/ProviderModelPicker';
 import { readLastVideoModel } from './lastVideoModel';
 
-export type MenuIconKey = 'upload' | 'sparkles' | 'layout' | 'text' | 'video' | 'audio' | 'script' | 'pano360' | 'threeDWorld' | 'videoCompose';
+export type MenuIconKey = 'upload' | 'sparkles' | 'layout' | 'text' | 'video' | 'audio' | 'script' | 'pano360' | 'threeDWorld' | 'videoCompose' | 'nsfw';
 
 export interface CanvasNodeCapabilities {
   toolbar: boolean;
@@ -158,6 +172,361 @@ const imageGenNodeDefinition: CanvasNodeDefinition<ImageGenNodeData> = {
     isGenerating: false,
     generationStartedAt: null,
     generationDurationMs: 60000,
+  }),
+};
+
+// R18 图片节点：与 imageGenNode 功能同构（提示词/参考图/连线/结果回填），
+// 但提交走 model-library 本地 NSFW 管线。菜单入口仅在 R18 开启后出现
+// （CanvasAddNodeGrid 按 useNsfwStatus 过滤），节点本体未开启时呈锁定态。
+const nsfwImageGenNodeDefinition: CanvasNodeDefinition<NSFWImageGenNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwImageGen,
+  menuLabelKey: 'node.menu.nsfwImage',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: false,
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwImageGen],
+    imageUrl: null,
+    previewImageUrl: null,
+    aspectRatio: '16:9',
+    isSizeManuallyAdjusted: false,
+    prompt: '',
+    negativePrompt: '',
+    checkpoint: '',
+    size: '1216x832',
+    referenceImageUrl: null,
+    isGenerating: false,
+    generationStartedAt: null,
+    generationDurationMs: 60000,
+  }),
+};
+
+// R18 视频节点：内置 4 个 NSFW 预设（Civitai 逆向 LoRA 链）直提 ComfyUI，
+// mp4 落盘项目媒体。菜单入口仅 R18 开启后出现，与图片节点同口径。
+const nsfwVideoGenNodeDefinition: CanvasNodeDefinition<NSFWVideoGenNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwVideoGen,
+  menuLabelKey: 'node.menu.nsfwVideo',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: false,
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwVideoGen],
+    prompt: '',
+    presetId: '',
+    width: 832,
+    height: 480,
+    length: 81,
+    videoUrl: null,
+    firstFrameUrl: null,
+    isGenerating: false,
+    generationStartedAt: null,
+    generationDurationMs: 300000,
+  }),
+};
+
+// R18 剧本节点：梗概+角色卡 → LLM 结构化分镜 scenes JSON（同步端点，
+// 本地 uncensored 模型）。菜单/锁定态与 R18 图片节点同口径；产物
+// planResult 由下游「R18 分镜节点」经连线消费（非图像流，节点直读）。
+const nsfwScriptNodeDefinition: CanvasNodeDefinition<NSFWScriptNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwScript,
+  menuLabelKey: 'node.menu.nsfwScript',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: false,
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwScript],
+    synopsis: '',
+    charactersText: '',
+    styleHint: '',
+    durationSec: 90,
+    aspect: '9:16',
+    planResult: null,
+    isGenerating: false,
+    generationStartedAt: null,
+    generationDurationMs: 120000,
+  }),
+};
+
+// R18 分镜节点：上游 R18 剧本 scenes × 定妆照（IPAdapter 锚定）→ 并发批量
+// 首帧；每帧落图 spawn exportImage 子节点供 R18 视频节点单独连线。
+const nsfwStoryboardNodeDefinition: CanvasNodeDefinition<NSFWStoryboardNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwStoryboard,
+  menuLabelKey: 'node.menu.nsfwStoryboard',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: false,
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwStoryboard],
+    checkpoint: '',
+    size: '832x1216',
+    frames: [],
+    anchorUploadUrl: null,
+    isBatchRunning: false,
+    batchError: null,
+  }),
+};
+
+// R18 出片节点：消费上游「R18 分镜」已生成首帧的镜头——TTS 逐句配音 +
+// 视频逐镜头顺序生成（action 走预设 / plot·portrait 走 h3-clean），
+// 产物 spawn 视频/音频子节点连视频合成；附 SRT 字幕导出。
+const nsfwVideoBatchNodeDefinition: CanvasNodeDefinition<NSFWVideoBatchNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwVideoBatch,
+  menuLabelKey: 'node.menu.nsfwVideoBatch',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: false,
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwVideoBatch],
+    voice: 'human-zh-paimon',
+    shots: [],
+    isBatchRunning: false,
+    batchError: null,
+  }),
+};
+
+// R18 短剧工厂：单节点全流程（剧本→首帧→配音→出片→合成），五阶段状态机
+// 持久化断点续拍。上游可选图片节点（定妆照锚定）。
+const nsfwDramaStudioNodeDefinition: CanvasNodeDefinition<NSFWDramaStudioNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwDramaStudio,
+  menuLabelKey: 'node.menu.nsfwDramaStudio',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: {
+    toolbar: false,
+    promptInput: false,
+  },
+  connectivity: {
+    sourceHandle: true,
+    targetHandle: true,
+    connectMenu: {
+      fromSource: true,
+      fromTarget: false,
+    },
+  },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwDramaStudio],
+    synopsis: '',
+    charactersText: '',
+    styleHint: '',
+    durationSec: 90,
+    aspect: '9:16',
+    checkpoint: '',
+    size: '832x1216',
+    anchorUploadUrl: null,
+    voice: 'human-zh-paimon',
+    autoConfirm: false,
+    planTitle: '',
+    scenes: [],
+    frameUrls: {},
+    shotOutputs: {},
+    composeUrl: null,
+    composeDurationSec: null,
+    pipeline: 'idle',
+  }),
+};
+
+// ---- R18 制作工厂流水线（8 工序节点，2026-08-19）----
+// 共用 connectivity 形状：双 handle + 右侧 source 菜单。
+const FACTORY_CONNECTIVITY = {
+  sourceHandle: true,
+  targetHandle: true,
+  connectMenu: { fromSource: true, fromTarget: false },
+} as const;
+const FACTORY_CAPABILITIES = { toolbar: false, promptInput: false } as const;
+
+const nsfwFactoryInitNodeDefinition: CanvasNodeDefinition<NSFWFactoryInitNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryInit,
+  menuLabelKey: 'node.menu.nsfwFactoryInit',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: { ...FACTORY_CONNECTIVITY, connectMenu: { fromSource: true, fromTarget: false } },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryInit],
+    theme: '都市情感',
+    themeNote: '',
+    checkpoint: '',
+    size: '832x1216',
+    durationSec: 90,
+    aspect: '9:16',
+  }),
+};
+
+const nsfwFactoryScriptNodeDefinition: CanvasNodeDefinition<NSFWFactoryScriptNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryScript,
+  menuLabelKey: 'node.menu.nsfwFactoryScript',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: FACTORY_CONNECTIVITY,
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryScript],
+    synopsis: '',
+    charactersText: '',
+    episodeCount: 1,
+    planTitle: '',
+    episodes: [],
+    isGenerating: false,
+    generationStartedAt: null,
+    generationError: null,
+  }),
+};
+
+const nsfwFactoryAssetNodeDefinition: CanvasNodeDefinition<NSFWFactoryAssetNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryAsset,
+  menuLabelKey: 'node.menu.nsfwFactoryAsset',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: FACTORY_CONNECTIVITY,
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryAsset],
+    items: [],
+    styleAnchorUrl: null,
+    isGenerating: false,
+    generationError: null,
+  }),
+};
+
+const nsfwFactoryStoryboardNodeDefinition: CanvasNodeDefinition<NSFWFactoryStoryboardNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+  menuLabelKey: 'node.menu.nsfwFactoryStoryboard',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: FACTORY_CONNECTIVITY,
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryStoryboard],
+    rows: [],
+    confirmed: false,
+  }),
+};
+
+const nsfwFactoryShotNodeDefinition: CanvasNodeDefinition<NSFWFactoryShotNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryShot,
+  menuLabelKey: 'node.menu.nsfwFactoryShot',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: FACTORY_CONNECTIVITY,
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryShot],
+    outputs: {},
+    isRunning: false,
+    error: null,
+    interrupted: false,
+  }),
+};
+
+const nsfwFactoryAudioNodeDefinition: CanvasNodeDefinition<NSFWFactoryAudioNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryAudio,
+  menuLabelKey: 'node.menu.nsfwFactoryAudio',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: FACTORY_CONNECTIVITY,
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryAudio],
+    voice: 'human-zh-paimon',
+    ttsUrls: {},
+    bgmUrl: '',
+    bgmVolume: 0.35,
+    envSfxUrl: '',
+    envSfxVolume: 0.25,
+    isRunning: false,
+    error: null,
+  }),
+};
+
+const nsfwFactoryComposeNodeDefinition: CanvasNodeDefinition<NSFWFactoryComposeNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryCompose,
+  menuLabelKey: 'node.menu.nsfwFactoryCompose',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: FACTORY_CONNECTIVITY,
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryCompose],
+    colorProfile: 'none',
+    transition: 'fade',
+    openingText: '',
+    closingText: '',
+    burnSubtitle: true,
+    composeUrl: null,
+    composeDurationSec: null,
+    isRunning: false,
+    error: null,
+  }),
+};
+
+const nsfwFactoryQcNodeDefinition: CanvasNodeDefinition<NSFWFactoryQcNodeData> = {
+  type: CANVAS_NODE_TYPES.nsfwFactoryQc,
+  menuLabelKey: 'node.menu.nsfwFactoryQc',
+  menuIcon: 'nsfw',
+  visibleInMenu: true,
+  capabilities: FACTORY_CAPABILITIES,
+  connectivity: { ...FACTORY_CONNECTIVITY, connectMenu: { fromSource: false, fromTarget: false } },
+  createDefaultData: () => ({
+    displayName: DEFAULT_NODE_DISPLAY_NAME[CANVAS_NODE_TYPES.nsfwFactoryQc],
+    reportUrl: null,
+    report: null,
+    isRunning: false,
+    error: null,
   }),
 };
 
@@ -632,6 +1001,20 @@ export const canvasNodeDefinitions: Record<CanvasNodeType, CanvasNodeDefinition>
   [CANVAS_NODE_TYPES.pano360Viewer]: pano360ViewerNodeDefinition,
   [CANVAS_NODE_TYPES.threeDWorld]: threeDWorldNodeDefinition,
   [CANVAS_NODE_TYPES.skill]: skillNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwImageGen]: nsfwImageGenNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwVideoGen]: nsfwVideoGenNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwScript]: nsfwScriptNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwStoryboard]: nsfwStoryboardNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwVideoBatch]: nsfwVideoBatchNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwDramaStudio]: nsfwDramaStudioNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryInit]: nsfwFactoryInitNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: nsfwFactoryScriptNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: nsfwFactoryAssetNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: nsfwFactoryStoryboardNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: nsfwFactoryShotNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: nsfwFactoryAudioNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: nsfwFactoryComposeNodeDefinition,
+  [CANVAS_NODE_TYPES.nsfwFactoryQc]: nsfwFactoryQcNodeDefinition,
 };
 
 export function getNodeDefinition(type: CanvasNodeType): CanvasNodeDefinition {
@@ -661,7 +1044,38 @@ const UPSTREAM_SOURCE_WHITELIST: Partial<Record<CanvasNodeType, readonly CanvasN
   // 分离」动作留下的溯源边：那个动作从一个视频节点同时产出「背景音」音频节点和
   // 「无声」视频节点，两条边一起画回源视频。少了 video 这一项，音频那条边会被建边
   // 收口静默丢掉，画布上一边连着无声视频、一边孤零零挂着背景音。
-  [CANVAS_NODE_TYPES.audio]: [CANVAS_NODE_TYPES.textAnnotation, CANVAS_NODE_TYPES.video],
+  [CANVAS_NODE_TYPES.audio]: [
+    CANVAS_NODE_TYPES.textAnnotation,
+    CANVAS_NODE_TYPES.video,
+    // R18 出片 spawn 配音子节点时的溯源边（batch→audio），少了会被建边
+    // 收口静默丢掉（2026-08-18 E2E 实测复现）
+    CANVAS_NODE_TYPES.nsfwVideoBatch,
+  ],
+  // ---- R18 制作工厂流水线（链式相邻工序 + 图片源可选锚定）----
+  // 工序序（2026-08-19 调整：分镜表提前，数字资产在分镜确认后按具体镜头生成）：
+  // ①立项 → ②剧本 → ③分镜表 → ④数字资产 → ⑤镜头 → ⑥音频 → ⑦后期 → ⑧质检
+  [CANVAS_NODE_TYPES.nsfwFactoryInit]: [],
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: [CANVAS_NODE_TYPES.nsfwFactoryInit],
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: [CANVAS_NODE_TYPES.nsfwFactoryScript],
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: [
+    CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+    CANVAS_NODE_TYPES.upload,
+    CANVAS_NODE_TYPES.imageGen,
+    CANVAS_NODE_TYPES.nsfwImageGen,
+    CANVAS_NODE_TYPES.exportImage,
+  ],
+  // 资产为可选工序：允许分镜表直连镜头（跳过资产生成）
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAsset,
+    CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: [CANVAS_NODE_TYPES.nsfwFactoryShot],
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAudio,
+    // 无配音/BGM 时允许镜头直连合成
+    CANVAS_NODE_TYPES.nsfwFactoryShot,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryQc]: [CANVAS_NODE_TYPES.nsfwFactoryCompose],
 };
 
 // 「源节点类型」→ 允许的下游（目标）节点类型白名单。与上面那张表对称：那张按
@@ -676,6 +1090,21 @@ const UPSTREAM_SOURCE_WHITELIST: Partial<Record<CanvasNodeType, readonly CanvasN
 // 谁都没拦。放进这里才真正收口。
 const DOWNSTREAM_TARGET_WHITELIST: Partial<Record<CanvasNodeType, readonly CanvasNodeType[]>> = {
   [CANVAS_NODE_TYPES.audio]: [CANVAS_NODE_TYPES.video, CANVAS_NODE_TYPES.videoCompose],
+  // ---- R18 制作工厂流水线（镜像上游表）----
+  [CANVAS_NODE_TYPES.nsfwFactoryInit]: [CANVAS_NODE_TYPES.nsfwFactoryScript],
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: [CANVAS_NODE_TYPES.nsfwFactoryStoryboard],
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAsset,
+    CANVAS_NODE_TYPES.nsfwFactoryShot,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: [CANVAS_NODE_TYPES.nsfwFactoryShot],
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAudio,
+    CANVAS_NODE_TYPES.nsfwFactoryCompose,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: [CANVAS_NODE_TYPES.nsfwFactoryCompose],
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: [CANVAS_NODE_TYPES.nsfwFactoryQc],
+  [CANVAS_NODE_TYPES.nsfwFactoryQc]: [],
 };
 
 // 返回某目标类型允许的上游源类型；返回 null 表示该类型不施加额外类型限制。
@@ -784,19 +1213,65 @@ export const DOWNSTREAM_SPAWN_WHITELIST: Partial<
   [CANVAS_NODE_TYPES.imageEdit]: IMAGE_DOWNSTREAM_SPAWN_TYPES,
   [CANVAS_NODE_TYPES.imageGen]: IMAGE_DOWNSTREAM_SPAWN_TYPES,
   [CANVAS_NODE_TYPES.exportImage]: IMAGE_DOWNSTREAM_SPAWN_TYPES,
+  // R18 剧本：下游唯一嫡系是「R18 分镜」（消费 planResult.scenes）。
+  [CANVAS_NODE_TYPES.nsfwScript]: [CANVAS_NODE_TYPES.nsfwStoryboard],
+  // R18 分镜：spawn 的首帧子节点之外，嫡系下游是「R18 出片」。
+  [CANVAS_NODE_TYPES.nsfwStoryboard]: [
+    CANVAS_NODE_TYPES.nsfwVideoBatch,
+    ...IMAGE_DOWNSTREAM_SPAWN_TYPES,
+  ],
+  // ---- R18 制作工厂流水线（+ 菜单候选）----
+  [CANVAS_NODE_TYPES.nsfwFactoryInit]: [CANVAS_NODE_TYPES.nsfwFactoryScript],
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: [CANVAS_NODE_TYPES.nsfwFactoryStoryboard],
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAsset,
+    CANVAS_NODE_TYPES.nsfwFactoryShot,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: [CANVAS_NODE_TYPES.nsfwFactoryShot],
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAudio,
+    CANVAS_NODE_TYPES.nsfwFactoryCompose,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: [CANVAS_NODE_TYPES.nsfwFactoryCompose],
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: [CANVAS_NODE_TYPES.nsfwFactoryQc],
 };
+
+// ---- 主菜单/通用「+」菜单隐藏集（2026-08-19 深度精简）----
+// 旧分步三件套（R18 剧本/分镜/出片，已被工厂工序覆盖）与工厂 8 个单工序节点
+// 不再出现在主添加菜单和普通节点的「+」候选里——常规用法走「R18 制作流水线」
+// 一键按钮；单工序仍可从链上前一工序节点的「+」上下文 spawn（白名单路径不过
+// 这道过滤）。旧画布里的既有节点渲染不受影响（只藏菜单，不删类型）。
+export const MENU_HIDDEN_NODE_TYPES: ReadonlySet<CanvasNodeType> = new Set([
+  CANVAS_NODE_TYPES.nsfwScript,
+  CANVAS_NODE_TYPES.nsfwStoryboard,
+  CANVAS_NODE_TYPES.nsfwVideoBatch,
+  CANVAS_NODE_TYPES.nsfwFactoryInit,
+  CANVAS_NODE_TYPES.nsfwFactoryScript,
+  CANVAS_NODE_TYPES.nsfwFactoryAsset,
+  CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+  CANVAS_NODE_TYPES.nsfwFactoryShot,
+  CANVAS_NODE_TYPES.nsfwFactoryAudio,
+  CANVAS_NODE_TYPES.nsfwFactoryCompose,
+  CANVAS_NODE_TYPES.nsfwFactoryQc,
+]);
 
 // 给定起源节点类型，返回「从右侧 source handle 出发能创建的下游节点类型集」。
 export function getDownstreamSpawnTypes(
   originType: CanvasNodeType | undefined,
 ): CanvasNodeType[] {
   const base = getConnectMenuNodeTypes('source');
-  if (!originType) return base;
+  if (!originType) return base.filter((type) => !MENU_HIDDEN_NODE_TYPES.has(type));
   // 再过一遍手工建边规则：菜单里出现的候选必须真的连得上。否则用户点了以后新节点
   // 建出来了、边被建边收口拒掉，画布上留下一个孤立节点（如脚本 → 音频）。
   const connectable = base.filter((type) => isManualConnectionAllowed(originType, type));
   const allowed = DOWNSTREAM_SPAWN_WHITELIST[originType];
-  return allowed ? connectable.filter((type) => allowed.includes(type)) : connectable;
+  if (allowed) {
+    // 有白名单（含工厂链式 spawn）：按白名单收口，不过隐藏集——链上工序
+    // 本身就是隐藏类型，必须能从「+」spawn。
+    return connectable.filter((type) => allowed.includes(type));
+  }
+  // 无白名单回落（普通节点的「+」）：过滤隐藏节点，避免 R18 全家桶刷屏。
+  return connectable.filter((type) => !MENU_HIDDEN_NODE_TYPES.has(type));
 }
 
 // 「从左侧 target handle 出发能创建哪些上游节点」的产品白名单 —— 上面那张表的
@@ -823,6 +1298,46 @@ export const UPSTREAM_SPAWN_WHITELIST: Partial<
     CANVAS_NODE_TYPES.imageGen,
     CANVAS_NODE_TYPES.audio,
   ],
+  // R18 分镜：上游 = R18 剧本（scenes 来源）+ 任意图片节点（定妆照锚定）。
+  [CANVAS_NODE_TYPES.nsfwStoryboard]: [
+    CANVAS_NODE_TYPES.nsfwScript,
+    CANVAS_NODE_TYPES.upload,
+    CANVAS_NODE_TYPES.imageGen,
+    CANVAS_NODE_TYPES.nsfwImageGen,
+    CANVAS_NODE_TYPES.exportImage,
+  ],
+  // R18 出片：上游唯一嫡系是「R18 分镜」（frames + 首帧来源）。
+  [CANVAS_NODE_TYPES.nsfwVideoBatch]: [CANVAS_NODE_TYPES.nsfwStoryboard],
+  // R18 短剧工厂：上游可选图片节点（定妆照锚定）。
+  [CANVAS_NODE_TYPES.nsfwDramaStudio]: [
+    CANVAS_NODE_TYPES.upload,
+    CANVAS_NODE_TYPES.imageGen,
+    CANVAS_NODE_TYPES.nsfwImageGen,
+    CANVAS_NODE_TYPES.exportImage,
+  ],
+  // 音频的「+ 菜单」只给文本（video/batch 边是系统 spawn 的溯源边，建边
+  // 规则放行但菜单不提供——与 node-registry 测试约定一致）
+  [CANVAS_NODE_TYPES.audio]: [CANVAS_NODE_TYPES.textAnnotation],
+  // ---- R18 制作工厂流水线（左侧「+」上游候选，镜像下游表）----
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: [CANVAS_NODE_TYPES.nsfwFactoryInit],
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: [CANVAS_NODE_TYPES.nsfwFactoryScript],
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: [
+    CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+    CANVAS_NODE_TYPES.upload,
+    CANVAS_NODE_TYPES.imageGen,
+    CANVAS_NODE_TYPES.nsfwImageGen,
+    CANVAS_NODE_TYPES.exportImage,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAsset,
+    CANVAS_NODE_TYPES.nsfwFactoryStoryboard,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: [CANVAS_NODE_TYPES.nsfwFactoryShot],
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: [
+    CANVAS_NODE_TYPES.nsfwFactoryAudio,
+    CANVAS_NODE_TYPES.nsfwFactoryShot,
+  ],
+  [CANVAS_NODE_TYPES.nsfwFactoryQc]: [CANVAS_NODE_TYPES.nsfwFactoryCompose],
 };
 
 // 给定目标节点类型，返回「从左侧 target handle 出发能创建的上游节点类型集」。
@@ -859,5 +1374,6 @@ export function getUpstreamSpawnTypes(
     return manual(allowedUpstream);
   }
 
-  return manual(base);
+  // 最终回落（普通节点的左侧「+」）：过滤隐藏节点（同 getDownstreamSpawnTypes）。
+  return manual(base).filter((type) => !MENU_HIDDEN_NODE_TYPES.has(type));
 }

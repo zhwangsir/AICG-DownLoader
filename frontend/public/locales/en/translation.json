@@ -3404,6 +3404,8 @@
       "script": "Script",
       "pano360Viewer": "360° View",
       "threeDWorld": "3D World",
+      "nsfwImage": "R18 Image",
+      "nsfwVideo": "R18 Video",
       "sectionAddNode": "Add Node",
       "sectionAddResource": "Add Resource",
       "sectionSkillNode": "Skill Nodes",
@@ -3412,7 +3414,21 @@
       "placeholderAudio": "Audio",
       "placeholderScript": "Script",
       "betaTag": "Beta",
-      "videoCompose": "Video Compose"
+      "videoCompose": "Video Compose",
+      "nsfwScript": "R18 Script",
+      "nsfwStoryboard": "R18 Storyboard",
+      "nsfwVideoBatch": "R18 Episode",
+      "nsfwDramaStudio": "R18 Drama Studio",
+      "nsfwFactoryInit": "Factory·Init",
+      "nsfwFactoryScript": "Factory·Script",
+      "nsfwFactoryAsset": "Factory·Assets",
+      "nsfwFactoryStoryboard": "Factory·Storyboard",
+      "nsfwFactoryShot": "Factory·Shots",
+      "nsfwFactoryAudio": "Factory·Audio",
+      "nsfwFactoryCompose": "Factory·Compose",
+      "nsfwFactoryQc": "Factory·QC",
+      "nsfwFactoryPipeline": "R18 Production Pipeline",
+      "nsfwFactoryPipelineHint": "Insert 8-stage left-to-right pipeline"
     },
     "imageNode": {
       "title": "Image Node",
@@ -4017,7 +4033,26 @@
       "loading": "Loading…",
       "tabs": {
         "nas": "Local Models",
-        "download": "Download"
+        "download": "Download",
+        "studio": "Image Studio"
+      },
+      "studio": {
+        "title": "Image Studio",
+        "checkpoint": "Checkpoint",
+        "prompt": "Prompt",
+        "promptPlaceholder": "Enter prompt… (NSFW checkpoints require R18 unlocked)",
+        "negative": "Negative prompt",
+        "negativePlaceholder": "lowres, bad anatomy, watermark…",
+        "size": "Size",
+        "sizePortrait": "Portrait 832×1216",
+        "sizeLandscape": "Landscape 1216×832",
+        "sizeSquare": "Square 1024×1024",
+        "generate": "Generate",
+        "generating": "Generating… (~30-90s)",
+        "download": "Download image",
+        "nsfwBlocked": "Selected checkpoint is NSFW; unlock R18 first.",
+        "emptyPrompt": "Enter a prompt and pick a checkpoint.",
+        "result": "Result"
       },
       "nas": {
         "searchPlaceholder": "Search model name / path…",

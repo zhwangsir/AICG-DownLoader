@@ -6,6 +6,7 @@ import type {
   DirectorObjectLayer,
   DirectorWorldSource,
 } from '@/features/viewer-kit/three-d/directorManifest';
+import type { R18SceneData } from '@/lib/queries/model-library';
 
 export const CANVAS_NODE_TYPES = {
   upload: 'uploadNode',
@@ -25,6 +26,21 @@ export const CANVAS_NODE_TYPES = {
   pano360Viewer: 'pano360ViewerNode',
   threeDWorld: 'threeDWorldNode',
   skill: 'skillNode',
+  nsfwImageGen: 'nsfwImageGenNode',
+  nsfwVideoGen: 'nsfwVideoGenNode',
+  nsfwScript: 'nsfwScriptNode',
+  nsfwStoryboard: 'nsfwStoryboardNode',
+  nsfwVideoBatch: 'nsfwVideoBatchNode',
+  nsfwDramaStudio: 'nsfwDramaStudioNode',
+  // ---- R18 制作工厂流水线（8 工序左到右链，2026-08-19）----
+  nsfwFactoryInit: 'nsfwFactoryInitNode',
+  nsfwFactoryScript: 'nsfwFactoryScriptNode',
+  nsfwFactoryAsset: 'nsfwFactoryAssetNode',
+  nsfwFactoryStoryboard: 'nsfwFactoryStoryboardNode',
+  nsfwFactoryShot: 'nsfwFactoryShotNode',
+  nsfwFactoryAudio: 'nsfwFactoryAudioNode',
+  nsfwFactoryCompose: 'nsfwFactoryComposeNode',
+  nsfwFactoryQc: 'nsfwFactoryQcNode',
 } as const;
 
 export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[keyof typeof CANVAS_NODE_TYPES];
@@ -369,6 +385,47 @@ export interface ImageGenNodeData extends NodeImageData {
   generationErrorRequestId?: string | null;
 }
 
+/**
+ * R18 图片节点数据 —— 功能与 imageGenNode 同构（提示词/尺寸/参考图/连线），
+ * 但提交走 model-library 本地 NSFW 管线（checkpoint 级 SDXL 出图），
+ * 产物落盘项目媒体（imageUrl 为 /static/projects/... 相对 URL）。
+ */
+export interface NSFWImageGenNodeData extends NodeImageData {
+  prompt: string;
+  negativePrompt: string;
+  /** model-library checkpoint 文件名（如 xxx.safetensors）。 */
+  checkpoint: string;
+  /** SDXL 像素尺寸，"WxH" 格式（如 832x1216）。 */
+  size: string;
+  /** 用户手动上传的参考图（IPAdapter 锚定），优先于上游连线图。 */
+  referenceImageUrl?: string | null;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationDurationMs?: number;
+  generationError?: string | null;
+}
+
+/**
+ * R18 视频节点数据 —— 内置 4 个 NSFW 预设（Wan 2.2 I2V ×3 / MiniMax H3 ×1）
+ * 直提 ComfyUI，mp4 落盘项目媒体。首帧锚定强制（I2V 必需）。
+ */
+export interface NSFWVideoGenNodeData extends NodeDisplayData {
+  prompt: string;
+  /** 预设 id（wan22-missionary / wan22-doggie-twerk / wan22-blowjob-closeup / h3-aio）。 */
+  presetId: string;
+  width: number;
+  height: number;
+  /** 帧数（wan 81≈5s / h3 124≈5s、241≈10s）。 */
+  length: number;
+  videoUrl: string | null;
+  /** 用户手动上传的首帧图，优先于上游连线图。 */
+  firstFrameUrl?: string | null;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationDurationMs?: number;
+  generationError?: string | null;
+}
+
 export interface StoryboardFrameItem {
   id: string;
   imageUrl: string | null;
@@ -376,6 +433,250 @@ export interface StoryboardFrameItem {
   aspectRatio?: string;
   note: string;
   order: number;
+}
+
+/**
+ * R18 剧本节点数据 —— 梗概+角色卡 → LLM（本地 uncensored）结构化分镜：
+ * scenes JSON（类型路由 plot/action/portrait、预设 id、首帧提示词、对白）。
+ * 下游「R18 分镜节点」读 planResult.scenes 批量出首帧。
+ */
+export interface NSFWScriptNodeData extends NodeDisplayData {
+  synopsis: string;
+  /** 角色卡自由文本，每行「名字：描述」。 */
+  charactersText: string;
+  styleHint: string;
+  durationSec: number;
+  aspect: '9:16' | '16:9' | '1:1';
+  planResult: { title: string; scenes: R18SceneData[] } | null;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationDurationMs?: number;
+  generationError?: string | null;
+}
+
+/** R18 分镜节点：单帧（对应剧本一个 scene）的首帧生成状态。 */
+export interface NsfwStoryboardFrameItem {
+  id: string;
+  sceneNo: number;
+  kind: 'plot' | 'action' | 'portrait';
+  title: string;
+  imagePrompt: string;
+  videoPrompt: string;
+  presetId: string;
+  dialogue: string;
+  narration: string;
+  durationSec: number;
+  /** 剧本规划的音频策略：native（h3-aio 音画同出，不配音）/ tts / none。 */
+  audio: 'native' | 'tts' | 'none';
+  imageUrl: string | null;
+  isGenerating?: boolean;
+  error?: string | null;
+  /** 首帧落图后 spawn 的子节点（exportImage），避免重复 spawn。 */
+  childNodeId?: string | null;
+}
+
+/**
+ * R18 分镜节点数据 —— 消费上游 R18 剧本 scenes × 定妆照（IPAdapter 锚定）
+ * 并发批量生成全部首帧；每帧落图后 spawn exportImage 子节点供下游 R18 视频节点
+ * 单独连线引用。
+ */
+export interface NSFWStoryboardNodeData extends NodeDisplayData {
+  checkpoint: string;
+  size: string;
+  frames: NsfwStoryboardFrameItem[];
+  /** 用户手动上传的定妆照（锚定优先于上游连线图）。 */
+  anchorUploadUrl?: string | null;
+  isBatchRunning?: boolean;
+  batchError?: string | null;
+}
+
+/** R18 出片节点：单个镜头（对应分镜一帧）的出片状态。 */
+export interface NsfwVideoBatchShot {
+  id: string;
+  sceneNo: number;
+  kind: 'plot' | 'action' | 'portrait';
+  title: string;
+  videoPrompt: string;
+  presetId: string;
+  dialogue: string;
+  narration: string;
+  durationSec: number;
+  audio: 'native' | 'tts' | 'none';
+  firstFrameUrl: string | null;
+  /** 生成产物：mp4 URL + spawn 的视频子节点。 */
+  videoUrl: string | null;
+  videoNodeId?: string | null;
+  /** TTS 产物：mp3 URL + spawn 的音频子节点（audio=tts 镜头）。 */
+  audioUrl: string | null;
+  audioNodeId?: string | null;
+  phase: 'pending' | 'tts' | 'video' | 'done' | 'error';
+  error?: string | null;
+}
+
+/**
+ * R18 出片节点数据 —— 消费上游「R18 分镜」frames（已生成首帧的镜头）：
+ * 先逐句 TTS（audio=tts 镜头），再顺序逐镜头生成视频（action 走其预设，
+ * plot/portrait 走 h3-clean 无 LoRA 预设）；每个产物 spawn 视频/音频子节点
+ * 供 videoCompose 合成；并支持按剧本对白导出 SRT 字幕轨。
+ */
+export interface NSFWVideoBatchNodeData extends NodeDisplayData {
+  voice: string;
+  shots: NsfwVideoBatchShot[];
+  isBatchRunning?: boolean;
+  batchError?: string | null;
+}
+
+/**
+ * R18 短剧工厂节点数据 —— 单节点全流程：梗概输入 → LLM 分镜 → 批量首帧 →
+ * TTS 情感配音 → 逐镜头视频 → 成片合成（字幕烧录），五阶段状态机持久化在
+ * node data，刷新页面后可断点续拍。
+ */
+export interface NSFWDramaStudioNodeData extends NodeDisplayData {
+  // ── 输入区（与剧本/分镜/出片三节点输入合并）──
+  synopsis: string;
+  charactersText: string;
+  styleHint: string;
+  durationSec: number;
+  aspect: '9:16' | '16:9' | '1:1';
+  checkpoint: string;
+  size: string;
+  /** 定妆照（IPAdapter 锚定全部首帧）。 */
+  anchorUploadUrl?: string | null;
+  voice: string;
+  /** 剧本完成后不停顿直接出片（默认 false=暂停等确认可改词）。 */
+  autoConfirm: boolean;
+
+  // ── 五阶段产物（断点续拍依据：产物在则跳过该阶段）──
+  planTitle: string;
+  scenes: R18SceneData[];
+  /** 首帧：sceneNo → imageUrl。 */
+  frameUrls: Record<number, string>;
+  /** 出片：sceneNo → {videoUrl, audioUrl}。 */
+  shotOutputs: Record<number, { videoUrl: string; audioUrl: string | null }>;
+  /** 成片。 */
+  composeUrl: string | null;
+  composeDurationSec?: number | null;
+  /** 合成响应回传的最终 SRT（真实时间轴，与烧录字幕同源）。 */
+  composeSrt?: string;
+
+  /** idle→planning→await_confirm→frames→shots→composing→done / error。 */
+  pipeline: 'idle' | 'planning' | 'await_confirm' | 'frames' | 'shots' | 'composing' | 'done' | 'error';
+  /** 页面刷新中断后为 true：面板显示「继续拍摄」。 */
+  interrupted?: boolean;
+  error?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// R18 制作工厂流水线（8 工序：立项→剧本→资产→分镜→镜头→音频→后期→质检）
+// 数据经左到右连线逐工序传递（组件用 useFactoryUpstream 沿入边回溯取最近工序产物）
+// ---------------------------------------------------------------------------
+
+/** 工序 1：立项定位（题材/模型/时长/分辨率/画幅 —— 全流水线规格源头）。 */
+export interface NSFWFactoryInitNodeData extends NodeDisplayData {
+  theme: string;
+  themeNote: string;
+  checkpoint: string;
+  size: string;
+  durationSec: number;
+  aspect: '9:16' | '16:9' | '1:1';
+}
+
+/** 工序 2：剧本工程（梗概+角色卡 → 分集 episodes；scenes 展平带 episodeNo）。 */
+export interface NSFWFactoryScriptNodeData extends NodeDisplayData {
+  synopsis: string;
+  charactersText: string;
+  episodeCount: number;
+  planTitle: string;
+  episodes: Array<{ episodeNo: number; title: string; scenes: R18SceneData[] }>;
+  isGenerating?: boolean;
+  generationStartedAt?: number | null;
+  generationError?: string | null;
+}
+
+/** 工序 4：数字资产（分镜确认后按镜头提取角色/场景参考图 + 画风锚定）。 */
+export interface NSFWFactoryAssetItem {
+  kind: 'character' | 'scene' | 'prop';
+  name: string;
+  desc: string;
+  imageUrl: string;
+  generating?: boolean;
+  error?: string | null;
+}
+
+export interface NSFWFactoryAssetNodeData extends NodeDisplayData {
+  items: NSFWFactoryAssetItem[];
+  styleAnchorUrl: string | null;
+  isGenerating?: boolean;
+  generationError?: string | null;
+}
+
+/** 工序 3：分镜表（镜号/景别/运镜/画面提示词/台词/时长，可编辑后确认）。 */
+export interface NSFWFactoryStoryboardRow {
+  shotNo: number;
+  episodeNo: number;
+  kind: 'plot' | 'action' | 'portrait';
+  shotSize: string;
+  cameraMove: string;
+  imagePrompt: string;
+  videoPrompt: string;
+  dialogue: string;
+  narration: string;
+  emotion: string;
+  durationSec: number;
+  presetId: string;
+  audio: 'native' | 'tts' | 'none';
+  actionDesc: string;
+  expression: string;
+  sceneDesc: string;
+}
+
+export interface NSFWFactoryStoryboardNodeData extends NodeDisplayData {
+  rows: NSFWFactoryStoryboardRow[];
+  confirmed: boolean;
+}
+
+/** 工序 5：镜头视频（帧链生成 frameUrl → I2V videoUrl，断点续跑）。 */
+export interface NSFWFactoryShotNodeData extends NodeDisplayData {
+  outputs: Record<number, { frameUrl: string; videoUrl: string }>;
+  isRunning?: boolean;
+  error?: string | null;
+  interrupted?: boolean;
+}
+
+/** 工序 6：音频制作（逐镜头 TTS + BGM + 环境音效轨）。 */
+export interface NSFWFactoryAudioNodeData extends NodeDisplayData {
+  voice: string;
+  ttsUrls: Record<number, string>;
+  bgmUrl: string;
+  bgmVolume: number;
+  /** 环境音效轨（雨声/街道等，循环铺满全片）。 */
+  envSfxUrl: string;
+  envSfxVolume: number;
+  isRunning?: boolean;
+  error?: string | null;
+}
+
+/** 工序 7：后期合成（调色/转场/片头尾卡/字幕烧录/BGM 混音）。 */
+export interface NSFWFactoryComposeNodeData extends NodeDisplayData {
+  colorProfile: 'none' | 'warm' | 'cool' | 'film';
+  transition: 'none' | 'fade';
+  openingText: string;
+  closingText: string;
+  burnSubtitle: boolean;
+  /** 合成响应回传的最终 SRT（真实时间轴，供工序⑧ QC 回读比对）。 */
+  srt?: string;
+  composeUrl: string | null;
+  composeDurationSec?: number | null;
+  isRunning?: boolean;
+  error?: string | null;
+}
+
+/** 工序 8：质检预览（时长/音轨/字幕回读/剧情 LLM 审查报告 + 成片预览）。 */
+export interface NSFWFactoryQcNodeData extends NodeDisplayData {
+  reportUrl: string | null;
+  report: import('@/lib/queries/model-library').R18FactoryQcResult | null;
+  isRunning?: boolean;
+  error?: string | null;
 }
 
 export interface StoryboardExportOptions {

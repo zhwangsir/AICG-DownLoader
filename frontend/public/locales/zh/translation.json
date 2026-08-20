@@ -3404,6 +3404,8 @@
       "script": "脚本",
       "pano360Viewer": "360° 全景",
       "threeDWorld": "导演世界",
+      "nsfwImage": "R18 图片",
+      "nsfwVideo": "R18 视频",
       "sectionAddNode": "添加节点",
       "sectionAddResource": "添加资源",
       "sectionSkillNode": "技能节点",
@@ -3412,7 +3414,21 @@
       "placeholderAudio": "音频",
       "placeholderScript": "脚本",
       "betaTag": "Beta",
-      "videoCompose": "视频合成"
+      "videoCompose": "视频合成",
+      "nsfwScript": "R18 剧本",
+      "nsfwStoryboard": "R18 分镜",
+      "nsfwVideoBatch": "R18 出片",
+      "nsfwDramaStudio": "R18 短剧工厂",
+      "nsfwFactoryInit": "工厂·立项",
+      "nsfwFactoryScript": "工厂·剧本",
+      "nsfwFactoryAsset": "工厂·资产",
+      "nsfwFactoryStoryboard": "工厂·分镜",
+      "nsfwFactoryShot": "工厂·镜头",
+      "nsfwFactoryAudio": "工厂·音频",
+      "nsfwFactoryCompose": "工厂·后期",
+      "nsfwFactoryQc": "工厂·质检",
+      "nsfwFactoryPipeline": "R18 制作流水线",
+      "nsfwFactoryPipelineHint": "一键插入 8 工序左到右流水线"
     },
     "imageNode": {
       "title": "图片节点",
@@ -4017,7 +4033,26 @@
       "loading": "加载中…",
       "tabs": {
         "nas": "本地模型",
-        "download": "下载"
+        "download": "下载",
+        "studio": "生图台"
+      },
+      "studio": {
+        "title": "生图测试台",
+        "checkpoint": "底模（checkpoint）",
+        "prompt": "正向提示词",
+        "promptPlaceholder": "输入提示词…（NSFW 底模需先开启 R18）",
+        "negative": "负面提示词",
+        "negativePlaceholder": "lowres, bad anatomy, watermark…",
+        "size": "尺寸",
+        "sizePortrait": "竖屏 832×1216",
+        "sizeLandscape": "横屏 1216×832",
+        "sizeSquare": "方图 1024×1024",
+        "generate": "生成",
+        "generating": "生成中…（约 30-90 秒）",
+        "download": "下载图片",
+        "nsfwBlocked": "所选底模为 NSFW 内容，请先开启 R18 开关。",
+        "emptyPrompt": "请输入提示词并选择底模。",
+        "result": "生成结果"
       },
       "nas": {
         "searchPlaceholder": "搜索模型名称 / 路径…",

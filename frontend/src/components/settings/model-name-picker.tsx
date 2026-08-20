@@ -33,6 +33,7 @@ export function ModelNamePicker({
   expectedTypes,
   disabled,
   ariaLabel,
+  getOptionDisabledReason,
 }: {
   value: string;
   onChange: (filename: string) => void;
@@ -40,6 +41,8 @@ export function ModelNamePicker({
   expectedTypes: string[];
   disabled?: boolean;
   ariaLabel?: string;
+  /** 返回禁选原因（非 null 则该条目禁选并显示原因），如 SDXL 不兼容清单 */
+  getOptionDisabledReason?: (entry: ModelLibraryEntry) => string | null;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -116,34 +119,48 @@ export function ModelNamePicker({
               {t("settings.library.picker.noCandidates")}
             </div>
           ) : (
-            candidates.map((entry) => (
-              <button
-                key={`${entry.root}/${entry.rel_path}`}
-                type="button"
-                role="option"
-                aria-selected={entry.name === value}
-                onClick={() => select(entry)}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-white/[0.06]"
-              >
-                <Check
+            candidates.map((entry) => {
+              const disabledReason = getOptionDisabledReason?.(entry) ?? null;
+              return (
+                <button
+                  key={`${entry.root}/${entry.rel_path}`}
+                  type="button"
+                  role="option"
+                  aria-selected={entry.name === value}
+                  aria-disabled={disabledReason != null || undefined}
+                  title={disabledReason ?? undefined}
+                  onClick={() => {
+                    if (disabledReason) return;
+                    select(entry);
+                  }}
                   className={cn(
-                    "size-3.5 shrink-0",
-                    entry.name === value ? "text-cyan-300" : "opacity-0",
+                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs",
+                    disabledReason
+                      ? "cursor-not-allowed opacity-45"
+                      : "hover:bg-white/[0.06]",
                   )}
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-mono">{entry.name}</span>
-                  <span className="block text-[10px] text-muted-foreground">
-                    {entry.root} · {entry.type}
-                    {entry.nsfw ? " · NSFW" : ""}
+                >
+                  <Check
+                    className={cn(
+                      "size-3.5 shrink-0",
+                      entry.name === value ? "text-cyan-300" : "opacity-0",
+                    )}
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono">{entry.name}</span>
+                    <span className="block text-[10px] text-muted-foreground">
+                      {entry.root} · {entry.type}
+                      {entry.nsfw ? " · NSFW" : ""}
+                      {disabledReason ? ` · ${disabledReason}` : ""}
+                    </span>
                   </span>
-                </span>
-                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                  {formatSize(entry.size)}
-                </span>
-              </button>
-            ))
+                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                    {formatSize(entry.size)}
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
       </PopoverContent>

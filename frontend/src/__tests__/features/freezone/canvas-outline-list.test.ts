@@ -239,7 +239,10 @@ describe("CANVAS_OUTLINE_FILTERS", () => {
 
   it("maps 全部 to an empty type list", () => {
     expect(outlineFilterTypes("all")).toEqual([]);
-    expect(outlineFilterTypes("audio")).toEqual([CANVAS_NODE_TYPES.audio]);
+    expect(outlineFilterTypes("audio")).toEqual([
+      CANVAS_NODE_TYPES.audio,
+      CANVAS_NODE_TYPES.nsfwFactoryAudio,
+    ]);
   });
 });
 

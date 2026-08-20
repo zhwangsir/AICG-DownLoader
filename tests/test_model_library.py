@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 import respx
 from fastapi import FastAPI
@@ -59,6 +62,244 @@ class TestNsfwGate:
     def test_default_status_disabled(self):
         assert ml.nsfw_status() == {"nsfw_enabled": False}
 
+
+# ---------------------------------------------------------------------------
+# 生图测试台（generate-image：R18 门禁 + 网关转发）
+# ---------------------------------------------------------------------------
+
+
+class _FakeTranslatorAgent:
+    """替身 Agent：可注入输出文本或异常。"""
+
+    def __init__(self, output: str | None = None, error: Exception | None = None):
+        self._output = output
+        self._error = error
+        self.calls: list[str] = []
+
+    async def run(self, text: str):
+        self.calls.append(text)
+        if self._error:
+            raise self._error
+        import types
+
+        return types.SimpleNamespace(output=self._output)
+
+
+class TestPromptTranslation:
+    """generate-image 中文提示词译写（SDXL 不识别中文，送网关前转英文 tag）。"""
+
+    @pytest.mark.asyncio
+    async def test_english_prompt_passes_through_without_llm(self, monkeypatch):
+        # 纯英文输入零开销直通：不应构造/调用 Agent
+        def _boom():
+            raise AssertionError("纯英文提示词不应触达 LLM")
+
+        monkeypatch.setattr(ml_routes, "_get_prompt_translator_agent", _boom)
+        out = await ml_routes.translate_prompt_to_english("1girl, red hair, masterpiece")
+        assert out == "1girl, red hair, masterpiece"
+
+    @pytest.mark.asyncio
+    async def test_chinese_prompt_translated_to_english_tags(self, monkeypatch):
+        agent = _FakeTranslatorAgent(output="1girl, 28 years old, long straight black hair, slim, white silk nightgown")
+        monkeypatch.setattr(ml_routes, "_get_prompt_translator_agent", lambda: agent)
+        out = await ml_routes.translate_prompt_to_english("28岁女性，黑色长直发，纤细体型，白色丝绸睡裙")
+        assert out.startswith("1girl")
+        assert agent.calls  # 确实走了 LLM
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_falls_back_to_original(self, monkeypatch):
+        agent = _FakeTranslatorAgent(error=RuntimeError("gateway down"))
+        monkeypatch.setattr(ml_routes, "_get_prompt_translator_agent", lambda: agent)
+        text = "黑色长直发的女性"
+        out = await ml_routes.translate_prompt_to_english(text)
+        assert out == text  # fail-open
+
+    @pytest.mark.asyncio
+    async def test_suspiciously_short_translation_falls_back(self, monkeypatch):
+        # 中文 8 字 → 译写结果 2 字符，明显丢信息，回退原文
+        agent = _FakeTranslatorAgent(output="ok")
+        monkeypatch.setattr(ml_routes, "_get_prompt_translator_agent", lambda: agent)
+        text = "28岁女性黑色长直发纤细体型"
+        out = await ml_routes.translate_prompt_to_english(text)
+        assert out == text
+
+    @pytest.mark.asyncio
+    async def test_empty_and_whitespace_prompts(self):
+        assert await ml_routes.translate_prompt_to_english("") == ""
+        assert await ml_routes.translate_prompt_to_english("   ") == "   "
+
+    def test_generate_image_endpoint_translates_before_gateway(self, monkeypatch):
+        """端点集成：中文 prompt 译写后才送 local_gateway（网关收到英文）。"""
+        captured = {}
+
+        def _handler(request: httpx.Request) -> Response:
+            captured["body"] = json.loads(request.read())
+            return Response(200, json={"data": [{"b64_json": "QUJD"}]})
+
+        agent = _FakeTranslatorAgent(output="1girl, 28 years old, long black straight hair, slim body, white silk nightgown")
+        monkeypatch.setattr(ml_routes, "_get_prompt_translator_agent", lambda: agent)
+
+        with respx.mock:
+            respx.post(url__regex=r".*/v1/images/generations").mock(side_effect=_handler)
+            c = _client()
+            r = c.post(
+                "/model-library/generate-image",
+                json={
+                    "prompt": "28岁女性，黑色长直发，白色丝绸睡裙",
+                    "negative_prompt": "低画质",
+                    "checkpoint": "majicMIX.safetensors",
+                },
+            )
+            assert r.status_code == 200
+            body = captured["body"]
+            translated = "1girl, 28 years old, long black straight hair, slim body, white silk nightgown"
+            assert body["prompt"] == translated
+            # negative 同样含中文 → 同一替身 Agent 译写（输出恒定）
+            assert body["negative_prompt"] == translated
+            # 两次译写（正向 + 负向）都经同一个替身 Agent
+            assert len(agent.calls) == 2
+
+
+class TestGenerateImage:
+    def _post(self, client: TestClient, **overrides):
+        body = {
+            "prompt": "1girl, test",
+            "negative_prompt": "lowres",
+            "checkpoint": "majicMIX realistic_v7.safetensors",
+            "size": "832x1216",
+        }
+        body.update(overrides)
+        return client.post("/model-library/generate-image", json=body)
+
+    def test_nsfw_checkpoint_blocked_without_r18(self):
+        with respx.mock:
+            # R18 关闭 + NSFW 底模 → 403（不应触达网关）
+            c = _client()
+            r = self._post(c, checkpoint="lustifySDXLNSFW_apexV8.safetensors")
+            assert r.status_code == 403
+            assert "R18" in r.json()["detail"]
+
+    def test_nsfw_checkpoint_allowed_with_r18(self):
+        ml.set_nsfw(True)
+        with respx.mock:
+            route = respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(200, json={"data": [{"b64_json": "QUJD"}]})
+            )
+            c = _client()
+            r = self._post(c, checkpoint="lustifySDXLNSFW_apexV8.safetensors")
+            assert r.status_code == 200
+            assert r.json() == {"ok": True, "data": {"data": [{"b64_json": "QUJD"}]}}
+            sent = route.calls.last.request.read()
+            assert b"lustifySDXLNSFW" in sent
+            assert b"DC-sdxl" in sent
+
+    def test_sfw_checkpoint_passes_without_r18(self):
+        with respx.mock:
+            route = respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(200, json={"data": [{"b64_json": "QUJD"}]})
+            )
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 200
+            assert route.called
+
+    def test_gateway_error_mapped_to_502(self):
+        with respx.mock:
+            respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(502, json={"error": {"message": "缺失权重"}})
+            )
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 502
+            assert "缺失权重" in r.json()["detail"]
+
+    def test_gateway_unreachable_502(self):
+        with respx.mock:
+            respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                side_effect=httpx.ConnectError("connection refused")
+            )
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 502
+            assert "不可达" in r.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_project_id_saves_png_and_returns_url(self, monkeypatch, tmp_path):
+        import base64
+
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"imgdata").decode()
+        with respx.mock:
+            respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(200, json={"data": [{"b64_json": png}]})
+            )
+
+            class _Ctx:
+                output_dir = str(tmp_path)
+                project_id = "proj-1"
+
+            async def _fake_resolve(**kwargs):
+                return _Ctx()
+
+            monkeypatch.setattr(ml_routes, "resolve_project_context", _fake_resolve)
+            monkeypatch.setattr(ml_routes, "require_project_home_node", lambda ctx, operation: None)
+
+            from fastapi.testclient import TestClient as TC
+
+            app = FastAPI()
+            app.include_router(ml_routes.router)
+            app.dependency_overrides[ml_routes.get_api_user] = lambda: {"username": "alice"}
+            c = TC(app)
+            r = c.post(
+                "/model-library/generate-image",
+                json={
+                    "prompt": "1girl",
+                    "checkpoint": "majicMIX.safetensors",
+                    "project_id": "proj-1",
+                },
+            )
+            assert r.status_code == 200
+            data = r.json()["data"]
+            assert data["url"].startswith("/static/projects/proj-1/")
+            assert "freezone/_outputs/nsfw_studio/" in data["rel_path"]
+            # 文件真实落盘
+            saved = tmp_path / data["rel_path"]
+            assert saved.read_bytes().startswith(b"\x89PNG")
+
+    def test_reference_url_routes_to_edits(self):
+        captured = {}
+
+        def _handler(request: httpx.Request) -> Response:
+            captured["path"] = request.url.path
+            captured["body"] = request.read()
+            return Response(200, json={"data": [{"b64_json": "QUJD"}]})
+
+        with respx.mock:
+            respx.post(url__regex=r".*").mock(side_effect=_handler)
+            c = _client()
+            r = c.post(
+                "/model-library/generate-image",
+                json={
+                    "prompt": "1girl",
+                    "checkpoint": "majicMIX.safetensors",
+                    "reference_url": "http://x/ref.png",
+                },
+            )
+            assert r.status_code == 200
+            assert captured["path"] == "/v1/images/edits"
+            assert b"http://x/ref.png" in captured["body"]
+
+    def test_no_project_returns_b64_only(self):
+        with respx.mock:
+            respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(200, json={"data": [{"b64_json": "QUJD"}]})
+            )
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 200
+            assert "url" not in r.json()["data"]
+
+
+class TestNsfwGateRoundtrip:
     def test_enable_disable_roundtrip(self):
         assert ml.set_nsfw(True) == {"nsfw_enabled": True}
         assert ml.nsfw_status()["nsfw_enabled"] is True
@@ -586,3 +827,965 @@ class TestRouter:
             c = _client()
             resp = c.get("/model-library/search", params={"q": "test"})
         assert resp.status_code == 200 and resp.json()["data"]["items"] == []
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint 架构探测（safetensors header → 工作流路由）
+# ---------------------------------------------------------------------------
+
+
+def _mk_safetensors(path: Path, keys: list[str]) -> Path:
+    """手写一个只含 header 的合法 safetensors（data 段空）。"""
+    import struct
+
+    header = {k: {"dtype": "F32", "shape": [1], "data_offsets": [0, 0]} for k in keys}
+    blob = json.dumps(header).encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(struct.pack("<Q", len(blob)) + blob)
+    return path
+
+
+class TestArchDetect:
+    def test_sd_complete(self, tmp_path):
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/sdxl.safetensors",
+            ["model.diffusion_model.x", "conditioner.embedders.clip_l.y", "vae.decoder"],
+        )
+        assert ml.detect_checkpoint_arch(
+            "checkpoints/sdxl.safetensors", [tmp_path / "models"]
+        ) == "sd"
+
+    def test_sd15(self, tmp_path):
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/sd15.safetensors",
+            ["cond_stage_model.transformer", "model.diffusion_model.x"],
+        )
+        assert ml.detect_checkpoint_arch(
+            "checkpoints/sd15.safetensors", [tmp_path / "models"]
+        ) == "sd"
+
+    def test_flux_complete(self, tmp_path):
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/flux.safetensors",
+            ["model.diffusion_model.x", "clip_l.y", "t5xxl.z", "vae.decoder"],
+        )
+        assert ml.detect_checkpoint_arch(
+            "checkpoints/flux.safetensors", [tmp_path / "models"]
+        ) == "flux"
+
+    def test_flux_double_blocks(self, tmp_path):
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/f2.safetensors",
+            ["double_blocks.0.x", "single_blocks.0.y"],
+        )
+        # double_blocks 且无 vae → flux-unet
+        assert ml.detect_checkpoint_arch(
+            "checkpoints/f2.safetensors", [tmp_path / "models"]
+        ) == "flux-unet"
+
+    def test_krea2(self, tmp_path):
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/krea.safetensors",
+            ["blocks.0.attn.gate.weight", "txtfusion.w", "tmlp.w"],
+        )
+        assert ml.detect_checkpoint_arch(
+            "checkpoints/krea.safetensors", [tmp_path / "models"]
+        ) == "krea2"
+
+    def test_lora_and_other_and_missing(self, tmp_path):
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/l.safetensors",
+            ["lora_te_text_model.0", "lora_unet.1"],
+        )
+        root = tmp_path / "models"
+        assert ml.detect_checkpoint_arch("checkpoints/l.safetensors", [root]) == "lora"
+        _mk_safetensors(
+            root / "checkpoints/vid.safetensors", ["transformer.blocks.0", "patch_embed"]
+        )
+        assert ml.detect_checkpoint_arch("checkpoints/vid.safetensors", [root]) == "other"
+        # 文件不存在 → unknown（放行，不误拦）
+        assert ml.detect_checkpoint_arch("checkpoints/none.safetensors", [root]) == "unknown"
+
+    def test_generate_routes_flux_workflow(self, monkeypatch):
+        """arch=flux/krea2 时 payload 带对应 workflow 转发（2026-08-18 krea2 已接入）。"""
+        captured = {}
+
+        def _handler(request: httpx.Request) -> Response:
+            captured["path"] = request.url.path
+            captured["body"] = request.read()
+            return Response(200, json={"data": [{"b64_json": "QUJD"}]})
+
+        with respx.mock:
+            respx.post(url__regex=r".*").mock(side_effect=_handler)
+            c = _client()
+            monkeypatch.setattr(
+                ml_routes, "detect_checkpoint_arch", lambda rel: "flux"
+            )
+            r = c.post(
+                "/model-library/generate-image",
+                json={"prompt": "1girl", "checkpoint": "flux1-dev-fp8.safetensors"},
+            )
+            assert r.status_code == 200
+            assert b"flux" in captured["body"]
+
+            monkeypatch.setattr(
+                ml_routes, "detect_checkpoint_arch", lambda rel: "krea2"
+            )
+            r2 = c.post(
+                "/model-library/generate-image",
+                json={"prompt": "1girl", "checkpoint": "krea2TurboFP8_krea2TURBO.safetensors"},
+            )
+            assert r2.status_code == 200
+            assert b"krea2" in captured["body"]
+
+    def test_models_endpoint_annotates_arch(self, tmp_path, monkeypatch):
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/krea2TurboFP8_krea2TURBO.safetensors",
+            ["blocks.0.attn.gate.weight", "txtfusion.w"],
+        )
+        _mk_safetensors(
+            tmp_path / "models/checkpoints/flux1-dev-fp8.safetensors",
+            ["model.diffusion_model.x", "clip_l.y", "t5xxl.z", "vae.decoder"],
+        )
+        c = _client()
+        items = c.get("/model-library/models").json()["data"]["items"]
+        by_name = {e["name"]: e for e in items}
+        assert by_name["krea2TurboFP8_krea2TURBO.safetensors"]["arch"] == "krea2"
+        # krea2 已接入（UNETLoader 链），不再禁选
+        assert not by_name["krea2TurboFP8_krea2TURBO.safetensors"].get("sdxl_incompatible")
+        # flux 可用：有 arch 标记但不禁选
+        assert by_name["flux1-dev-fp8.safetensors"]["arch"] == "flux"
+        assert not by_name["flux1-dev-fp8.safetensors"].get("sdxl_incompatible")
+
+
+# ---------------------------------------------------------------------------
+# SDXL 不兼容清单（生成失败自学习 denylist）
+# ---------------------------------------------------------------------------
+
+
+class TestSdxlIncompatible:
+    def _post_gen(self, client, checkpoint="krea2TurboFP8_krea2TURBO.safetensors"):
+        return client.post(
+            "/model-library/generate-image",
+            json={"prompt": "1girl", "checkpoint": checkpoint},
+        )
+
+    def test_clip_invalid_error_marks_and_returns_422(self):
+        """ComfyUI 报 clip 无效 → 记入清单 + 422 人话报错。"""
+        with respx.mock:
+            respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(
+                    500,
+                    json={
+                        "error": {
+                            "message": (
+                                "SDXL 执行失败: [['execution_error', "
+                                "{'node_type': 'CLIPTextEncode', 'exception_message': "
+                                "\"ERROR: clip input is invalid: None\\n\\nIf the clip is from "
+                                "a checkpoint loader node your checkpoint does not contain "
+                                "a valid clip or text encoder model.\"}]]"
+                            )
+                        }
+                    },
+                )
+            )
+            c = _client()
+            r = self._post_gen(c)
+            assert r.status_code == 422
+            assert "不含文本编码器" in r.json()["detail"]
+            # 已记入清单
+            entries = ml.get_sdxl_incompatible()
+            assert "krea2TurboFP8_krea2TURBO.safetensors" in entries
+            assert "文本编码器" in entries["krea2TurboFP8_krea2TURBO.safetensors"]
+
+    def test_other_gateway_errors_not_marked(self):
+        with respx.mock:
+            respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(500, json={"error": {"message": "显存不足 OOM"}})
+            )
+            c = _client()
+            r = self._post_gen(c)
+            assert r.status_code == 502
+            assert ml.get_sdxl_incompatible() == {}
+
+    def test_models_endpoint_flags_incompatible(self, tmp_path):
+        _mk_model(tmp_path / "models", "checkpoints/krea2TurboFP8_krea2TURBO.safetensors")
+        _mk_model(tmp_path / "models", "checkpoints/majic.safetensors")
+        ml.set_sdxl_incompatible(
+            "krea2TurboFP8_krea2TURBO.safetensors", "不含文本编码器"
+        )
+        c = _client()
+        items = c.get("/model-library/models").json()["data"]["items"]
+        by_name = {e["name"]: e for e in items}
+        assert by_name["krea2TurboFP8_krea2TURBO.safetensors"]["sdxl_incompatible"] is True
+        assert "sdxl_incompatible" not in by_name["majic.safetensors"]
+
+    def test_management_endpoint_roundtrip(self):
+        c = _client()
+        resp = c.post(
+            "/model-library/sdxl-incompatible",
+            json={"filename": "krea2TurboFP8_krea2TURBO.safetensors", "reason": "test"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["data"]["count"] == 1
+        # 移除（误记纠正）
+        resp = c.post(
+            "/model-library/sdxl-incompatible",
+            json={"filename": "krea2TurboFP8_krea2TURBO.safetensors", "reason": None},
+        )
+        assert resp.json()["data"]["count"] == 0
+        assert c.get("/model-library/sdxl-incompatible").json()["data"]["entries"] == {}
+
+    def test_success_clears_stale_denylist_entry(self, monkeypatch):
+        """生成成功 → 自动洗白历史 denylist 记录（架构接入后残留不再禁选）。"""
+        monkeypatch.setattr(ml_routes, "detect_checkpoint_arch", lambda rel: "krea2")
+        ml.set_sdxl_incompatible(
+            "krea2TurboFP8_krea2TURBO.safetensors", "不含文本编码器（历史误记）"
+        )
+        with respx.mock:
+            respx.post("http://127.0.0.1:8790/v1/images/generations").mock(
+                return_value=Response(200, json={"data": [{"b64_json": "QUJD"}]})
+            )
+            c = _client()
+            r = self._post_gen(c)
+            assert r.status_code == 200
+            # 成功后清单已自动清除
+            assert ml.get_sdxl_incompatible() == {}
+
+
+# ---------------------------------------------------------------------------
+# R18 短剧分镜规划（r18-script/plan：门禁 + 同步 LLM 端点）
+# ---------------------------------------------------------------------------
+
+
+class TestR18ScriptPlan:
+    def _post(self, client: TestClient, **overrides):
+        body = {
+            "synopsis": "雨夜酒店，两个陌生人的相遇",
+            "characters": [{"name": "林薇", "description": "28岁黑长发女性"}],
+            "duration_sec": 90,
+        }
+        body.update(overrides)
+        return client.post("/model-library/r18-script/plan", json=body)
+
+    def test_blocked_without_r18(self):
+        c = _client()
+        r = self._post(c)
+        assert r.status_code == 403
+        assert "R18" in r.json()["detail"]
+
+    def test_happy_path_returns_scenes(self, monkeypatch):
+        ml.set_nsfw(True)
+
+        async def _fake_plan(req):
+            from novelvideo.agents.r18_script_planner import (
+                R18Scene,
+                R18ScriptPlan,
+                normalize_plan,
+            )
+            return normalize_plan(
+                R18ScriptPlan(
+                    title="雨夜",
+                    scenes=[
+                        R18Scene(
+                            scene_no=1, kind="portrait", shot_description="定妆",
+                            image_prompt="1girl, black hair, masterpiece",
+                        ),
+                        R18Scene(
+                            scene_no=2, kind="action", shot_description="动作",
+                            image_prompt="m15510n4ry, 1girl", video_prompt="motion",
+                            preset_id="wan22-missionary", audio="tts",
+                        ),
+                    ],
+                )
+            )
+
+        monkeypatch.setattr(ml_routes, "plan_r18_script", _fake_plan)
+        c = _client()
+        r = self._post(c)
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["title"] == "雨夜"
+        assert [s["kind"] for s in data["scenes"]] == ["portrait", "action"]
+        assert data["scenes"][1]["preset_id"] == "wan22-missionary"
+
+    def test_planner_value_error_maps_503(self, monkeypatch):
+        ml.set_nsfw(True)
+
+        async def _boom(req):
+            raise ValueError("API key not set")
+
+        monkeypatch.setattr(ml_routes, "plan_r18_script", _boom)
+        c = _client()
+        r = self._post(c)
+        assert r.status_code == 503
+
+    def test_planner_failure_maps_502(self, monkeypatch):
+        ml.set_nsfw(True)
+
+        async def _boom(req):
+            raise RuntimeError("model timeout")
+
+        monkeypatch.setattr(ml_routes, "plan_r18_script", _boom)
+        c = _client()
+        r = self._post(c)
+        assert r.status_code == 502
+        assert "分镜规划失败" in r.json()["detail"]
+
+    def test_empty_synopsis_422(self):
+        ml.set_nsfw(True)
+        c = _client()
+        r = self._post(c, synopsis="")
+        assert r.status_code == 422
+
+
+class TestR18PlannerUnit:
+    def test_normalize_falls_back_invalid_preset(self):
+        from novelvideo.agents.r18_script_planner import (
+            R18Scene,
+            R18ScriptPlan,
+            normalize_plan,
+        )
+
+        plan = normalize_plan(
+            R18ScriptPlan(
+                title="t",
+                scenes=[
+                    R18Scene(scene_no=5, kind="action", shot_description="x",
+                             image_prompt="p", preset_id="nonexistent"),
+                    R18Scene(scene_no=1, kind="portrait", shot_description="y",
+                             image_prompt="p", video_prompt="should-clear"),
+                    R18Scene(scene_no=2, kind="plot", shot_description="z",
+                             image_prompt="p", preset_id="wan22-missionary"),
+                ],
+            )
+        )
+        assert [s.scene_no for s in plan.scenes] == [1, 2, 3]
+        assert plan.scenes[0].preset_id == "h3-aio"  # 非法 action 预设兜底
+        assert plan.scenes[1].video_prompt == ""  # portrait 清运动词
+        assert plan.scenes[2].preset_id == ""  # plot 清预设
+
+    def test_build_user_prompt_includes_characters(self):
+        from novelvideo.agents.r18_script_planner import (
+            R18Character,
+            R18ScriptPlanRequest,
+            build_user_prompt,
+        )
+
+        req = R18ScriptPlanRequest(
+            synopsis="梗概内容",
+            characters=[R18Character(name="林薇", description="黑长发")],
+            style_hint="电影感",
+        )
+        prompt = build_user_prompt(req)
+        assert "梗概内容" in prompt
+        assert "林薇" in prompt and "黑长发" in prompt
+        assert "电影感" in prompt
+        assert "90" in prompt and "9:16" in prompt
+
+
+# ---------------------------------------------------------------------------
+# R18 配音（r18-tts：CosyVoice2 代理）
+# ---------------------------------------------------------------------------
+
+
+class TestR18Tts:
+    def _post(self, client: TestClient, **overrides):
+        body = {"text": "深夜的酒店房间，灯光很暖。", "voice": "zh-CN-XiaoxiaoNeural"}
+        body.update(overrides)
+        return client.post("/model-library/r18-tts", json=body)
+
+    def test_blocked_without_r18(self):
+        c = _client()
+        r = self._post(c)
+        assert r.status_code == 403
+        assert "R18" in r.json()["detail"]
+
+    def test_happy_path_returns_b64_without_project(self):
+        ml.set_nsfw(True)
+        mp3 = b"ID3\x04\x00" + b"\x00" * 32  # ID3 头 + 脏数据即可过魔数校验
+        with respx.mock:
+            route = respx.post("http://192.168.71.127:9201/v1/audio/speech").mock(
+                return_value=Response(200, content=mp3, headers={"content-type": "audio/mpeg"})
+            )
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 200
+            data = r.json()["data"]
+            assert data["format"] == "mp3"
+            assert base64.b64decode(data["audio_b64"]) == mp3
+            sent = json.loads(route.calls.last.request.read())
+            assert sent["voice"] == "zh-CN-XiaoxiaoNeural"
+            assert sent["response_format"] == "mp3"
+            # 无 emotion → 不带 instructions 字段（走普通合成路径）
+            assert "instructions" not in sent
+
+    def test_emotion_maps_to_restricted_instructions(self):
+        """emotion 非空 → 拼「请用X的语气说」受限指令集透传（instruct2 路径）。"""
+        ml.set_nsfw(True)
+        mp3 = b"ID3\x04\x00" + b"\x00" * 32
+        with respx.mock:
+            route = respx.post("http://192.168.71.127:9201/v1/audio/speech").mock(
+                return_value=Response(200, content=mp3, headers={"content-type": "audio/mpeg"})
+            )
+            c = _client()
+            r = self._post(c, emotion="温柔害羞")
+            assert r.status_code == 200
+            sent = json.loads(route.calls.last.request.read())
+            assert sent["instructions"] == "请用温柔害羞的语气说"
+
+    def test_build_instructions_unit(self):
+        assert ml_routes._build_instructions("") == ""
+        assert ml_routes._build_instructions("  ") == ""
+        # 收录情感词 → 丰富指令（语速/声音修饰，2026-08-19 调研：具体词效果明显）
+        assert ml_routes._build_instructions("温柔") == "请用温柔缠绵、语速稍缓的语气说"
+        assert ml_routes._build_instructions("羞涩。") == "请用害羞羞涩、声音轻柔的语气说"
+        assert ml_routes._build_instructions("喘息轻颤") == "请用气声喘息、声音轻颤的语气说"
+        assert ml_routes._build_instructions("平静") == "请用自然平和、像朋友聊天的语气说"
+        # 未收录词 → 通用受限格式（issue #1802 短格式兜底）
+        assert ml_routes._build_instructions("妖媚诱惑") == "请用妖媚诱惑的语气说"
+
+    def test_speed_source_routing(self):
+        """speed 透传：dialogue 默认 1.0；narration 默认 1.05；显式 speed 优先。"""
+        ml.set_nsfw(True)
+        mp3 = b"ID3\x04\x00" + b"\x00" * 32
+        with respx.mock:
+            route = respx.post("http://192.168.71.127:9201/v1/audio/speech").mock(
+                return_value=Response(200, content=mp3, headers={"content-type": "audio/mpeg"})
+            )
+            c = _client()
+            r = self._post(c)  # 默认 dialogue
+            assert r.status_code == 200
+            sent = json.loads(route.calls.last.request.read())
+            assert sent["speed"] == 1.0
+
+            r = self._post(c, source="narration")
+            assert r.status_code == 200
+            sent = json.loads(route.calls.last.request.read())
+            assert sent["speed"] == 1.05
+
+            r = self._post(c, source="narration", speed=0.9)
+            assert r.status_code == 200
+            sent = json.loads(route.calls.last.request.read())
+            assert sent["speed"] == 0.9
+
+    def test_unknown_voice_422(self):
+        ml.set_nsfw(True)
+        c = _client()
+        r = self._post(c, voice="zh-CN-NotExist")
+        assert r.status_code == 422
+        assert "音色" in r.json()["detail"]
+
+    def test_non_mp3_payload_maps_502(self):
+        ml.set_nsfw(True)
+        with respx.mock:
+            respx.post("http://192.168.71.127:9201/v1/audio/speech").mock(
+                return_value=Response(200, json={"error": "boom"})
+            )
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 502
+
+    def test_upstream_unreachable_maps_502(self):
+        ml.set_nsfw(True)
+        with respx.mock:
+            respx.post("http://192.168.71.127:9201/v1/audio/speech").mock(
+                side_effect=httpx.ConnectError("refused")
+            )
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 502
+            assert "CosyVoice2" in r.json()["detail"]
+
+
+class TestH3CleanPreset:
+    def test_preset_registered_and_lora_free(self):
+        from pathlib import Path as _P
+
+        meta = ml_routes.NSFW_VIDEO_PRESETS["h3-clean"]
+        assert meta["route"] == "h3"
+        path = _P(ml_routes.PRESET_DIR) / meta["file"]
+        assert path.is_file(), f"预设文件缺失: {path}"
+        wf = json.loads(path.read_text(encoding="utf-8"))
+        # 无 LoRA；model 链直连 UNETLoader；音画双解码齐全
+        assert not any(n["class_type"] == "LoraLoaderModelOnly" for n in wf.values())
+        assert wf["32"]["inputs"]["model"] == ["1", 0]
+        assert wf["33"]["inputs"]["model"] == ["1", 0]
+        kinds = {n["class_type"] for n in wf.values()}
+        assert {"VAEDecode", "VAEDecodeAudio", "CreateVideo", "SaveVideo"} <= kinds
+        # 默认提示词不带 NSFW 触发词
+        assert "hmmotion" not in wf["20"]["inputs"]["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# R18 成片合成（r18-compose：filter 构造 / 媒体解析 / 端点集成）
+# ---------------------------------------------------------------------------
+
+
+class TestR18ComposeFilter:
+    def test_native_plus_tts_layered_mix(self):
+        """native 音轨 + tts 配音两路 amix，tts 按镜头起始 adelay。"""
+        fc, vout, aout = ml_routes._build_compose_filter(
+            num_videos=2,
+            video_has_audio=[True, False],
+            tts_offsets_ms=[None, 5000],
+            has_srt=False,
+            target_w=832,
+            target_h=1216,
+        )
+        assert vout == "[vcat]" and aout == "[aout]"
+        assert "concat=n=2:v=1:a=0[vcat]" in fc
+        assert "[0:a]aresample=24000,aformat=channel_layouts=mono[v0a]" in fc
+        # 镜头2 无音轨不进混音；tts 延迟 = 5000 + 250 淡入偏移
+        assert "[2:a]aresample=24000,aformat=channel_layouts=mono,adelay=5250:all=1[t1]" in fc
+        assert "amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95[aout]" in fc
+        assert "subtitles" not in fc
+
+    def test_all_silent_falls_back_anullsrc(self):
+        fc, vout, aout = ml_routes._build_compose_filter(
+            num_videos=2,
+            video_has_audio=[False, False],
+            tts_offsets_ms=[None, None],
+            has_srt=False,
+            target_w=832,
+            target_h=1216,
+        )
+        assert "anullsrc=r=24000:cl=mono[aout]" in fc
+        assert "amix" not in fc
+
+    def test_srt_burn_after_concat(self):
+        fc, vout, aout = ml_routes._build_compose_filter(
+            num_videos=1,
+            video_has_audio=[True],
+            tts_offsets_ms=[0],
+            has_srt=True,
+            target_w=832,
+            target_h=1216,
+        )
+        assert vout == "[vout]"
+        assert "subtitles=sub.srt" in fc
+        assert "PingFang SC" in fc
+
+
+class TestR18ComposeResolveMedia:
+    def _mk_output(self, tmp_path):
+        out = tmp_path / "output"
+        (out / "freezone/_outputs/nsfw_studio").mkdir(parents=True)
+        return out
+
+    def test_resolves_static_url(self, tmp_path):
+        out = self._mk_output(tmp_path)
+        f = out / "freezone/_outputs/nsfw_studio/v1.mp4"
+        f.write_bytes(b"x" * 10)
+        url = f"/static/projects/PRJ123/freezone/_outputs/nsfw_studio/{f.name}?v=99"
+        resolved = ml_routes._resolve_project_media(out, url, "PRJ123")
+        assert resolved == f.resolve()
+
+    def test_rejects_path_escape(self, tmp_path):
+        out = self._mk_output(tmp_path)
+        evil = "/static/projects/PRJ123/../../etc/passwd"
+        with pytest.raises(Exception) as ei:
+            ml_routes._resolve_project_media(out, evil, "PRJ123")
+        assert "越界" in str(ei.value)
+
+    def test_rejects_missing_file(self, tmp_path):
+        out = self._mk_output(tmp_path)
+        with pytest.raises(Exception) as ei:
+            ml_routes._resolve_project_media(
+                out, "/static/projects/PRJ123/freezone/_outputs/nsfw_studio/nope.mp4", "PRJ123"
+            )
+        assert "不存在" in str(ei.value)
+
+
+class TestR18ComposeEndpoint:
+    def _mk_ctx(self, monkeypatch, tmp_path):
+        """挂 fake resolve_project_context（editor 权限）指向 tmp 输出目录。"""
+        out = tmp_path / "output"
+        (out / "freezone/_outputs/nsfw_studio").mkdir(parents=True)
+
+        class _Ctx:
+            project_id = "PRJ123"
+            output_dir = str(out)
+
+        async def _fake_resolve(**kwargs):
+            return _Ctx()
+
+        def _fake_require(ctx, **kwargs):
+            return None
+
+        monkeypatch.setattr(ml_routes, "resolve_project_context", _fake_resolve)
+        monkeypatch.setattr(ml_routes, "require_project_home_node", _fake_require)
+        return out
+
+    def test_compose_blocked_without_r18(self):
+        c = _client()
+        r = c.post(
+            "/model-library/r18-compose",
+            json={"project_id": "P", "shots": [{"video_url": "/static/x.mp4"}]},
+        )
+        assert r.status_code == 403
+
+    def test_compose_happy_path(self, monkeypatch, tmp_path):
+        ml.set_nsfw(True)
+        out = self._mk_ctx(monkeypatch, tmp_path)
+        v1 = out / "freezone/_outputs/nsfw_studio/v1.mp4"
+        v2 = out / "freezone/_outputs/nsfw_studio/v2.mp4"
+        t1 = out / "freezone/_outputs/nsfw_studio/tts1.mp3"
+        for f in (v1, v2, t1):
+            f.write_bytes(b"x" * 16)
+
+        async def _dur(path):
+            return 5.0
+
+        async def _aud(path):
+            return path.suffix == ".mp4" and "v1" in path.name
+
+        async def _size(path):
+            return (832, 1216)
+
+        executed: dict = {}
+
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self):
+                return b"", b""
+
+        async def _fake_exec(*cmd, **kwargs):
+            executed["cmd"] = cmd
+            executed["cwd"] = kwargs.get("cwd")
+            # ffmpeg 执行时捕获字幕文件内容（with 块退出后 tmpdir 即清理）
+            sub = Path(kwargs.get("cwd") or ".") / "sub.srt"
+            executed["srt"] = sub.read_text(encoding="utf-8") if sub.exists() else None
+            # 模拟 ffmpeg 产出成片文件（从 cmd 末尾取输出路径）
+            out_path = Path(cmd[-1])
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32)
+            return _FakeProc()
+
+        monkeypatch.setattr(ml_routes, "_probe_media_duration", _dur)
+        monkeypatch.setattr(ml_routes, "_probe_has_audio", _aud)
+        monkeypatch.setattr(ml_routes, "_probe_video_size", _size)
+        monkeypatch.setattr(ml_routes.asyncio, "create_subprocess_exec", _fake_exec)
+
+        c = _client()
+        r = c.post(
+            "/model-library/r18-compose",
+            json={
+                "project_id": "PRJ123",
+                "title": "深夜初遇",
+                "srt": "1\n00:00:00,000 --> 00:00:05,000\n测试字幕\n",
+                "shots": [
+                    {"video_url": f"/static/projects/PRJ123/freezone/_outputs/nsfw_studio/{v1.name}", "tts_url": f"/static/projects/PRJ123/freezone/_outputs/nsfw_studio/{t1.name}", "audio_mode": "tts"},
+                    {"video_url": f"/static/projects/PRJ123/freezone/_outputs/nsfw_studio/{v2.name}", "audio_mode": "none"},
+                ],
+            },
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["duration_sec"] == 10.0
+        assert data["shots"] == 2
+        assert "/static/projects/PRJ123/" in data["url"]
+        cmd = executed["cmd"]
+        # 输入顺序：2 视频 + 1 mp3；字幕烧录在列
+        inputs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-i"]
+        assert len(inputs) == 3
+        assert str(v1) in inputs[0] and str(v2) in inputs[1] and str(t1) in inputs[2]
+        fc = cmd[cmd.index("-filter_complex") + 1]
+        # 镜头1 的 tts offset=0 → adelay=0+250 淡入偏移
+        assert "concat=n=2" in fc and "adelay=250:all=1" in fc and "subtitles=sub.srt" in fc
+        # 字幕内容已落盘到 ffmpeg cwd
+        assert executed["srt"] is not None and executed["srt"].startswith("1\n")
+
+    def test_compose_ffmpeg_failure_maps_502(self, monkeypatch, tmp_path):
+        ml.set_nsfw(True)
+        out = self._mk_ctx(monkeypatch, tmp_path)
+        v1 = out / "freezone/_outputs/nsfw_studio/v1.mp4"
+        v1.write_bytes(b"x" * 16)
+
+        async def _dur(path):
+            return 5.0
+
+        async def _aud(path):
+            return False
+
+        async def _size(path):
+            return (832, 1216)
+
+        class _FakeProc:
+            returncode = 1
+
+            async def communicate(self):
+                return b"", b"boom\nInvalid data"
+
+        async def _fake_exec(*cmd, **kwargs):
+            return _FakeProc()
+
+        monkeypatch.setattr(ml_routes, "_probe_media_duration", _dur)
+        monkeypatch.setattr(ml_routes, "_probe_has_audio", _aud)
+        monkeypatch.setattr(ml_routes, "_probe_video_size", _size)
+        monkeypatch.setattr(ml_routes.asyncio, "create_subprocess_exec", _fake_exec)
+
+        c = _client()
+        r = c.post(
+            "/model-library/r18-compose",
+            json={
+                "project_id": "PRJ123",
+                "shots": [{"video_url": f"/static/projects/PRJ123/freezone/_outputs/nsfw_studio/{v1.name}"}],
+            },
+        )
+        assert r.status_code == 502
+        assert "ffmpeg" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# R18 视频生成（generate-video：预设直提 ComfyUI + mp4 落盘）
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateVideo:
+    def _post(self, client: TestClient, **overrides):
+        body = {
+            "preset_id": "wan22-missionary",
+            "prompt": "m15510n4ry, a woman",
+            "first_frame_url": "http://x/frame.png",
+        }
+        body.update(overrides)
+        return client.post("/model-library/generate-video", json=body)
+
+    def test_blocked_without_r18(self):
+        with respx.mock:
+            c = _client()
+            r = self._post(c)
+            assert r.status_code == 403
+            assert "R18" in r.json()["detail"]
+
+    def test_unknown_preset_400(self):
+        ml.set_nsfw(True)
+        with respx.mock:
+            c = _client()
+            r = self._post(c, preset_id="no-such")
+            assert r.status_code == 400
+            assert "wan22-missionary" in r.json()["detail"]
+
+    def test_video_presets_hidden_without_r18(self):
+        c = _client()
+        assert c.get("/model-library/video-presets").json()["data"]["items"] == []
+        ml.set_nsfw(True)
+        items = c.get("/model-library/video-presets").json()["data"]["items"]
+        assert len(items) == 5
+        assert {i["id"] for i in items} == {
+            "wan22-missionary",
+            "wan22-doggie-twerk",
+            "wan22-blowjob-closeup",
+            "h3-aio",
+            "h3-clean",
+        }
+
+    def test_patch_workflow_wan(self):
+        wf, _ = ml_routes._load_preset_workflow("wan22-missionary")
+        out = ml_routes._patch_video_workflow(
+            wf,
+            prompt="POS",
+            negative_prompt="NEG",
+            first_frame_name="f.png",
+            width=480,
+            height=832,
+            length=81,
+            seed=42,
+        )
+        i2v = next(n for n in out.values() if n["class_type"] == "WanImageToVideo")
+        assert i2v["inputs"]["width"] == 480 and i2v["inputs"]["length"] == 81
+        load = next(n for n in out.values() if n["class_type"] == "LoadImage")
+        assert load["inputs"]["image"] == "f.png"
+        texts = [n for n in out.values() if n["class_type"] == "CLIPTextEncode"]
+        by_text = {n["inputs"]["text"]: n for n in texts}
+        assert "POS" in by_text and "NEG" in by_text
+        # 正向进 title 含「正向」的节点
+        pos_node = by_text["POS"]
+        assert "正向" in pos_node["_meta"]["title"]
+        seeds = {
+            n["inputs"]["noise_seed"]
+            for n in out.values()
+            if n["class_type"] == "KSamplerAdvanced"
+        }
+        assert seeds == {42}
+
+    def test_patch_workflow_h3(self):
+        wf, _ = ml_routes._load_preset_workflow("h3-aio")
+        out = ml_routes._patch_video_workflow(
+            wf,
+            prompt="hmmotion, scene",
+            negative_prompt=None,
+            first_frame_name="h.png",
+            width=1280,
+            height=704,
+            length=124,
+            seed=7,
+        )
+        i2v = next(n for n in out.values() if n["class_type"] == "MiniMaxH3ImageToVideo")
+        assert i2v["inputs"]["prompt"] == "hmmotion, scene"
+        assert i2v["inputs"]["width"] == 1280 and i2v["inputs"]["length"] == 124
+        noise = next(n for n in out.values() if n["class_type"] == "RandomNoise")
+        assert noise["inputs"]["noise_seed"] == 7
+        load = next(n for n in out.values() if n["class_type"] == "LoadImage")
+        assert load["inputs"]["image"] == "h.png"
+
+    def test_project_id_saves_mp4_and_returns_url(self, monkeypatch, tmp_path):
+        ml.set_nsfw(True)
+
+        async def _fake_submit(workflow, first_frame_url):
+            assert first_frame_url == "http://x/frame.png"
+            return {"video_bytes": b"\x00\x00\x00\x18ftypmp42DATA", "filename": "out.mp4", "backend": "http://lb"}
+
+        monkeypatch.setattr(ml_routes, "_submit_and_collect", _fake_submit)
+
+        class _Ctx:
+            output_dir = str(tmp_path)
+            project_id = "proj-1"
+
+        async def _fake_resolve(**kwargs):
+            return _Ctx()
+
+        monkeypatch.setattr(ml_routes, "resolve_project_context", _fake_resolve)
+        monkeypatch.setattr(ml_routes, "require_project_home_node", lambda ctx, operation: None)
+
+        c = _client()
+        r = self._post(c, project_id="proj-1", seed=99)
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["seed"] == 99
+        assert data["url"].startswith("/static/projects/proj-1/")
+        assert data["rel_path"].endswith(".mp4")
+        assert "freezone/_outputs/nsfw_studio/" in data["rel_path"]
+        saved = tmp_path / data["rel_path"]
+        assert saved.read_bytes().startswith(b"\x00\x00\x00\x18ftyp")
+
+    def test_random_seed_when_absent(self, monkeypatch):
+        ml.set_nsfw(True)
+
+        async def _fake_submit(workflow, first_frame_url):
+            return {"video_bytes": b"v", "filename": "out.mp4", "backend": "http://lb"}
+
+        monkeypatch.setattr(ml_routes, "_submit_and_collect", _fake_submit)
+        with respx.mock:
+            c = _client()
+            r = self._post(c)
+        assert r.status_code == 200
+        assert isinstance(r.json()["data"]["seed"], int)
+
+    def test_upload_first_frame_accepts_data_uri(self):
+        """上游图片节点旧产物为 b64 data URI 时直接解码，不走 httpx。"""
+        import asyncio
+
+        png = b"\x89PNG\r\n\x1a\n" + b"frame"
+        b64 = base64.b64encode(png).decode()
+        data_uri = f"data:image/png;base64,{b64}"
+        received: list[bytes] = []
+
+        def _handler(request: httpx.Request) -> Response:
+            if request.url.path == "/upload/image":
+                received.append(request.content)
+                return Response(200, json={"name": "ok"})
+            return Response(200, json={"prompt_id": "x"})
+
+        with respx.mock:
+            respx.post(url__regex=r"^http://h3:8195/upload/image").mock(side_effect=_handler)
+            async def _run():
+                async with httpx.AsyncClient() as client:
+                    return await ml_routes._upload_first_frame(
+                        client, data_uri, ["http://h3:8195"]
+                    )
+            filename = asyncio.run(_run())
+            assert filename.startswith("dc_") and filename.endswith(".png")
+            assert len(received) == 1
+            # multipart body 内嵌了原始 PNG 字节
+            assert b"\x89PNG" in received[0]
+
+    def test_upload_first_frame_rejects_bad_data_uri(self):
+        import asyncio
+
+        with respx.mock:
+            async def _run():
+                async with httpx.AsyncClient() as client:
+                    return await ml_routes._upload_first_frame(
+                        client, "data:image/png;base64,!!not-b64!!", ["http://h3:8195"]
+                    )
+            try:
+                asyncio.run(_run())
+                raise AssertionError("应当抛 400")
+            except Exception as e:
+                assert "400" in str(e) or "data URI" in str(e)
+
+    def test_submit_routes_by_workflow_class(self):
+        """Wan 路线走 LB 且首帧覆盖三后端；H3 路线单点。"""
+        import asyncio
+
+        wan_wf, _ = ml_routes._load_preset_workflow("wan22-missionary")
+        h3_wf, _ = ml_routes._load_preset_workflow("h3-aio")
+        uploads: list[str] = []
+        histories: dict[str, dict] = {}
+
+        def _make_handler(backend: str):
+            def _handler(request: httpx.Request) -> Response:
+                if request.url.path == "/upload/image":
+                    uploads.append(backend)
+                    return Response(200, json={"name": "ok"})
+                if request.url.path == "/prompt":
+                    pid = f"pid-{backend}"
+                    histories[pid] = {
+                        "status": {"status_str": "success", "completed": True},
+                        "outputs": {"50": {"gifs": [{"filename": "v.mp4", "subfolder": "nsfw", "type": "output"}]}},
+                    }
+                    return Response(200, json={"prompt_id": pid})
+                if request.url.path.startswith("/history/"):
+                    pid = request.url.path.split("/")[-1]
+                    return Response(200, json={pid: histories[pid]})
+                if request.url.path == "/view":
+                    return Response(200, content=b"mp4bytes")
+                return Response(404)
+
+            return _handler
+
+        original_interval = ml_routes.VIDEO_POLL_INTERVAL
+        original_max_wait = ml_routes.VIDEO_MAX_WAIT_SECONDS
+        ml_routes.VIDEO_POLL_INTERVAL = 0.01  # 测试几乎不等待
+        ml_routes.VIDEO_MAX_WAIT_SECONDS = 10.0  # 失败快速暴露，不卡测试
+        try:
+            # 注意：必须用 `with respx.mock:`（全局 mocker）——`respx.mock(...)`
+            # 带参调用返回独立 mocker，模块级 respx.post 注册不进去，请求会
+            # passthrough 到真实集群（曾触发真实提交，见调试记录）。
+            with respx.mock:
+                for base, tag in [
+                    (r"http://192\.168\.71\.127:8189", ":8189"),
+                    (r"http://192\.168\.71\.115:8188", "pc01"),
+                    (r"http://192\.168\.71\.114:8193", "pc02"),
+                    (r"http://192\.168\.71\.127:8188", "lb"),
+                    (r"http://192\.168\.71\.127:8195", "h3"),
+                ]:
+                    respx.post(url__regex=rf"^{base}/(upload/image|prompt|view)").mock(
+                        side_effect=_make_handler(tag)
+                    )
+                    respx.get(url__regex=rf"^{base}/(history|view)").mock(
+                        side_effect=_make_handler(tag)
+                    )
+                respx.get("http://x/frame.png").mock(
+                    return_value=Response(200, content=b"png")
+                )
+
+                async def _run(wf):
+                    return await ml_routes._submit_and_collect(wf, "http://x/frame.png")
+
+                wan_result = asyncio.run(_run(wan_wf))
+                assert wan_result["backend"] == "http://192.168.71.127:8188"
+                assert wan_result["video_bytes"] == b"mp4bytes"
+                # 首帧已覆盖全部三后端（LB 随机路由不丢文件）
+                assert set(uploads) == {":8189", "pc01", "pc02"}
+
+                uploads.clear()
+                h3_result = asyncio.run(_run(h3_wf))
+                assert h3_result["backend"] == "http://192.168.71.127:8195"
+                assert uploads == ["h3"]
+        finally:
+            ml_routes.VIDEO_POLL_INTERVAL = original_interval
+            ml_routes.VIDEO_MAX_WAIT_SECONDS = original_max_wait

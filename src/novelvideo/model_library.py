@@ -46,6 +46,8 @@ DEFAULT_NSFW_KEYWORDS = (
     "nsfw,porn,xxx,hentai,r18,erotic,nude,urpm,lustify,bigasse,sexgod,footjob"
     ",pussy,cumshot,blowjob,deepthroat,twerk,dr34ml4y,m4crom4sti4,hmnsfw,hmpussy"
     ",vagassist,slop,missionary,d0gg1e,c0wg1rl,bl0wj0b,m15510n4ry,pull0ut,b0dyshot"
+    ",cum,futa,naughty,bounce,cowgirl,fingering,orgasm,anal,handjob,boob,penis"
+    ",vagina,creampie,ahegao,paizuri,tiddies,nipple,dr34mjob"
 )
 MODEL_FILE_EXTENSIONS = {".safetensors", ".pt", ".pth", ".ckpt", ".bin", ".onnx"}
 DOWNLOAD_SUBDIR_WHITELIST = {
@@ -67,6 +69,7 @@ DOWNLOAD_TIMEOUT = 30.0
 
 _K_NSFW_ENABLED = "model_library.nsfw_enabled"
 _K_NSFW_MARKS = "model_library.nsfw_marks"
+_K_SDXL_INCOMPATIBLE = "model_library.sdxl_incompatible"
 
 
 def _split_csv(value: str) -> list[str]:
@@ -79,7 +82,7 @@ def model_roots() -> list[Path]:
 
 
 def cache_ttl() -> float:
-    return float(os.environ.get("DASHBOX_MODEL_LIBRARY_CACHE_TTL", "60"))
+    return float(os.environ.get("DASHBOX_MODEL_LIBRARY_CACHE_TTL", "600"))
 
 
 def civitai_api_base() -> str:
@@ -149,6 +152,116 @@ def is_nsfw_entry(filename: str, rel_path: str, marks: dict[str, bool] | None = 
 
 
 # ---------------------------------------------------------------------------
+# SDXL 不兼容清单（settings.db：生成时实测失败的自学习 denylist）
+# 场景：unet-only / Flux 系权重不含文本编码器，CheckpointLoaderSimple→CLIPTextEncode
+# 通用工作流跑不了（ComfyUI 报 "clip input is invalid"）。首次失败自动记名，
+# 模型库条目标记 sdxl_incompatible，前端选择器禁选，避免反复踩坑。
+# ---------------------------------------------------------------------------
+
+
+def get_sdxl_incompatible() -> dict[str, str]:
+    """读取 {filename: 原因}（容忍损坏数据）。"""
+    raw = _read_all().get(_K_SDXL_INCOMPATIBLE, "")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("SDXL 不兼容清单损坏，按空处理")
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def set_sdxl_incompatible(filename: str, reason: str | None) -> dict[str, Any]:
+    """记入（reason 非空）/移除（reason=None）一个不兼容底模，返回最新清单。"""
+    filename = sanitize_filename(filename)
+    entries = get_sdxl_incompatible()
+    if reason is None:
+        entries.pop(filename, None)
+    else:
+        entries[filename] = str(reason)[:200]
+    _write_many({_K_SDXL_INCOMPATIBLE: json.dumps(entries, ensure_ascii=False, sort_keys=True)})
+    logger.info("SDXL 不兼容清单 %s → %s", filename, reason)
+    nas_library_service.invalidate()
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint 架构探测（读 safetensors header 的 tensor keys 判定模型家族）
+# 决定生图走哪条工作流：SDXL 通用链 / Flux 链 / 不支持（缺组件或非图像权重）。
+# ---------------------------------------------------------------------------
+
+# 只读 header 前缀片段即可判家族，避免大文件全读。
+_HEADER_PROBE_BYTES = 2 * 1024 * 1024
+
+
+def _safetensors_keys_head(path: Path) -> list[str] | None:
+    """读 safetensors header 的 tensor 名列表；文件缺失/损坏返回 None。"""
+    try:
+        with open(path, "rb") as f:
+            raw_len = f.read(8)
+            if len(raw_len) != 8:
+                return None
+            header_len = int.from_bytes(raw_len, "little")
+            # header 本身可能超过 2MB（超多 tensor），按实际长度读但封顶 16MB
+            chunk = f.read(min(header_len, 16 * 1024 * 1024))
+        header = json.loads(chunk)
+        return [k for k in header if k != "__metadata__"]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def detect_checkpoint_arch(rel_path: str, roots: list[Path] | None = None) -> str:
+    """按 tensor keys 判定 checkpoint 家族。
+
+    返回值：sd（SD1.5/XL 完整，CheckpointLoaderSimple 可用）/
+    flux（Flux 完整 checkpoint，走 FluxGuidance 链）/ krea2（Krea2 unet，
+    需 gemma3 编码器+专属节点，暂未接入）/ lora / other（LTX/SUPIR 等非
+    SDXL 生图权重或未知架构）。
+    """
+    if roots is None:
+        roots = model_roots()
+    path = None
+    for root in roots:
+        cand = root / rel_path
+        if cand.is_file():
+            path = cand
+            break
+    if path is None:
+        return "unknown"
+    keys = _safetensors_keys_head(path)
+    if not keys:
+        return "unknown"
+    has = lambda sub: any(sub in k for k in keys)  # noqa: E731
+    if has("lora_") or has("lora_te"):
+        return "lora"
+    if has("double_blocks") or (has("model.diffusion_model") and has("t5xxl")):
+        return "flux" if has("vae.") else "flux-unet"
+    if has("model.diffusion_model") and has("conditioner.embedders"):
+        return "sd"
+    if has("cond_stage_model") or (has("model.diffusion_model") and has("vae.")):
+        return "sd"
+    if has("txtfusion") or has("txtmlp"):
+        return "krea2"
+    if has("model.diffusion_model"):
+        return "sd-unet"
+    return "other"
+
+
+# 非生图/未接入架构 → picker 禁选原因文案（unknown 不拦：本地读不到权重
+# 文件时保持放行，避免误伤远端模型根/异常环境）。krea2 已接入（2026-08-18，
+# Qwen3-VL-4B 编码器 + qwen_image_vae，走 local_gateway workflow=krea2）。
+ARCH_UNSUPPORTED_REASON: dict[str, str] = {
+    "flux-unet": "Flux unet-only（缺独立 VAE），暂未接入",
+    "sd-unet": "SDXL unet-only（缺 clip_g 文本编码器），暂未接入",
+    "lora": "LoRA 权重，不是底模（放错目录）",
+    "other": "非 SDXL 生图权重（视频/3D/音频/超分或未知架构）",
+}
+
+
+# ---------------------------------------------------------------------------
 # NSFW 门禁（R18 确认开关，存 settings.db runtime_settings）
 # ---------------------------------------------------------------------------
 
@@ -181,6 +294,7 @@ class NasLibraryService:
         self._cache: list[dict[str, Any]] | None = None
         self._cache_at: float = 0.0
         self._lock = threading.Lock()
+        self._refreshing = False
 
     def _scan_root(self, root: Path, marks: dict[str, bool] | None = None) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
@@ -228,6 +342,23 @@ class NasLibraryService:
             self._cache = None
             self._cache_at = 0.0
 
+    def _refresh_async(self) -> None:
+        """后台重扫（stale-while-revalidate）：不阻塞请求，完成后替换缓存。"""
+        if self._refreshing:
+            return
+        self._refreshing = True
+
+        def _worker():
+            try:
+                fresh = self._scan_all()
+                with self._lock:
+                    self._cache = fresh
+                    self._cache_at = time.time()
+            finally:
+                self._refreshing = False
+
+        threading.Thread(target=_worker, daemon=True, name="nas-rescan").start()
+
     def list_models(
         self,
         type_filter: str | None = None,
@@ -235,13 +366,22 @@ class NasLibraryService:
         include_nsfw: bool = False,
         refresh: bool = False,
     ) -> dict[str, Any]:
-        """列出模型（带过滤）。返回 {items, total, types, scanned_at, cache_hit}。"""
+        """列出模型（带过滤）。返回 {items, total, types, scanned_at, cache_hit}。
+
+        缓存策略：TTL 内直接命中；过期但有旧数据时先返回旧数据并后台重扫
+        （NAS 全量扫描 96~269s，阻塞式过期重扫会拖垮前端 10s 超时）。
+        """
         with self._lock:
             now = time.time()
-            cache_valid = self._cache is not None and (now - self._cache_at) < cache_ttl()
-            if refresh or not cache_valid:
+            have_cache = self._cache is not None
+            cache_valid = have_cache and (now - self._cache_at) < cache_ttl()
+            if not have_cache or refresh:
+                # 冷启动或显式 refresh：同步重扫（主动请求愿意等待）
                 self._cache = self._scan_all()
                 self._cache_at = now
+            elif not cache_valid:
+                # TTL 自然过期但有旧数据：立即返回旧值，后台刷新
+                self._refresh_async()
             items = self._cache or []
             cache_hit = cache_valid and not refresh
 
