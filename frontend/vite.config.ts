@@ -149,6 +149,24 @@ export default defineConfig(({ mode }) => {
                   .replace(/;\s*Domain=[^;]+/gi, ""),
               );
             });
+            // 后端 dev server 重启窗口/不可达时，http-proxy 默认给浏览器回一个
+            // 裸 500（空响应体）——与「服务端代码异常」无法区分，浏览器实测曾
+            // 把它误诊为后端 500（task-center hydrate 报 HTTPError 500，而后端
+            // 日志零错误）。统一改写为 503 + JSON 错误体，语义上明确「可重试的
+            // 基础设施不可用」。前端 hydrate/SSE 原本就会容错重试，无需改动。
+            proxy.on("error", (_err, _req, res) => {
+              const body = JSON.stringify({
+                ok: false,
+                error: {
+                  code: "backend_unavailable",
+                  message: "Backend dev server unavailable (restarting?)",
+                },
+              });
+              if (!res.headersSent && typeof res.writeHead === "function") {
+                res.writeHead(503, { "Content-Type": "application/json" });
+                res.end(body);
+              }
+            });
           },
         },
         "/static": {
