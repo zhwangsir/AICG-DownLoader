@@ -68,9 +68,62 @@ const SHELL_FALLBACK_SIZES: Partial<Record<string, { width: number; height: numb
   threeDWorldNode: { width: 340, height: 210 },
   storyboardNode: { width: 800, height: 600 },
   storyboardGenNode: { width: 800, height: 600 },
+  // R18 系列与 canvasStore 的 FALLBACK_NODE_SIZES / 各组件 DEFAULT_WIDTH/HEIGHT 对齐
+  nsfwImageGenNode: { width: 480, height: 320 },
+  nsfwVideoGenNode: { width: 480, height: 300 },
+  nsfwScriptNode: { width: 460, height: 420 },
+  nsfwStoryboardNode: { width: 460, height: 420 },
+  nsfwVideoBatchNode: { width: 460, height: 420 },
+  nsfwDramaStudioNode: { width: 480, height: 480 },
+  nsfwFactoryInitNode: { width: 460, height: 420 },
+  nsfwFactoryScriptNode: { width: 460, height: 460 },
+  nsfwFactoryStoryboardNode: { width: 560, height: 460 },
+  nsfwFactoryAssetNode: { width: 480, height: 460 },
+  nsfwFactoryShotNode: { width: 480, height: 460 },
+  nsfwFactoryAudioNode: { width: 460, height: 460 },
+  nsfwFactoryComposeNode: { width: 480, height: 460 },
+  nsfwFactoryQcNode: { width: 480, height: 460 },
 };
 
 const DEFAULT_SHELL_SIZE = { width: 400, height: 300 };
+
+/**
+ * 解析 shell 盒子尺寸：正数实测值优先，否则按类型兜底。
+ *
+ * 用 `> 0` 而不是 `??`：RF 对「首屏恢复在低缩放档、从未渲染过」的节点会给出 0
+ * （getNodeDimensions 的 ?? 0 兜底），而 0 不是 nullish——`0 ?? 460 === 0`，
+ * shell 会渲染成 0×0 彻底不可见（2026-08-20 浏览器实测踩过）。undefined/NaN
+ * 参与数值比较均为 false，同样落到兜底。
+ */
+export function resolveShellSize(
+  type: string,
+  width: number | undefined,
+  height: number | undefined,
+): { width: number; height: number } {
+  const fallback = SHELL_FALLBACK_SIZES[type] ?? DEFAULT_SHELL_SIZE;
+  return {
+    width: width !== undefined && width > 0 ? width : fallback.width,
+    height: height !== undefined && height > 0 ? height : fallback.height,
+  };
+}
+
+/**
+ * 工厂工序 shell 徽标（低缩放档辨识用）。
+ *
+ * shell 没有标题，低缩放下整条流水线是一排同款灰块，无法分辨哪个节点是哪道
+ * 工序。徽标是与节点头 metaText「工序 N/8」同源的静态类型级信息（不是节点
+ * 标题——标题可被用户改写，且选中节点会击穿 shell 显示完整组件）。
+ */
+export const LOD_SHELL_STAGE_BADGES: Partial<Record<string, string>> = {
+  nsfwFactoryInitNode: '①立项',
+  nsfwFactoryScriptNode: '②剧本',
+  nsfwFactoryStoryboardNode: '③分镜',
+  nsfwFactoryAssetNode: '④资产',
+  nsfwFactoryShotNode: '⑤镜头',
+  nsfwFactoryAudioNode: '⑥音频',
+  nsfwFactoryComposeNode: '⑦合成',
+  nsfwFactoryQcNode: '⑧质检',
+};
 
 type ShellData = {
   imageUrl?: string | null;
@@ -79,6 +132,9 @@ type ShellData = {
   videoUrl?: string | null;
   isGenerating?: boolean;
   isUploading?: boolean;
+  /** 工厂工序运行中 / R18 出片批次运行中（低缩放档 busy 角标）。 */
+  isRunning?: boolean;
+  isBatchRunning?: boolean;
 };
 
 /** 每种类型能当缩略图用的字段（回落顺序与各组件的展示逻辑一致）。 */
@@ -110,9 +166,7 @@ function LodShell({ type, id, data, selected, width, height }: {
   width: number | undefined;
   height: number | undefined;
 }) {
-  const fallback = SHELL_FALLBACK_SIZES[type] ?? DEFAULT_SHELL_SIZE;
-  const w = width ?? fallback.width;
-  const h = height ?? fallback.height;
+  const { width: w, height: h } = resolveShellSize(type, width, height);
 
   // 视频缩略图：订阅模块级抓帧缓存；节点从未挂载过完整组件时（首屏即低缩放），
   // 这里负责把抓帧任务排进空闲队列，不依赖完整组件出现过。
@@ -130,7 +184,15 @@ function LodShell({ type, id, data, selected, width, height }: {
       ? (lodStill ?? (data.previewImageUrl ? resolveImageDisplayUrl(data.previewImageUrl) : null))
       : resolveShellImage(type, data);
 
-  const busy = Boolean(data.isGenerating || data.isUploading);
+  // busy 角标兼容工厂工序（isRunning）与 R18 出片批次（isBatchRunning）的运行态
+  const busy = Boolean(
+    data.isGenerating || data.isUploading || data.isRunning || data.isBatchRunning,
+  );
+
+  const stageBadge = LOD_SHELL_STAGE_BADGES[type];
+  // 徽标字号按节点宽 ~10% 取值：低缩放档（0.1-0.35）下换算到屏幕上恒为
+  // ~12-16px 可读大小，无需订阅 zoom（避免平移/缩放每帧重渲染）。
+  const badgeFontSize = stageBadge ? Math.max(20, Math.round(w * 0.1)) : 0;
 
   const style: CSSProperties = { width: w, height: h };
 
@@ -144,6 +206,14 @@ function LodShell({ type, id, data, selected, width, height }: {
       )}
       {imageSrc ? (
         <img src={imageSrc} alt="" draggable={false} className="dc-lod-shell__thumb" />
+      ) : null}
+      {stageBadge ? (
+        <span
+          className="dc-lod-shell__badge"
+          style={{ fontSize: badgeFontSize }}
+        >
+          {stageBadge}
+        </span>
       ) : null}
       {busy ? <span className="dc-lod-shell__busy" data-node-id={id} /> : null}
     </div>

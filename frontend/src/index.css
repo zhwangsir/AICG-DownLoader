@@ -800,6 +800,24 @@
   pointer-events: none;
 }
 
+/* 工厂工序徽标：低缩放档 shell 无标题，用「序号+工序名」小药丸保留辨识度。
+   字号由组件按节点宽 ~10% 内联设置，缩放换算到屏幕恒为 ~12-16px 可读大小。 */
+.dc-lod-shell__badge {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.12em 0.7em;
+  border-radius: 9999px;
+  background: rgba(12, 14, 18, 0.82);
+  color: rgba(226, 232, 240, 0.95);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
 /* 生成/上传中角标：低缩放下节点本体只有几十像素，用醒目的呼吸圆点表达状态。 */
 .dc-lod-shell__busy {
   position: absolute;

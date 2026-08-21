@@ -1368,12 +1368,12 @@ export function Canvas({
     let maxX = Number.NEGATIVE_INFINITY;
     let maxY = Number.NEGATIVE_INFINITY;
     for (const node of targets) {
-      const width =
-        node.measured?.width ??
-        (typeof node.width === 'number' ? node.width : DEFAULT_NODE_WIDTH);
-      const height =
-        node.measured?.height ??
-        (typeof node.height === 'number' ? node.height : 240);
+      // 零尺寸防御：未测量节点 RF 给 0（非 nullish，?? 兜不住），低缩放档
+      // 0×0 shell 曾使 measured 恒为 0（shell 侧已修，这里同样按正数校验）
+      const rawWidth = node.measured?.width ?? (typeof node.width === 'number' ? node.width : 0);
+      const rawHeight = node.measured?.height ?? (typeof node.height === 'number' ? node.height : 0);
+      const width = rawWidth > 0 ? rawWidth : DEFAULT_NODE_WIDTH;
+      const height = rawHeight > 0 ? rawHeight : 240;
       minX = Math.min(minX, node.position.x);
       minY = Math.min(minY, node.position.y);
       maxX = Math.max(maxX, node.position.x + width);
