@@ -46,7 +46,11 @@ import {
   nodeHasTargetHandle,
   isUpstreamConnectionAllowed,
 } from '@/features/canvas/domain/nodeRegistry';
-import { EXPORT_RESULT_DISPLAY_NAME } from '@/features/canvas/domain/nodeDisplay';
+import {
+  EXPORT_RESULT_DISPLAY_NAME,
+  getDefaultNodeDisplayName,
+  isLegacyDefaultDisplayName,
+} from '@/features/canvas/domain/nodeDisplay';
 import {
   overflowingVideoReferenceEdgeIds,
   videoReferenceConnectionRejection,
@@ -667,6 +671,14 @@ function normalizeNodes(rawNodes: CanvasNode[]): CanvasNode[] {
 
       if ('aspectRatio' in mergedData && !mergedData.aspectRatio) {
         mergedData.aspectRatio = DEFAULT_ASPECT_RATIO;
+      }
+
+      // 历史默认名迁移：调序前创建的节点把旧默认名持久化在 displayName（覆盖了
+      // createDefaultData 的现行默认名）。type+旧名精确命中即重置回现行默认名；
+      // 用户自定义名与非工厂类型不受影响。
+      const legacyDisplayName = (node.data as { displayName?: unknown }).displayName;
+      if (isLegacyDefaultDisplayName(node.type as CanvasNodeType, legacyDisplayName)) {
+        mergedData.displayName = getDefaultNodeDisplayName(node.type as CanvasNodeType, mergedData);
       }
 
       // Keep generation state only when there is a recoverable handle: either a

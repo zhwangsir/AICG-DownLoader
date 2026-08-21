@@ -87,3 +87,30 @@ export function isNodeUsingDefaultDisplayName(type: CanvasNodeType, data: Partia
   }
   return customTitle === getDefaultNodeDisplayName(type, data);
 }
+
+/**
+ * 历史默认名迁移表（type + 旧默认名精确匹配）。
+ *
+ * displayName 是创建节点时写入并随画布 JSON 持久化的默认名；工序调序/默认名
+ * 改名后，存量节点仍显示旧默认名（如 2026-08-19 工厂调序前的「工厂③数字资产」，
+ * 现行序为 ③分镜表/④数字资产）。hydrate 时命中即重置回现行默认名——重置而非
+ * 保留，使调序/改名只需改 DEFAULT_NODE_DISPLAY_NAME，不会产生新的存量漂移。
+ * 未来再有默认名变更，往本表补一行旧名即可。
+ */
+export const LEGACY_DEFAULT_DISPLAY_NAMES: Partial<Record<CanvasNodeType, readonly string[]>> = {
+  // 2026-08-19 工厂工序调序（原③资产/④分镜 → ③分镜/④资产）前的旧默认名
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: ['工厂③数字资产'],
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: ['工厂④分镜表'],
+};
+
+/** displayName 是否为该类型的某个历史默认名（用户自定义名不受影响）。 */
+export function isLegacyDefaultDisplayName(
+  type: CanvasNodeType,
+  displayName: unknown,
+): boolean {
+  const legacyNames = LEGACY_DEFAULT_DISPLAY_NAMES[type];
+  if (!legacyNames || typeof displayName !== 'string') {
+    return false;
+  }
+  return legacyNames.includes(displayName.trim());
+}
