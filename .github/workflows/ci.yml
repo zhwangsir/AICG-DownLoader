@@ -85,3 +85,58 @@ jobs:
       - name: Clippy (deny warnings)
         if: runner.os == 'Linux'
         run: cargo clippy --release --locked -- -D warnings
+
+  # AI 短剧工作台前端（platform/frontend）：TypeScript 类型检查 + vitest 组件/单测。
+  # 与 Rust 矩阵解耦：前端改动远频于 Rust，独立 job 失败定位更快；
+  # 仅 ubuntu 单平台（jsdom 无平台差异），Node 20 LTS。
+  # 包管理器为 pnpm（node_modules 为 .pnpm 结构，pnpm-lock.yaml 为准）。
+  frontend-test:
+    name: Frontend Test (platform/frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: platform/frontend/pnpm-lock.yaml
+
+      - name: Install dependencies (locked)
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Vitest (unit + component)
+        run: npm test
+
+  # AIGCPannel 后端（platform/backend）：uv + pytest。与 Rust/前端解耦。
+  backend-test:
+    name: Backend Test (platform/backend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform/backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync deps
+        run: uv sync --extra dev
+
+      - name: Pytest
+        run: uv run pytest

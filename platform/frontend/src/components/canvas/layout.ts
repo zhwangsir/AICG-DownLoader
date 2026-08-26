@@ -74,7 +74,8 @@ function baseNodeHeight(node: Node<DramaNodeData>): number {
     if (data.qualityIssues) h += 30;
     if (data.editablePrompts) h += 30;
     if (data.generateLabel && !data.loading) h += future ? 32 : 42;
-    if (data.loading) h += future ? 14 : 18;
+    // isFutureNode 要求 !loading，此处 future 恒为 false，固定 18
+    if (data.loading) h += 18;
   }
   return Math.max(h, future ? 120 : 138);
 }

@@ -264,7 +264,56 @@ class QualityAgent(BaseAgent):
                     message=f"小配角跨集召回: 角色「{name}」仅出场 {char_scene_count[name]} 镜但跨 {len(eps)} 集，服饰一致性崩坏率高",
                     suggestion="建议在角色资产库中锁定该角色服装细节卡，跨集生成时强制引用",
                 ))
+        issues.extend(self._multishot_group_issues(request.scenes))
         return issues
+
+    def _multishot_group_issues(self, scenes) -> list[QualityCheckItem]:
+        """M12.3 多镜联合生成组自动标注（H3 独有失败模式：跨镜角色漂移）。
+
+        与 video_agent.group_scenes_for_multishot 同规则（同集相邻、场景数/总时长
+        双上限）模拟分组；≥2 场景成组时逐场景打 info 标，提示人工抽查组内首尾帧
+        角色一致性（一次推理生成多镜，漂移无法靠单镜重抽修复）。
+        """
+        if settings.video_backend.lower() != "h3" or not settings.h3_multishot_enabled:
+            return []
+        max_scenes = settings.h3_multishot_max_scenes
+        max_seconds = settings.h3_multishot_max_seconds
+
+        groups: list[list] = []
+        current: list = []
+        current_seconds = 0.0
+        current_episode: int | None = None
+        for s in scenes:
+            duration = float(s.duration_seconds)
+            if (
+                current
+                and s.episode == current_episode
+                and len(current) < max_scenes
+                and current_seconds + duration <= max_seconds
+            ):
+                current.append(s)
+                current_seconds += duration
+            else:
+                if current:
+                    groups.append(current)
+                current = [s]
+                current_seconds = duration
+                current_episode = s.episode
+        if current:
+            groups.append(current)
+
+        return [
+            QualityCheckItem(
+                category="visual_risk",
+                severity="info",
+                scene_id=s.scene_id,
+                message=f"多镜联合生成组（{len(group)} 镜一次推理）: 跨镜角色漂移风险",
+                suggestion="建议抽查该组首尾帧角色一致性；漂移时整组重抽或改逐场景生成（h3_multishot_enabled=False）",
+            )
+            for group in groups
+            if len(group) >= 2
+            for s in group
+        ]
 
     def _fallback_check(self, request: QualityCheckRequest) -> QualityCheckResult:
         """LLM 超时时的降级规则质检：字幕错别字 + 敏感词基础检测 + 结构/高风险镜头。"""
@@ -517,6 +566,25 @@ VISUAL_QUALITY_PROMPT_TEMPLATE = """你是一名短剧视频质检专家。以�
 只输出 JSON，不要 markdown 代码块，不要解释。
 """
 
+# M13 角色一致性对照专用 prompt（独立第二次 VLM 调用，与主画质检查分离）。
+# 实测教训：漂移指令拼接在长画质 prompt 末尾会被"画质检查"心智框架稀释，
+# 模型直接忽略（极端换人也漏报）；独立简单 prompt 裸测 100% 命中。
+DRIFT_CHECK_PROMPT = """前 {ref_count} 张图是角色定妆参考图（三视图：正面/侧面/背面），最后 1 张是视频抽帧。
+请判断视频帧中的角色是否与参考图为同一角色。判定规则：
+- 第一步先判断参考角色是否在帧中出镜：帧为 POV 主观镜头/空镜/仅道具特写，或帧中仅出现与参考角色明显不同的背景路人 → character_present 填 false，此种情况一律不算漂移；
+- 性别/年龄段/画风（卡通 vs 写实）/人种明显不同，或明显不是同一人 → 判定漂移；
+- 确认是同一角色后，不同视角（正面/侧面/背面）之间的外观差异（如背面看不到面部）→ 不算漂移；
+- 帧模糊、角色占比过小或被遮挡到无法辨认 → 不算漂移，details 填写"无法辨认"；
+- 同视角下发型、服装款式、妆容与参考图明显不同 → 判定漂移。
+
+输出要求：只输出一个 JSON 对象，包含三个字段：
+- character_present：布尔值，参考角色是否在帧中出镜（无法辨认视为出镜；仅当帧中完全没有参考角色时填 false）；
+- drift_detected：布尔值，判定漂移为 true，否则为 false（character_present 为 false 时必须填 false）；
+- details：字符串。判定漂移时，必须根据图片实际内容描述具体差异（如"服装颜色不同：帧为红色T恤，参考图为蓝色T恤"）；参考角色未出镜时填写"参考角色未出镜"；无漂移时填空字符串。
+严禁照抄本说明中的示例文字。
+
+不要 markdown 代码块，不要解释。"""
+
 
 class VisualQualityAgent(BaseAgent):
     """视觉质检 Agent：视频 → 抽帧 → VLM 检查。"""
@@ -566,21 +634,31 @@ class VisualQualityAgent(BaseAgent):
             # 2. 抽帧
             frames = await self._extract_frames(video_path, request.max_frames)
 
-            # 3. 构建带图片的 VLM 消息
-            content: list[dict[str, Any]] = [
-                {"type": "text", "text": VISUAL_QUALITY_PROMPT_TEMPLATE.format(
-                    title=request.title or "未命名视频",
-                    check_types=", ".join(request.check_types),
-                )}
-            ]
+            # 3. M13 角色一致性对照：下载参考图（失败的单张跳过，不阻断主检查）
+            ref_paths: list[Path] = []
+            if request.reference_image_urls:
+                downloaded = await asyncio.gather(
+                    *(self._download_reference_image(u) for u in request.reference_image_urls)
+                )
+                ref_paths = [p for p in downloaded if p is not None]
+
+            # 4. 主画质检查：仅视频帧（不混入参考图——实测参考图+长 prompt 会让
+            # 漂移指令被画质检查框架稀释，极端换人都漏报；漂移走独立调用）
+            prompt_text = VISUAL_QUALITY_PROMPT_TEMPLATE.format(
+                title=request.title or "未命名视频",
+                check_types=", ".join(request.check_types),
+            )
+            content: list[dict[str, Any]] = [{"type": "text", "text": prompt_text}]
+            # M13 调优：detail 必须从 low 提到 high —— low 模式下 vLLM 把图缩到极小，
+            # VLM 看不清直接编答案（实测幻觉出参考图不存在的"红色T恤"）
             for timestamp, frame_path in frames:
                 encoded = base64.b64encode(frame_path.read_bytes()).decode("utf-8")
                 content.append({
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "low"},
+                    "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
                 })
 
-            # 4. 调用 VLM（使用独立的 VLM 客户端，指向 workstation Qwen3-VL 服务）
+            # 5. 调用 VLM（使用独立的 VLM 客户端，指向 workstation Qwen3-VL 服务）
             # Nemotron 推理模型对多帧画面会产生超长思考链（>8000 token 仍被截断），
             # 通过 chat_template_kwargs.enable_thinking=False 关闭推理模式，
             # 直接输出 JSON（实测 8000 token 耗尽 → 81 token 完成）。
@@ -616,17 +694,36 @@ class VisualQualityAgent(BaseAgent):
                     raw,
                     0,
                 )
+            issues = [
+                QualityVisualItem(**item)
+                for item in data.get("issues", [])
+                if isinstance(item, dict)
+            ]
+            summary = data.get("summary", "")
+
+            # 6. M13 独立漂移对照：有参考图时单独调用 VLM（专用简单 prompt，
+            # 实测命中率远高于拼接式）；检出漂移时追加 critical issue 并修订 summary
+            drift_detected = False
+            if ref_paths:
+                drift_detected, drift_detail = await self._drift_check(ref_paths, frames)
+                if drift_detected:
+                    issues.append(QualityVisualItem(
+                        category="visual_consistency",
+                        severity="critical",
+                        timestamp=None,
+                        message=f"角色漂移：{drift_detail or '视频角色与参考图不一致'}",
+                        suggestion="参考角色资产库三视图重抽该场景，或检查 ref 注入工作流",
+                    ))
+                    summary = f"检测到角色漂移（{drift_detail}）。" if drift_detail else "检测到角色漂移。"
+
             result = QualityVisualResult(
                 project_id=request.project_id,
                 title=request.title,
                 scene_id=request.scene_id,
                 score=int(data.get("score", 80)),
-                summary=data.get("summary", ""),
-                issues=[
-                    QualityVisualItem(**item)
-                    for item in data.get("issues", [])
-                    if isinstance(item, dict)
-                ],
+                summary=summary,
+                issues=issues,
+                drift_detected=drift_detected,
             )
 
             return AgentResponse(
@@ -670,6 +767,121 @@ class VisualQualityAgent(BaseAgent):
                 async for chunk in resp.aiter_bytes():
                     f.write(chunk)
         return dest
+
+    async def _drift_check(
+        self, ref_paths: list[Path], frames: list[tuple[float, Path]]
+    ) -> tuple[bool, str]:
+        """M13 独立漂移对照：逐帧并发判定，任一帧漂移即整体漂移。
+
+        实测教训：4+ 张图同时输入会让 Nemotron 产生跨图干扰幻觉（把卡通帧
+        描述成"写实成年女性"）；逐帧调用（参考图 + 单帧）判定与描述均准确。
+        返回 (drift_detected, details)。任何异常兜底 (False, "")，不阻断主检查。
+        """
+        try:
+            results = await asyncio.gather(*(
+                self._drift_check_single_frame(ref_paths, frame_path)
+                for _timestamp, frame_path in frames
+            ))
+            drift_hits = [detail for is_drift, detail in results if is_drift]
+            if drift_hits:
+                # 聚合去重漂移细节（多帧可能报同一差异）
+                uniq = list(dict.fromkeys(d.strip() for d in drift_hits if d.strip()))
+                return True, "；".join(uniq[:3])
+            return False, ""
+        except Exception as e:  # noqa: BLE001 —— 漂移检测失败不阻断主画质检查
+            logger.warning("漂移对照检测失败，按无漂移兜底: %s", e)
+            return False, ""
+
+    async def _drift_check_single_frame(
+        self, ref_paths: list[Path], frame_path: Path
+    ) -> tuple[bool, str]:
+        """单帧漂移判定：参考图 + 1 帧，返回 (drift_detected, details)。"""
+        try:
+            content: list[dict[str, Any]] = [{
+                "type": "text",
+                "text": DRIFT_CHECK_PROMPT.format(ref_count=len(ref_paths)),
+            }]
+            for ref_path in ref_paths:
+                encoded = base64.b64encode(ref_path.read_bytes()).decode("utf-8")
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
+                })
+            encoded = base64.b64encode(frame_path.read_bytes()).decode("utf-8")
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
+            })
+
+            client = self._get_vlm_client()
+            resp = await client.chat.completions.create(
+                model=settings.visual_model_name,
+                messages=[{"role": "user", "content": content}],
+                temperature=0.1,
+                max_tokens=500,
+                stream=False,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            )
+            raw = resp.choices[0].message.content or ""
+            if not raw:
+                raw = getattr(resp.choices[0].message, "reasoning_content", "") or ""
+            raw = strip_think_tags(raw)
+            if raw.startswith("```"):
+                lines = raw.split("\n")[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                raw = "\n".join(lines).strip()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = json_repair.loads(raw)
+            if not isinstance(data, dict):
+                return False, ""
+            # M16.3 未出镜豁免：参考角色不在帧中（POV 主观镜头/空镜/仅背景路人），
+            # 无论 drift_detected 为何均不算漂移 —— 程序兜底，防止 VLM 拿背景路人
+            # 与参考图比对误判（core E2E pipeline-7470e3e104d9 scene 1 真实缺陷）
+            if data.get("character_present") is False:
+                logger.info("参考角色未出镜，漂移判定豁免: %s", data.get("details", ""))
+                return False, ""
+            return bool(data.get("drift_detected", False)), str(data.get("details", ""))
+        except Exception as e:  # noqa: BLE001 —— 单帧失败按无漂移兜底，不拖垮整组
+            logger.warning("单帧漂移判定失败，按无漂移兜底: %s", e)
+            return False, ""
+
+    async def _download_reference_image(self, url: str) -> Path | None:
+        """下载角色定妆参考图，返回本地路径；失败返回 None（调用方跳过，不阻断主检查）。
+
+        本地静态资源（/static/character/xxx.png）直接映射到 output 目录免下载。
+        """
+        from urllib.parse import urlparse
+
+        url = (url or "").strip()
+        if not url:
+            return None
+        try:
+            parsed = urlparse(url)
+            # 本地静态资源直接复用（角色定妆照存于 output/character/）
+            if parsed.hostname in ("localhost", "127.0.0.1") and parsed.path.startswith("/static/"):
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) >= 3:
+                    local_dir = Path(__file__).resolve().parent.parent.parent / "output" / parts[1]
+                    candidate = local_dir / parts[-1]
+                    if candidate.exists():
+                        return candidate
+
+            suffix = Path(parsed.path).suffix or ".png"
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp.close()
+            dest = Path(tmp.name)
+            async with self.http.stream("GET", url) as resp:
+                resp.raise_for_status()
+                with open(dest, "wb") as f:
+                    async for chunk in resp.aiter_bytes():
+                        f.write(chunk)
+            return dest
+        except Exception as e:
+            logger.warning("参考图下载失败（跳过）: %s err=%s", url, e)
+            return None
 
     async def _extract_frames(
         self,

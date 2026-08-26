@@ -1,6 +1,1323 @@
+# TEST_LOG.md — AIGCPannel
+
+- 2026-08-27 融合收尾（仍未 commit/push）：CORS 已去掉 localhost:1420；frontend package.json 已无 @tauri-apps；backend .venv 已在 platform/backend 重建；引擎页可手动刷新探测 :8080/:8780。crate/安装器路径/GitHub URL 仍旧。远程仓名等用户点头再两边一起改。ToIV 和 dashbox 品牌文件未动。
+
+- 2026-08-27 第一波融合落盘（未 commit/push）：产品显示名 AIGCPannel。`./start-aigcpannel.sh` backend :8100 + frontend :3501；`./start-engine.sh` DashBox docker 默认 :8080/:8780。根 NOTICE 声明 dashbox/ 为 ELv2。crate/配置目录仍 comfy-downloader。远程仍 AICG-DownLoader。已删 platform/deploy 下 deepfilternet、hunyuanimage、latentsync、video-enhance、xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。GET /api/panel/status 可查 config/models.json 是否可读。ToIV 未动。dashbox 品牌文件未改。
+
+
+- 2026-08-27 用户定名 **AIGCPannel**（拼法以用户为准）：下载器+短剧台+DashBox 融合为一仓。五件套只维护 `ALLProject/AIGCPannel`（原 AICG-DownLoader-main）。三份拷贝已删，不往拷贝写。DashBox 上游 LICENSE/NOTICE/品牌不覆盖。集群真相只在 ToIV/AGENTS.md。远程仓尚未改名。
+
+- 2026-08-27 项目管家文档治理：根目录收敛为 5 件套。
+
 # TEST_LOG.md — 测试与验证时序日志
 
 > 本文件按时间倒序记录每次回归验证的命令、结果与关键代码片段。
+
+## 2026-08-10 M20 长视频分块续写 PoC（H3 I2V 帧链）
+
+### 背景
+
+2026-08-10 长视频调研结论：2-5 分钟长视频采用「分块生成 + 视频续写/首尾帧衔接 + 一致性约束」
+技术路线。路线 A 复用现有 H3 I2V 能力：chunk i+1 首帧 = chunk i 末帧（帧链），
+逐块透传角色参考图（ref2va）与画风锚定（M18.4），ffmpeg concat 拼接成长视频。
+本条目为路线 A 的首次实机验证。PoC 默认关闭（`long_video_enabled=False`），不影响高质量短剧主流程。
+
+### 实现（config.py / long_video_service.py / tests）
+
+- **配置**：`long_video_enabled=False`（默认关闭）、`long_video_max_chunks=4`、
+  `long_video_chunk_seconds=5`、`long_video_frame_prefix="longvideo_chain"`。
+- **服务**：`app/services/long_video_service.py`
+  - `extract_last_frame`：ffmpeg `-sseof -0.1` 尾部定位抽末帧（避免全片解码）；
+  - `concat_videos`：concat demuxer + 统一重编码（libx264 crf18 + aac + faststart），
+    消除块间时间戳/编码参数缝隙；
+  - `LongVideoService.generate`：帧链编排 —— 块 i 末帧抽取后上传 ComfyUI input
+    （确定性文件名 + overwrite），构造 `/view?filename=...&type=input` URL 作块 i+1 首帧；
+    任一块失败 fail-fast（PoC 阶段不拼接部分结果，防断链视频混入流水线）。
+- **测试**：
+  - 单元 `tests/unit/test_long_video_service.py` 11 例：ffmpeg/ffprobe 命令构造、
+    帧链 image_url 传递、参考图/画风透传、max_chunks 截断、fail-fast、开关关闭、空 prompt。
+  - 实机 `tests/integration/test_long_video_poc.py`（`-m slow`）：合成 9:16 关键帧，
+    2 块 × 5s 原生 H3（20 步）帧链生成 + 拼接验证，产物归档 `test_artifacts/longvideo_poc/`。
+
+### 实机 PoC 结果
+
+```
+chunks=2 elapsed=490.3s（单块约 245s）
+final=long_video.mp4 size=3.78MB duration=10.38s（期望 ≈10s）
+接缝帧平均像素差=9.00/255（拼接缝 4.90s vs 5.10s 中点采样）
+```
+
+- 接缝前后帧目视对比（`seam_pre.png` / `seam_post.png`）：角色（面部/校服/包/姿态）、
+  场景（霓虹街景/湿路面反射）、构图几乎完全一致，帧链连续性达标。
+- 回归：后端单元 666 passed（+11，覆盖率 83.35%）；后端集成 25 passed（2 slow 摘除）；
+  前端 47 passed + 构建成功。
+
+### 结论与下一步
+
+路线 A 帧链续写在本项目 H3 链路上打通，2 块拼接无缝迹象。后续可选：
+1. 3-4 块 × 14s 拉长验证（接近 1 分钟）+ 角色漂移累积观测；
+2. LongVideoPlanner（剧本 → Act/Scene/Shot/Chunk 拆分）接入 pipeline_orchestrator；
+3. 路线 B 并行评估：workstation 部署 LongCat-Video 原生长视频模型对比。
+
+## 2026-08-08 MiniMax H3 Turbo LoRA 可选加速 A/B 验证
+
+### 背景
+
+高质量 AI 短剧当前默认使用原生 MiniMax H3（20 步 res_multistep + simple），单场景 5-15 分钟。
+社区 Turbo LoRA 宣称可将采样步数降至 4-8 步并获得约 5× 加速，但质量/画风 trade-off 需要在本项目
+短剧 pipeline 上实测。所有加速能力必须**可选、默认关闭**，不能影响现有高质量流程。
+
+### 实现（config.py / video_agent.py / tests）
+
+- **可选开关**：`h3_turbo_enabled=False`（默认关闭），`h3_turbo_steps=6`，
+  `h3_turbo_strength=1.0`，`h3_turbo_low_vram=False`。仅当显式开启时才改造工作流。
+- **工作流改造**：`_apply_h3_turbo_to_workflow` 在 UNETLoader 后插入 `MiniMaxH3TurboLoRA`，
+  将 `BasicGuider`/`BasicScheduler` 的 model 链路重定向到 LoRA 输出；用 `MiniMaxH3TurboSampler`
+  替换 `KSamplerSelect`；`steps` 切到 `h3_turbo_steps`。对 FL2VA / R2V / 多镜三条路径均生效。
+- **部署**：`minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors`（592MB pruned 版）
+  已放到 NAS `h3/loras/`，:8195 专用 ComfyUI 实例已加载 `ComfyUI-MiniMax-H3-Turbo` 节点。
+- **测试**：
+  - 单元测试 `TestH3TurboWorkflowTransformation` 6 例：默认关闭工作流不变、开启后 FL2VA/R2VA
+    正确注入、steps 切换、LoRA 自身 model 输入不被误改等。
+  - 实机 A/B 测试 `tests/integration/test_h3_turbo_ab.py`（`-m slow`）：合成 9:16 关键帧，
+    原生 20 步 vs Turbo 6 步各跑一次，对比耗时、成功率、视频大小与加速比。
+
+### A/B 结果
+
+| 模式 | steps | 耗时 | 视频大小 | 备注 |
+|---|---:|---:|---:|---|
+| 原生 H3 | 20 | 210.2s | 1.49MB | 默认高质量路径 |
+| Turbo LoRA | 6 | 74.1s | 2.32MB | 可选加速路径 |
+| **加速比** | — | **2.84×** | — | — |
+
+- 两模式均成功生成可下载 mp4，文件大小均大于 100KB。
+- Turbo 明显快于原生，满足「至少更快」的实验性门槛。
+- 画质/画风未做定量 VLM 评分，本次仅验证可用性与速度；对高质量短剧，Turbo 仍属**实验性可选项**，
+  默认保持原生 20 步。
+
+### 使用方式
+
+```bash
+# 默认关闭，不影响任何现有流程
+H3_TURBO_ENABLED=false
+
+# 需要快速迭代/预览时显式开启（可在 .env 或运行时切换）
+H3_TURBO_ENABLED=true
+H3_TURBO_STEPS=6
+H3_TURBO_STRENGTH=1.0
+```
+
+### 注意事项
+
+- Turbo LoRA 与原生 H3 在权重/采样器上互不兼容；代码通过工作流动态改造保证切换无需改模板文件。
+- `h3_turbo_low_vram=True` 会在显存不足时合并权重，画质略软，仅在 OOM 时启用。
+- 当前项目全套围绕高质量 AI 短剧，Turbo 只作为**可选加速预览**，不作为默认路径。
+
+---
+
+## 2026-08-07 M18.6 core 重启生效 + M18.4 QC 实机验证（两轮 E2E）
+
+### 第一轮（pipeline-badd72391e7e，style 透传修复生效后同参数复测）
+
+core 后端重启加载 M18.5 两项修复（VideoRequest.style 透传 + HunyuanImage /v1/v1 去重），
+参数同 M18.1 基线。结果：9 步全绿，storyboard/video 3/3（pc02 中途再次静默崩溃，
+计划任务 MountNAS+StartComfyUI 救援恢复，与易错点 10 预案一致）。
+
+- M18.2 ✅ 持续严格拦截：林远 side 连续 3 次不合格（发色/眼镜/服装不一致）、
+  苏清 closeup 连续 3 次不合格（服装款式不一致），废品不入库。
+- M18.4 ⚠️ QC 未实跑：本轮 H3 多镜组**一次成功**（上轮为 OOM 回退逐场景），
+  组级 QC 按设计跳过（重生成成本 10-20 分钟/组），仅约束层生效。
+- drift 3/3 但**指标被污染**（见关键发现 B），不可归因。
+
+### 关键发现（本轮暴露）
+
+1. **HunyuanImage 服务侧新故障**：`No module named 'hyimage.pipelines'`。
+   /v1/v1 404 修复有效（请求已到达服务），但服务 import 层损坏，
+   角色/分镜全链路回退 SDXL。属 workstation 侧服务问题，待修。
+2. **资产库陈旧参考污染（新缺口，派生候选）**：M18.2 拦截新三视图不入库后，
+   `_collect_character_reference_images` 按 character_id 静默命中 M18.1 旧资产
+   （林默/影子林小满），本轮角色实为林远/苏清 — 视频 ref2va 参考图与
+   视觉对照基准双双错配，drift 判定失去意义。候选治理：资产库按剧本指纹隔离 /
+   拦截后显式置空引用 / 资产版本化（待决策）。
+
+### 第二轮（pipeline-a91a8cfc2fa6，临时 H3_MULTISHOT_ENABLED=false 强制逐场景）
+
+为实机触达 M18.4 检测/纠偏层，core `.env` 临时关闭多镜开关重启，
+同参数复跑（验证后已恢复开关并重启，health 200）。
+
+- **M18.4 QC 首次实机全链路运行**：
+  - scene_1 检出画风漂移：「画面呈现写实渲染风格，具有逼真的皮肤纹理、光影反射
+    和蒸汽细节，缺乏国漫标志性的线条勾勒、平涂或赛璐璐上色特征」
+    → 纠偏触发：`strengthen_h3_style_clause` 强化锚定 + 换 seed 重生成 1/1；
+  - 重试产物仍判漂移（「高写实度 3D 渲染质感…更接近现代 3D 动画或写实 CG」）
+    → 重试耗尽 **fail-open 放行**（纠偏不阻断生产，与设计一致）；
+  - scene_2/3 首检通过（QC 通过无日志，静默放行）。
+- 结果：storyboard/video 3/3 全成，成片 9.17s，quality 75；
+  drift=[2,3] — scene_1（唯一经 QC 纠偏的场景）恰为唯一过视觉对照的场景，
+  提示性证据但受陈旧参考污染，不作强归因。
+- pc02 全程健康，定妆照复制零失败。
+
+### M18 收官结论
+
+M18.4 三层机制实机验证完备：约束层（多镜/单镜 prompt 锚定 + 冲突词清洗）、
+检测层（VLM 中点帧画风判定）、纠偏层（强化重生成 + 重试耗尽放行）全部实跑；
+M18.2 拦截、M18.3 锚定复制前两轮已实证。drift 治理效果的干净量化受
+「资产库陈旧参考」缺口阻塞，列入后续候选。全量回归维持 649 passed / 83.07%
+（本轮无代码变更，仅 core 侧配置临时切换）。
+
+---
+
+## 2026-08-07 M18.5 M18.3 运维分发 + 三里程碑联合实机 E2E（对照 M18.1 基线）
+
+### 运维三件事（全部完成）
+
+1. **IPAdapter 模型分发**：ip-adapter-plus-face_sdxl_vit-h + CLIP-ViT-H-14-laion2B-s32B-b79K
+   核验 workstation / pc01 / pc02 三 LB 后端齐全；`.env` 配
+   `IPADAPTER_SDXL_MODEL_NAME` / `IPADAPTER_CLIP_VISION_NAME`。
+2. **LB 后端直连清单**：`.env` 配 `COMFYUI_LB_BACKEND_URLS=workstation:8189,pc01:8188,pc02:8193`，
+   定妆照同名复制全后端，规避 LB /upload 轮询单点导致 LoadImage 跨后端 400。
+3. **pc02 崩溃救援**：E2E 中途 pc02 ComfyUI 进程静默退出（CUDA 初始化后无错误日志），
+   经计划任务 MountNAS + StartComfyUI 重启恢复 200，IPAdapter/CLIP-Vision 加载确认。
+
+### 联合 E2E（pipeline-dd4c074a73ac，core 实机，耗时 1591s）
+
+参数同 M18.1：都市悬疑 / 国漫 / 1 集×3 场景 / 定妆照 / 参考视频+音频 / run_visual_check=true。
+
+| 步骤 | 结果 |
+|---|---|
+| script | 《最后一杯热咖啡》2 角色 3 场景 |
+| character | char_001/char_002 **均被 M18.2 拦截未入库**（front/side/closeup 连续 3 次不合格） |
+| storyboard | 2/3 成功；scene_1 失败（pc02 崩溃窗口 → SDXL 回退超时 300s） |
+| video | H3 多镜 OOM 回退逐场景，2/2 成功（scene_2/3） |
+| voice/subtitle/edit | 3/3、3/3、成片 6.62s（2 segments） |
+| quality / visual_quality | 85 分 6 issues；checked=2，drift_scenes=[2,3]，两场景各 95 分 |
+
+### 三里程碑运行证据（core /tmp/aicg-backend.log）
+
+- **M18.2 ✅ 按设计严格拦截**：林默 front「眼神清澈缺疲惫空洞、缺智能手表、发际线偏低」、
+  苏雅 front「白发 vs 黑长直、侧分刘海、白色外套 vs 黑色高领」等详细判定，
+  换 seed 重试 2 轮仍不合格 → 废品不入库（设计目标达成）。
+- **M18.3 ✅ 锚定注入并复制**：定妆照以资产库 char_001 front 注入 IPAdapter；
+  pc02 崩溃窗口复制失败 5 次（`All connection attempts failed`），2/3 后端成功仍注入
+  （部分失败不阻断，与设计一致）。
+- **M18.4 ⚠️ QC 零运行**：日志无任何「H3 画风」记录 — 根因排查为
+  **orchestrator `_step_video` 构建 VideoRequest 时漏传 `style` 字段**，
+  QC fail-open 条件（style 为空）静默跳过；约束层冲突词清洗同样未生效。
+
+### drift 对照结论
+
+- M18.1 基线：drift 3/3（3 场景全漂移）。
+- 本轮：drift 2/2（样本因 pc02 崩溃缩为 2 场景），M18.4 QC 未实际运行，
+  **漂移治理效果不可归因、待下轮验证**；M18.2/M18.3 价值已实证
+  （废品拦截 + 锚定全链路注入）。
+
+### 缺口修复（本轮 E2E 暴露）
+
+1. **M18.4 接线缺口**（pipeline_orchestrator.py）：`VideoRequest` 补 `style=request.style`，
+   TDD 先红（`assert '' == '国漫'`）后绿；新增用例
+   `test_style_propagated_to_video_request`。
+2. **HunyuanImage 404**（image_service.py，本轮日志 `/v1/v1/images/generations` 实锤）：
+   endpoint 含 /v1 前缀，三处调用路径去重；core 已同步待重启生效。
+3. **测试隔离**（test_storyboard_agent.py）：本地 .env 的 `COMFYUI_LB_BACKEND_URLS`
+   污染旧用例单点上传断言（awaited once → 3 次），`_enable_anchor` 与 Wiring 类
+   显式置空 LB 清单隔离。
+
+### 全量回归
+
+```text
+后端 pytest tests/unit   649 passed，coverage 83.07%（≥80% 门槛），48.97s
+```
+
+### 后续
+
+- core 后端重启（加载 style 透传 + HunyuanImage 修复）后重跑同参数 E2E，
+  验证 M18.4 QC 实际拦截/纠偏行为，再下 drift 对照结论。
+- pc02 静默崩溃根因待查（Windows 事件日志 / ComfyUI 控制台输出）。
+
+---
+
+## 2026-08-07 M18.4 H3 画风漂移治理（约束 + 检测 + 纠偏三层）
+
+### 背景
+
+M18.1 帧级核验发现 H3 输出（半写实厚涂）与参考图/定妆照（卡通平涂）存在系统性
+画风漂移（3/3 VLM 真阳性）。M15 画风锚定只覆盖剧本/角色/分镜文生图链路，
+H3 视频链路三条 prompt 路径（fl2va/r2v/多镜）均未做画风约束，产出亦无检测。
+
+### 实现（video_agent.py / config.py / schemas.py）
+
+- **约束层** `apply_h3_style_anchor(prompt, style)`：画风冲突词清洗
+  （`sanitize_style_conflicts`，如国漫目标下剔除 hyperrealistic/cinematic realism）
+  + 幂等追加风格锚定尾（orchestrator M15.1 已追加过时跳过，不二次追加）；
+  style 为空或 `h3_style_anchor_enabled=False` 原样透传（向后兼容）。
+  三条路径统一接线：fl2va `_execute_via_h3_fl2va`、r2v `_execute_via_h3_r2v`
+  （锚定作用于场景 prompt 本体，风格尾位于参考图引导语之前）、
+  多镜 `build_multishot_prompt`（组级画风基准=组内首个非空 style，逐镜兜底）。
+- **检测层** `_h3_style_qc_check(video_url, style)`：`_extract_h3_middle_frame`
+  下载产出视频 ffprobe 取时长中点 ffmpeg 抽帧 → base64 送 VLM
+  （`visual_model_url`/`visual_model_name`，与 M18.2 同一入口），
+  判定渲染风格是否符合目标画风（内容/构图/外貌不作依据），
+  输出 `{"pass": bool, "reason"}`；异常/坏 JSON/结构不符一律 fail-open 放行。
+- **纠偏层** `_execute_h3_with_style_qc`：漂移时 `strengthen_h3_style_clause`
+  前置强化画风子句（`Rendered strictly in {style_name_en}. {原 prompt}`）
+  + 换 seed 重提交，最多 `h3_style_qc_max_retries=1` 次；
+  重试耗尽放行最后结果（纠偏不阻断生产，仅日志记录）。
+  仅包装单镜 execute（fl2va/r2v 派发入口 `_execute_via_h3`，r2v 重试仍走 r2v
+  且参考图挂接保留）；多镜组重生成成本高（10-20 分钟/组），组级漂移由约束层治理。
+- `config.py`：`h3_style_anchor_enabled=True` / `h3_style_qc_enabled=True` /
+  `h3_style_qc_max_retries=1`（回滚：全部置 False/0 后代码路径与现状一致）。
+- `schemas.py`：`VideoRequest.style` 字段（orchestrator 透传目标画风，空串跳过）。
+
+### TDD 用例（18 例，先红后绿）
+
+| 类 | 覆盖 | 结果 |
+|---|---|---|
+| TestH3StyleAnchorClause (6) | 冲突清洗+风格尾/幂等/写实反向清洗/开关关闭透传/空 style 透传/强化子句前置 | 6/6 PASS |
+| TestVideoAgentH3StyleAnchorWiring (4) | fl2va 锚定、r2v 锚定（风格尾在引导语前）、多镜逐镜锚定、多镜空 style 不变 | 4/4 PASS |
+| TestVideoAgentH3StyleQC (8) | 合格不重试/漂移换 seed 强化重生成/重试耗尽放行/r2v 亦过 QC/VLM 异常 fail-open/坏 JSON fail-open/开关关闭跳过/style 空跳过 | 8/8 PASS |
+
+首次跑红确认：r2v prompt 未清洗（`cinematic realism` 残留）、QC 包装器不存在；
+实现后 18/18 全绿。
+
+### 全量回归
+
+```text
+后端 pytest tests/unit   645 passed，coverage 83.02%（≥80% 门槛），49.13s
+前端 vitest               47 passed (3 files)
+前端 build                811ms 成功
+```
+
+### 注意事项
+
+- 检测层每单镜增加 1 次抽帧下载 + 1 次 VLM 调用（约 2-5s）；漂移时整镜重生成
+  （H3 单镜 5-15 分钟），`h3_style_qc_max_retries=1` 为成本/质量平衡点。
+- fail-open 设计：VLM 不可用、帧抽取失败、坏 JSON 均不阻断生产；误判风险由
+  「重试耗尽放行最后结果」兜底，持续误判可置 `h3_style_qc_enabled=False` 回滚。
+- 实机 E2E 验证（国漫画风 1 集×3 场景，观察 drift 判定率较 M18.1 基线 3/3 下降）
+  待 M18.3 运维（IPAdapter 模型分发）完成后联合进行。
+
+---
+
+## 2026-08-07 M18.3 分镜关键帧外貌锚定（定妆照 front IPAdapter 注入）
+
+### 背景
+
+M18.1 帧级核验发现分镜关键帧（黑长直发）与角色定妆照 front（短碎发）外貌冲突，
+H3 ref2va 以冲突关键帧为构图锚点进一步放大不一致。M18.3 在关键帧生成环节
+（SDXL 路径）把角色定妆照 front 作为 IPAdapter 图像参考注入，从源头锚定
+角色外观/服饰/整体设定一致性。
+
+### 实现（storyboard_agent.py / config.py）
+
+- 节点模板：IPAdapterModelLoader（`ip-adapter_sdxl_vit-h`）+ CLIPVisionLoader
+  （`CLIP-ViT-H-14-laion2B-s32B-b79K`）+ LoadImage（定妆照 front，运行时上传替换）
+  + IPAdapterAdvanced（权重 `storyboard_keyframe_anchor_weight=0.6`），
+  KSampler model 输入重定向到 IPAdapterAdvanced 输出。
+- `_resolve_keyframe_anchor_image()`：从角色资产库解析首个有定妆照 front 的角色
+  参考图；无定妆照/开关关闭/资产库异常 → 跳过锚定走原工作流。
+- `_inject_ipadapter_anchor()`：定妆照上传或节点装配任何异常回退原 SDXL 工作流
+  （锚定是增强不是阻断）。
+- M16 外貌锚定重试重生成时锚定参考图一并透传（重试不丢锚定）。
+- `config.py`：`storyboard_keyframe_anchor_enabled=True`（回滚置 False）。
+- 仅 SDXL 路径生效；HunyuanImage/FLUX+PuLID 主路径不变。
+
+### TDD 用例（10 例，先红后绿）
+
+| 类 | 覆盖 | 结果 |
+|---|---|---|
+| TestStoryboardKeyframeAnchor (6) | 有定妆照注入 4 节点+KSampler 重定向/无参考不注入/开关关闭不注入/权重来自配置/上传失败回退原工作流/外貌重试携带锚定 | 6/6 PASS |
+| TestStoryboardKeyframeAnchorWiring (4) | execute 级联：取首个 front/无 front 跳过/开关关闭跳过/资产库异常跳过 | 4/4 PASS |
+
+### 运维待办（合入 M18.4 实机联合验证前完成）
+
+- IPAdapter 模型分发：`ip-adapter_sdxl_vit-h.safetensors` +
+  `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` 至 workstation/pc01/pc02
+  ComfyUI `models/ipadapter` + `models/clip_vision`（NAS 模型库同步）；
+  pc01/pc02 `extra_model_paths.yaml` 确认含 ipadapter/clip_vision 映射；重启 ComfyUI。
+
+---
+
+## 2026-08-07 M18.2 角色三视图生成质检（VLM 校验 side/closeup 与 front 同角色同画风）
+
+### 背景
+
+M18.1 帧级核验发现 char_001 side 实为无关白发少女、char_002 side 实为 16 格眼睛
+画法参考表——视图生成「成功」但内容是废品，无质检拦截混入 ref 组，直接污染
+H3 ref2va 参考集。M18.2 在三视图生成后、角色卡入库前引入 VLM 质检。
+
+### 实现
+
+- `config.py`：新增 `character_view_qc_enabled=True` / `character_view_qc_max_retries=2`
+  （回滚开关：置 False 后代码路径与现状完全一致）；
+- `character_agent.py`：
+  - `_get_vlm_client()`：懒加载 AsyncOpenAI（与分镜 M16.2b 同一 spark02 Qwen3-VL 入口）；
+  - `_qc_front_view()`：front 自检（单人/完整人物肖像非素材表/外貌符合描述/画风符合锚定），
+    输出 `{"pass": bool, "reason"}`；
+  - `_qc_view_consistency()`：side/closeup 与 front 双图比对（发色/发型/服装一致；
+    姿势/视角/表情差异不算不一致），输出 `{"match": bool, "reason"}`；
+  - `_qc_three_views()`：编排——front 先自检（不合格换 seed 重生成，最多 2 次，
+    重试耗尽抛 RuntimeError 阻断入库），side/closeup 并行比对 front 各自独立重生成；
+  - `_regenerate_view()`：新随机 seed 按原后端派发重生成（主后端异常回退 SDXL）；
+  - fail-open：VLM 未配置/调用异常/坏 JSON 一律放行 + warning（质检器故障不阻断生产）；
+- `conftest.py`：`_patch_settings` 默认 `character_view_qc_enabled=False`（既有用例零影响），
+  专项用例局部开启。
+
+### TDD 用例（TestCharacterAgentViewQC 9 例，先红后绿）
+
+| 用例 | 断言要点 | 结果 |
+|---|---|---|
+| test_all_views_pass_qc | VLM 调 3 次（front 自检+side/closeup 比对），无重生成 | PASS |
+| test_qc_disabled_skips_vlm | 开关关闭 → VLM 0 调用（回滚路径） | PASS |
+| test_vlm_url_empty_fail_open | URL 空 → 跳过质检放行 | PASS |
+| test_front_fail_regenerates_with_new_seed | front 2 次生成 seed 互异，入库为重生图 | PASS |
+| test_side_mismatch_regenerates_only_side | 仅 side 重生（front/closeup 各 1 次） | PASS |
+| test_retry_exhausted_fails | 初始+2 重试全不合格 → success=False 含「质检」 | PASS |
+| test_qc_failure_not_registered_to_library | 重试耗尽 → register_from_card 未调用（废品不入库） | PASS |
+| test_vlm_exception_fail_open | VLM 抛异常 → 放行 success | PASS |
+| test_vlm_bad_json_fail_open | 坏 JSON → 放行 success | PASS |
+
+首次跑红确认：`assert 0 == 3`（VLM 未被调用，实现不存在）；实现后 9/9 全绿。
+
+### 全量回归
+
+```text
+后端 pytest tests/   642 passed（633→642，+9），coverage 86.19%（≥85.90% 基线保持），47.94s
+前端 vitest          47 passed (3 files)
+前端 build           881ms 成功
+```
+
+### 注意事项
+
+- 质检增加 3 次 VLM 调用（约 3-9s），仅在 `character_view_qc_enabled=True` 且
+  `visual_model_url` 非空时启用；生产默认开启。
+- VLM 误判风险由「2 次重试 + fail-open」缓解；若某画风持续误判可临时关闭开关回滚。
+- 实机 E2E 验证（构造 side 废品场景观察拦截+重生成日志）并入 M18.3 联合验证。
+
+---
+
+## 2026-08-07 M18.1 参考图修复红利验证（P0 input.png 修复版 vs bug 基线帧级对照）
+
+### 背景
+
+M17.5 修复了 P0 存量 bug——`upload_image_to_comfyui` 写死 `input.png` 导致多参考图
+顺序上传互相覆盖塌缩（M10 起所有 ref2va 工作流实际只用最后上传的一张图）。M18.1
+以「同参数修复版 E2E vs bug 基线」量化修复红利，验证参考图真正生效后的实际效果。
+
+### 方法
+
+1. bug 基线：`output/m17_bug_baseline/`（final_pipeline-1786025948.mp4 + video_scene_1/2.mp4，
+   工作流 4 个 LoadImage 全部 input.png）；
+2. 修复版 E2E：core :8100 `/api/drama/pipeline/run` 同题材参数（都市悬疑 / 国漫 /
+   生成定妆照 / 参考视频 + 参考音频 / run_visual_check=true），task `pipeline-7b0cd7cbfc3c`，
+   本次为 1 集 × 3 场景；
+3. 双维取证：:8195 history 工作流节点取证 + 视频抽帧与参考图逐张肉眼对照。
+
+### 结果
+
+- 修复版 9 步全绿，成片 `final_pipeline-1786033502.mp4`（9.46s，3 段），耗时 901s；
+- 视觉质检：score 95/85/85，**drift_scenes=[1,2,3]（3/3 全判漂移）**；bug 基线（M14.2/M17 E2E）
+  为 2/2 判漂移——漂移未消除；
+- **工作流取证**（prompt `31fe464b-210b-4db9-aea1-fb8ded940f18`，success）：
+  **7 个 LoadImage 节点文件名全部互异**（`video_agent_{130fc2ef,dabb1de3,63fa9745,
+  b8862859,1185e10e,3d24a35a,f9835b0c}.png`），`ref_images` 7 组全部独立挂接；
+  `ref_videos ← GetVideoComponents[80].0 ← LoadVideo[70]`、`ref_audios ← LoadAudio[90]`
+  正常；prompt 含 `<Picture N>/<Video 1>/<Audio 1>` 标签 + 音频方向字段。
+  **P0 修复实线确认**。
+
+### 帧级对照（修复版 3 场景 + bug 版 scene 1 + 7 张参考图原件）
+
+| 维度 | bug 基线（input.png 塌缩） | 修复版（7 图独立） |
+|---|---|---|
+| 跨镜角色一致性 | ❌ scene1 水手服 / scene2 形象不一 | ✅ 3 场景统一为「马尾 + 便利店制服」同一角色 |
+| 与定妆照一致 | ❌ 仅 closeup 一张生效 | ❌ 仍未对齐（见下根因） |
+| 画风 | 卡通平涂（贴近参考图） | 半写实厚涂（偏离参考图） |
+
+**结论：P0 修复带来真实红利——ref2va 多参考图首次真正同时生效，跨镜角色形象统一；
+但 drift 未消除，VLM 判定为真阳性。**
+
+### 根因升级：参考图集本身内部矛盾（7 张原件逐张核验）
+
+| # | 文件 | 实际内容 | 应为 |
+|---|---|---|---|
+| 1 | 130fc2ef | 分镜关键帧：黑**长直发**+蓝围裙，国漫 | scene1 关键帧 ✅ |
+| 2 | dabb1de3 | char_001 front：黑**短碎发**+蓝背带 | 主角定妆照 ✅（但与关键帧发型冲突） |
+| 3 | 63fa9745 | **白发紫瞳无关少女**（= char_001 side，文件尺寸一致确认） | ❌ side 视图生成失败产物 |
+| 4 | b8862859 | char_001 closeup | 主角特写 ✅ |
+| 5 | 1185e10e | char_002 front：青灰肤尖牙邪笑反派 | 反派「影子林小满」✅ |
+| 6 | 3d24a35a | **16 格眼睛画法参考表**（= char_002 side，尺寸一致确认） | ❌ 根本不是人物图 |
+| 7 | f9835b0c | char_002 closeup 尖牙特写 | 反派特写 ✅ |
+
+三重矛盾：① 角色 Agent 的 side 视图生成彻底失败且**无质检拦截**（1 张无关角色、
+1 张素材参考表混入 ref 组）；② 分镜关键帧（长发）与定妆照 front（短碎发）外貌冲突
+（M16 外貌锚定未贯通到关键帧生成）；③ H3 输出画风（半写实厚涂）与参考图
+（卡通平涂）系统性漂移。H3 面对矛盾参考集只能折中输出（马尾=长发+束发折中、
+红围裙≠蓝围裙），漂移是必然结果。
+
+### 派生（M18 后续候选，按优先级）
+
+1. **M18.2 角色三视图生成质检**：side/closeup 生成后 VLM 校验「与 front 同角色、
+   同画风、是人物图」，失败自动重生成（拦截白发少女/眼睛表这类废品入库）；
+2. **M18.3 分镜关键帧外貌锚定**：关键帧生成以定妆照 front 为图像参考（而非仅文字
+   描述），消除长发/短发冲突；
+3. **M18.4 H3 画风漂移**：参考图卡通平涂 vs 输出半写实厚涂，评估 prompt 画风强化
+   或 ref2va 风格约束参数。
+
+---
+
+## 2026-08-06 M17 H3 全模态能力释放（原生 CUT 语法 + 原生音频方向 + FL2VA 双锚定 + ref2va 音视频参考）
+
+### 背景（官方能力调研派生）
+
+M10-M12 已落地 fl2va I2V、ref2va 角色参考图、多镜 SHOT prompt。对照 MiniMax H3 官方指南
+与 :8195 节点签名实测，仍有四大能力未释放：
+
+1. 多镜 prompt 用自造 `SHOT X:` 格式；官方推荐 Context-IR 结构
+   （`integrated_multimodal_description:` + `[Shot N] At MM:SS.mmm, the camera cuts to ...`），
+   时间戳驱动跨镜剪辑连续性；
+2. 未注入官方音频方向字段（`overall_soundscape` / `non_diegetic_music`），H3 原生音轨
+   内容靠模型自由发挥，叙事节拍（hook/reversal/cliffhanger 等）无法传导到 BGM/声景；
+3. fl2va 只用首帧单锚定；官方支持 `last_frame` 双锚定 + 固定对齐指令
+   （Picture 1 → 0.00s / Picture 2 → S.SSs），端到端锁定起止构图；
+4. ref2va 只挂图片参考；`MiniMaxH3ReferenceToVideo` 实际还有 `ref_videos` /
+   `ref_video_audios` / `ref_audios` 三组全模态参考输入未接线。
+
+### 实机契约核验（硬性规则：先实测再编码）
+
+| 核验项 | 方法 | 结论 |
+|---|---|---|
+| fl2va `last_frame` 输入 | :8195 object_info 拉取 `MiniMaxH3ImageToVideo` 签名 | ✅ 存在，IMAGE 类型 |
+| ref2va 全模态参考组 | object_info 拉取 `MiniMaxH3ReferenceToVideo` 完整签名 | ✅ `ref_videos`/`ref_video_audios`/`ref_audios` 三组 COMFY_AUTOGROW_V3，max 各 3 |
+| LoadVideo / LoadAudio widget | object_info | ✅ `file` / `audio` 字段，按扩展名识别解码器 |
+| 音视频上传端点 | :8195 实测 POST /upload/audio | ✅ 405 不存在；**所有二进制统一走 /upload/image** |
+
+### 变更摘要
+
+- **M17.1 原生 CUT 语法**：`build_multishot_prompt(requests, native_cut=True)` 默认输出
+  Context-IR —— 首行 `integrated_multimodal_description:`，Shot 1 直述，`[Shot N] At
+  MM:SS.mmm, the camera cuts to ...` 时间戳为前序场景时长累计；`native_cut=False` 或
+  `settings.h3_native_cut_prompt_enabled=False` 保险丝回退 M11 旧版 `SHOT X:` 格式；
+  M12 节拍视觉指令在原生格式下仍注入对应镜段。
+- **M17.2 原生音频方向**：`build_audio_direction(beats)` 六节拍确定性映射官方两字段
+  （多节拍组按优先级取最强者，如 reversal 胜过 transition）；`_append_audio_direction`
+  追加在 prompt 尾部（多镜位于 description 之后）；`settings.h3_audio_direction_enabled`
+  为总开关。
+- **M17.3 FL2VA 双锚定**：`build_fl2va_alignment_instruction(duration, last_shot)` 生成官方
+  对齐指令前置 prompt 首部；`VideoRequest.last_frame_url` 非空时 fl2va 工作流挂节点 11
+  LoadImage → `last_frame`，空串退化为 I2VA（向后兼容）；orchestrator 在
+  `h3_last_frame_chain_enabled` 下同集相邻场景把「下一分镜关键帧」填入 `last_frame_url`
+  形成链式锚定；多镜组末场景的链式末帧（组后一镜关键帧）作组末帧实现**组间链式连续**，
+  无链式末帧时回退末场景自身关键帧（仍享双锚定）。
+- **M17.4 ref2va 全模态参考**：`VideoRequest.reference_videos/reference_audios`（各 ≤3）、
+  `PipelineRunRequest` 同名字段流水线级透传；ref2va 触发条件从「参考图非空」扩展为
+  「图/视频/音频任一非空」；`_inject_r2v_media_refs` 动态挂接 LoadVideo(7X)→
+  GetVideoComponents(8X) → `ref_videos.ref_video_N` + 原声音轨 → `ref_video_audios.
+  ref_video_audio_N`，LoadAudio(9X) → `ref_audios.ref_audio_N`；`build_r2v_media_guide`
+  生成 `<Video N>`/`<Audio N>` 官方标签引导（运镜/节奏/剪辑结构 + BGM 风格/声景质感）；
+  `base.upload_media_to_comfyui` 通用上传保留源扩展名、统一走 /upload/image（实测契约）。
+
+### TDD 用例（31 新增 + 多镜旧例同步，600→631）
+
+| 文件 | 类 | 用例数 | 覆盖点 |
+|---|---|---|---|
+| test_video_m17.py | TestNativeCutSyntax | 6 | Context-IR 默认/时间戳累计/首镜无时间戳/保险丝回退/setting 关闭回退/节拍指令保留 |
+| test_video_m17.py | TestAudioDirection | 8 | 双字段生成/未知节拍空/主导节拍优先/六节拍全覆盖/prompt 尾注/总开关/多镜位置/单镜 fl2va 接线 |
+| test_video_m17.py | TestFL2VAAlignment | 6 | 对齐指令单镜/多镜格式、双锚定接线（节点11+last_frame+上传2次）、空串退化 I2VA、组链式末帧、组回退末场景关键帧 |
+| test_video_m17.py | TestR2VMediaGuide | 4 | 空无媒体/纯视频/纯音频/复数标签 |
+| test_video_m17.py | TestR2VMediaInjection | 7 | 仅视频触发 ref2va/仅音频触发/节点挂接+标签引导/超 3 截断/上传保留扩展名+统一端点/无扩展名 fallback |
+| test_video_multishot.py | 旧例同步 | — | `SHOT X:` 断言全部迁移为原生 CUT `[Shot N]` 格式 |
+
+### 验证结果（本地全量回归）
+
+```text
+后端全量        631 passed（600→631，+31），86.10% coverage（≥80% 达标），51.26s
+前端 vitest     47 passed（3 files，本里程碑无前端变更）
+前端 build      1.11s 成功（dist 427.66 kB / gzip 130.77 kB）
+M17 专项        test_video_m17.py + test_video_multishot.py 56/56
+```
+
+### 残留派生（M18 候选）
+
+1. ~~core 重部署 + 全模态 E2E~~ → **已完成，见下方「core 全模态 E2E 终验」**；
+2. M16 派生 3 项仍挂账：漂移豁免扩充「肢体局部出镜」/ 多角色外貌分区隔离（反派串色）/
+   视频道具文字模糊化；
+3. 音频方向效果评估：E2E 后抽轨核对 BGM/声景是否按节拍意图生成（ffprobe 音轨存在性 +
+   人工听审）。
+
+### core 全模态 E2E 终验（2026-08-06 22:33 完成）
+
+**请求**：core :8100 `/api/drama/pipeline/run`，都市悬疑 / 国漫 / 1 集 × 2 镜 /
+生成定妆照 / 单镜 3s / run_quality_check=true / 烧录 AI 标识 /
+reference_videos=[video_scene_1.mp4] / reference_audios=[voice_scene_1_00.mp3]。
+
+**结果**：9 步全绿，成片 `final_pipeline-1786025948.mp4`（6.62s，h264 1080x1920 + aac，
+2.26MB）。多镜组（scene 1+2 同集相邻）单次 H3 调用输出 `video_multishot_1_2_00008_.mp4`，
+ffmpeg 切分为 video_scene_1/2.mp4。
+
+**:8195 history 工作流取证**（prompt_id `68adfb02-cc1b-432b-8187-5b693c4c6bf6`，
+status success）—— M17 三特性全部实线，非仅单测绿：
+
+| 特性 | 取证 |
+|---|---|
+| M17.1 原生 CUT | prompt 首行 `integrated_multimodal_description:`，`[Shot 2] At 00:03.000, the camera cuts to ...`（时间戳=首镜 3s 累计），首镜无时间戳 |
+| M17.2 音频方向 | `overall_soundscape: A low, tense room tone with a sharp sudden impact...` + `non_diegetic_music: A tense pulsating electronic score...`（hook 节拍映射实注） |
+| M17.4 全模态参考 | `ref_videos.ref_video_0 ← GetVideoComponents[80].0`、`ref_video_audios.ref_video_audio_0 ← [80].1`（参考视频原声轨）、`ref_audios.ref_audio_0 ← LoadAudio[90]`；prompt 尾部 `<Video 1> is reference clip... <Audio 1> is audio reference...` 标签引导 |
+| M17.3 FL2VA | 本次未走（组带定妆照优先 ref2va，角色一致性优先，符合设计）；单测 6 例覆盖 |
+
+### M17.5 P0 修复：多参考图上传文件名碰撞（input.png 塌缩）
+
+**发现**（上述取证工作流）：4 个 LoadImage 节点（分镜关键帧 + 角色三视图）
+`image` 字段**全部为 `input.png`**。`BaseAgent.upload_image_to_comfyui` 自 M10 起写死
+文件名 `input.png` 且 `overwrite=true`，多图顺序上传互相覆盖，工作流执行时所有
+LoadImage 实际读取**最后上传的那一张**（角色 closeup）——ref2va 的构图关键帧锚定与
+三视图区分一直未真正生效（M14.2 漂移真阳性、M16 外貌保真问题的重要隐蔽诱因）。
+
+**修复**（base.py）：上传文件名改为 `{agent_name}_{uuid4().hex[:8]}.png` 唯一命名，
+8 处 video_agent 调用点零改动自动受益；`result.get("name", filename)` 回退值同步唯一名。
+
+**TDD**（test_base.py +2）：`test_unique_filename_per_upload`（4 连传 4 名互异、
+Agent 前缀）、`test_fallback_name_when_comfyui_omits_name`（缺 name 回退为实际发送名）。
+
+**回归与部署**：后端 633/633（631→633，85.90% coverage，51.70s）、前端 vitest 47/47、
+build 1.00s；base.py rsync → core，uvicorn :8100 重启 health 200（grep uuid=3 确认
+新代码生效）。
+
+**遗留观察**：角色/分镜主后端 hunyuanimage:8600 持续不通，SDXL 回退正常出图（M14 起
+已知，不阻断）；FL2VA 双锚定待一次「无定妆照」pipeline 实战走线。
+
+---
+
+## 2026-08-06 M16.2 分镜外貌保真（氛围词剥离 + VLM 拼贴检测 + 短 prompt 重试）+ M16.3 漂移豁免 + core E2E 终验
+
+### 背景（M16.1 待验证项落地）
+
+core E2E（pipeline-87d6d5791120）实测：分镜 prompt 中角色外貌描述完全正确（black straight
+long hair / white shirt / dark gray pleated skirt），但 animagineXL40 产出仍为模型先验校服。
+M16.1 已将 KB 整串降为「可选」，但 LLM 仍习惯性全量注入氛围词（elaborate costumes /
+fantasy elements 等），多角色长 prompt 下稀释 CLIP 注意力并与锁定外貌冲突。
+
+### 变更摘要
+
+- **M16.2a `style_anchor.strip_kb_atmosphere`**：非写实画风确定性剥离 keywords_en 中除
+  style_name_en 外的全部氛围分段（风格由风格名 + checkpoint 双保险）；写实画风不剥离
+  （KB 词为摄影技术词，不与外貌争权重）；复用 sanitize 同一套标点收口规则。
+- **M16.2b `storyboard_agent._check_appearance_mismatch`**：分镜关键帧生成后 VLM（Qwen3-VL,
+  data URL high detail, temperature=0.1）比对出场角色外貌与角色描述，判定焦点收窄为
+  发色/发型、服装款式与颜色（画风/姿势/表情/视角差异不算失真）；开关
+  `settings.storyboard_appearance_check`（config.py 默认 True）。
+- **M16.2c `_rebuild_short_prompt` + `_verify_and_retry_appearance`**：失真时 LLM 重构
+  ≤80 英文词短 prompt（镜头类型开头 → 角色核心外貌原样翻译前置 → 至多 2 个动作/环境要素、
+  禁 7 类氛围填充词），重试 prompt 再经 sanitize + strip_kb_atmosphere + 锚定尾后重生成一次；
+  任何环节异常保留原图不阻断。
+- **M16.3 漂移豁免**：`DRIFT_CHECK_PROMPT` 新增 `character_present` 结构化字段（POV 主观
+  镜头/空镜/仅道具特写/仅背景路人 → false）；`quality_agent._drift_check_single_frame`
+  程序兜底：character_present=false 时无论 drift_detected 为何均豁免并记 info 日志。
+
+### TDD 用例（30 新增，570→600）
+
+| 文件 | 类 | 用例数 | 覆盖点 |
+|---|---|---|---|
+| test_style_anchor.py | TestStripKbAtmosphere | 8 | 非写实剥离保留风格名与实质内容/国漫 9 分段全命中/写实不剥离/空串兜底/标点收口 |
+| test_storyboard_agent.py | TestStoryboardAppearanceCheck 等 4 类 | 18 | VLM 请求结构/match=false 返回原因/VLM 未配置跳过/重构 prompt 规则/重试再清洗+剥离+锚定尾/execute 接线/异常保留原图 |
+| test_visual_quality_agent.py | TestCharacterPresentExemption | 4 | present=false 豁免/present=true 正常报/缺字段向后兼容/prompt 含豁免规则 |
+
+### 验证结果（本地回归）
+
+```text
+后端全量        600 passed（570→600），85.74% coverage（≥80% 达标），52.59s
+前端 vitest     47 passed（本里程碑无前端变更）
+```
+
+### core E2E 终验（pipeline-6ca41498acf7，成片 final_pipeline-1786007372.mp4）
+
+1集×2镜、style=国漫、定妆照1角色（林浅：黑色长直发/蓝白相间校服）、run_visual_check=true，
+全链路 9 步跑通。产物逐帧人工比对（拉取定妆照/分镜双版本/视频抽帧至本地）：
+
+- **画风链（M15 目标复核）**：定妆照/分镜/视频帧全为国漫日系 → 画风漂移根治确认 ✅
+- **M16.2 实战命中**：hunyuanimage 主后端连接失败 → SDXL 回退；VLM 校验双场景均检出问题并重试：
+  - scene1：初版 b4dba70e（眼睛+信封九宫格拼贴）→ VLM 检出「发色蓝黑/白衬衫/眼神惊讶」
+    → 重试 9d1df9fd（三联幅持信少女，黑长发/白衬衫）【gpu0:8189，17:12:15→17:12:27】
+  - scene2：初版 a3f24bbe（监控墙多格拼贴）→ VLM 检出「深色连帽卫衣/短发扎起」
+    → 重试 676b1385（干净单帧走廊少女，蓝白百褶裙+白领口）【pc02:8193，17:12:17→17:12:31】
+  - 重试版均为最终采用（时间线后者），拼贴→可用关键帧改善显著 ✅
+- **M16.3 未触发**：drift_scenes=[1,2] 仍报（score 95/98）。逐帧分析：
+  - scene1 视频为 POV 手持信封特写（s1_1/s1_2 仅手部）+ 背面镜头（s1_3 长黑发背影），
+    VLM 对仅手部出镜帧判 character_present=true（豁免规则未覆盖「肢体局部出镜」），
+    深色袖口 vs 蓝白校服 → 假阳性残留；
+  - scene2 视频帧林浅穿深色连帽卫衣+兜帽（s2_1/2/3），与定妆照蓝白校服不符 → **真阳性**，
+    连帽衫偏差源自分镜重试图（反派神秘人「深色连帽衫」外貌词串色主角）被 H3 ref2va 继承放大。
+
+### 残留派生（M17 候选）
+
+1. 豁免规则扩充：DRIFT_CHECK_PROMPT 补「仅手部/肢体局部出镜 → character_present=false」，
+   消除 POV 道具特写假阳性；
+2. 多角色外貌串色：分镜/视频 prompt 中反派外貌词（深色连帽衫）泄漏到主角，需角色外貌
+   分区隔离或负面词互斥（林浅 negative 加 hoodie）；
+3. H3 视频帧信封出现可读英文文字（违反 no readable text 约束，剧本 prompt 含信件文字内容
+   被直译生成），需视频 prompt 对道具文字做模糊化处理。
+
+---
+
+## 2026-08-06 M16.1 风格词与外貌词权重分离（prompt 结构改造）
+
+### 背景（M15.9 终验遗留缺陷）
+
+M15 画风锚定链修复后全链路画风统一（国漫 E2E 角色/分镜/视频帧均为动漫风），但残留
+**角色外貌保真**缺陷：定妆照/分镜提示词均正确携带「shoulder-length black short hair...
+dark blue uniform」，却因 KB 国漫 keywords 整串强制注入（vibrant colors / fantasy
+elements / elaborate costumes / particle effects 等内容词）与外貌描述争权重，
+定妆照实际产出银灰发（与剧本「黑色齐肩短发」相悖）。根因在三处 LLM 画风子句统一要求
+「每个提示词都必须显式包含该风格英文关键词（整串 KB keywords）」。
+
+### 变更摘要
+
+- **`app/services/style_anchor.py`** 新增 `style_prompt_clause(anchor, *, target)`：
+  - 必填收窄为风格名 `style_name_en`（如 `"Chinese anime guoman style"`）约束渲染风格；
+  - KB 完整关键词降为「风格氛围参考（可选，不必全部使用）」，不再强制全量注入；
+  - 显式声明权重分离规则：外貌描述（发色/发型/五官/服装款式与颜色）权重高于风格氛围词，
+    冲突氛围词（elaborate costumes 改指定服装、vibrant hair colors 改指定发色）必须舍弃。
+- **三链路统一接线**（同源根因，一并改造）：
+  - `script_agent.py`（上游源头，target="全剧画面"）；
+  - `character_agent.py` `_build_style_system`（target="角色定妆照"）；
+  - `storyboard_agent.py` `_build_style_system`（target="分镜画面"）。
+- `style_positive_tail` 无需变更（M15.1 起即仅追加风格名，本就符合分离原则）。
+
+### 关键代码片段
+
+```python
+def style_prompt_clause(anchor: StyleAnchor, *, target: str) -> str:
+    clause = (
+        f"画风统一：{target}风格必须严格统一为「{anchor.title}」，"
+        f"每个提示词必须显式包含风格关键词 \"{anchor.style_name_en}\""
+    )
+    if anchor.keywords_en and anchor.keywords_en != anchor.style_name_en:
+        clause += f"\n- 风格氛围参考（可选，不必全部使用）：{anchor.keywords_en}"
+    clause += (
+        "\n- 权重分离规则：角色外貌描述（发色、发型、五官、服装款式与颜色）权重高于风格氛围词，"
+        "与外貌冲突的氛围词（如 elaborate costumes 改变指定服装、"
+        "vibrant hair colors 改变指定发色）必须舍弃"
+    )
+    return clause
+```
+
+### TDD 用例（10 新增）
+
+| 文件 | 类 | 用例数 | 覆盖点 |
+|---|---|---|---|
+| test_style_anchor.py | TestStylePromptClause | 6 | 必填仅风格名/整串降可选/权重规则/target 注入/同名省略/写实画风 |
+| test_character_agent.py | TestCharacterStyleWeightSeparation | 2 | 国漫+写实 system prompt 结构断言 |
+| test_storyboard_agent.py | TestStoryboardStyleWeightSeparation | 1 | 国漫 system prompt 结构断言 |
+| test_script_agent.py | TestScriptStyleWeightSeparation | 1 | 国漫 system prompt 结构断言（遍历 call_args_list 规避返修末次调用无 system 的坑） |
+
+### 验证结果
+
+```text
+M16.1 新增测试   10/10 passed
+四文件局部       116 passed（style_anchor 41 + character 20 + storyboard 23 + script 32... 实际 116）
+后端全量         570 passed（+10），85.58% coverage（≥80% 达标），49.58s
+前端 vitest      47 passed
+前端 build       841ms（427.66 kB / gzip 130.77 kB）
+```
+
+### 待验证（M16.2 前置）
+
+- core 部署 + 国漫 E2E 复核定妆照发色/服装是否回归剧本描述（权重分离实效力证）。
+
+---
+
+## 2026-08-06 M15 全链路画风锚定（根治角色定妆照与 H3 视频画风脱节）
+
+### 变更摘要
+
+- **M15.1 style_anchor 服务 + 四链路注入**：新增 `app/services/style_anchor.py`，将 KB `styles.json` 画风解析为 `StyleAnchor`（keywords_en / style_name_en / negative_en / is_realistic），匹配优先级 title→id→归一化互包含→tags，未命中回退「写实电影感」；`style_positive_tail`/`style_negative_tail` 生成锚定尾。四链路统一注入：
+  - `script_agent.py`：系统提示词注入画风子句（风格关键词 + 写实性画质尾 + 冲突负面词）；
+  - `character_agent.py`：`_build_style_system` 模板化 PROMPT_SYSTEM，搜索词/兜底提示词/RAG extra_instruction 去除硬编码 photorealistic，三视图提示词生成后强制追加风格尾；
+  - `storyboard_agent.py`：同样模板化 + POSITIVE_SUFFIX 中性化，execute 末尾强制风格尾；
+  - `pipeline_orchestrator.py` `_step_video`：VideoRequest prompt 追加风格尾、negative_prompt 注入冲突画风 + 通用质量负面词；空场景 prompt 保持空串不硬塞。
+- **M15.2 TDD + 回归**：新增 20 例锚定测试（TestStyleTails 5 + TestCharacterStyleAnchoring 3 + TestVideoStyleAnchoring 3 + style_anchor 解析 9），storyboard/character_library 3 处旧断言同步风格尾。
+
+### 关键代码片段
+
+#### 1. 锚定尾生成（`app/services/style_anchor.py`）
+
+```python
+def style_positive_tail(anchor: StyleAnchor) -> str:
+    """追加到正向提示词末尾的画风锚定尾巴（风格名 + 写实画质尾）。"""
+    tail = f", {anchor.style_name_en}" if anchor.style_name_en else ""
+    if anchor.realism_tail_en:
+        tail += f", {anchor.realism_tail_en}"
+    return tail
+
+def style_negative_tail(anchor: StyleAnchor) -> str:
+    """追加到反向提示词末尾的冲突画风负面词。"""
+    return f", {anchor.negative_en}" if anchor.negative_en else ""
+```
+
+#### 2. H3 视频注入（`pipeline_orchestrator._step_video`）
+
+```python
+anchor = resolve_style_anchor(request.style)
+video_style_tail = style_positive_tail(anchor)
+style_neg = style_negative_tail(anchor).lstrip(", ")
+video_negative = f"{style_neg}, blurry, low quality, distorted" if style_neg else ""
+# VideoRequest(prompt=场景prompt + video_style_tail, negative_prompt=video_negative, ...)
+```
+
+### 验证结果
+
+```text
+后端全量        531 passed（509→531），85.47% coverage（≥80% 达标），47.93s
+前端 vitest     47 passed
+前端 build      950ms（427.66 kB / gzip 130.77 kB）
+core 部署       rsync backend → core；style_anchor.py + 3 文件 grep 命中 style_positive_tail；
+                uvicorn :8100 重启 health 200（本里程碑无前端变更，dist 未动）
+core E2E        task pipeline-088b6ccb4b9b（1集×2镜、style=国漫、定妆照1角色、
+                run_visual_check=true）— 全链路跑通，但 drift_scenes=[2] 残留（见 M15.4/15.5）
+```
+
+---
+
+## 2026-08-06 M15.4/M15.5 漂移残留根治（正文冲突清洗 + 参考图碰撞）
+
+### 背景（M15.3 E2E 遗留）
+
+pipeline-088b6ccb4b9b 全链路跑通但 `drift_scenes=[2]` 未消除，双重根因：
+
+1. **正文冲突信号抵消风格尾**：剧本 LLM 场景 prompt 自带 `hyperrealistic`、负面词反向排斥 `anime/cartoon`——仅在末尾追加锚定尾无法抵消正文中的对立风格词。
+2. **参考图跨后端同名碰撞**（pipeline-3ba8b3b3e304 复查确认）：pc02 重启后 SaveImage 计数器归零生成 `character_char_001_front_00001_.png`，LB `/view` 按 BACKENDS 顺序（gpu0→pc02→pc01）盲试，命中 gpu0 同名写实陈旧图 → H3 ref2va 与漂移检测拿到错误参考图。
+
+### 变更摘要
+
+- **M15.4 sanitize_style_conflicts（style_anchor.py）**：`_REALISM_FAMILY_TERMS`/`_ANIME_FAMILY_TERMS` 两族互斥词表，词边界正则（`\b` 保护 unrealistic/surrealism）；正向词删对立家族、反向词删目标家族（反向词不得排斥目标画风本身），质量词（blurry/low quality 等）一律保留，删除后标点收口（折叠空白/规范逗号/去连续首尾逗号）。`script_agent`（源头场景 prompt）/`character_agent`/`storyboard_agent` 三链路在追加风格尾前先清洗 LLM 产出。
+- **M15.5 三件套**：
+  1. **filename_prefix 唯一化**：`character_agent._generate_image_via_sdxl` 与 `storyboard_agent._generate_image_via_sdxl` 的 `filename_prefix` 追加 `uuid.uuid4().hex[:8]` 后缀（如 `character_char_001_front_a1b2c3d4`），从源头杜绝跨后端同名碰撞；保留 character_id/view/scene_id 语义便于人工检索与 NAS 归档。
+  2. **LB /view 精确路由（platform/deploy/comfyui-lb/comfyui-lb.py）**：新增 `file_map`（filename→backend_id），`handle_history` 返回完成态 outputs 时 `_learn_file_mapping` 学习映射（images/gifs/videos 三类）；`handle_view` 命中映射时只问生成后端，未命中/异常回退原盲试逻辑；`_trim_map` 统一 5000/4000 容量裁剪。已部署 workstation（备份 comfyui-lb.py.bak-m155），`systemctl restart comfyui-lb` active，`:8188/system_stats` 200。
+  3. **冲突词表补充**：`_REALISM_FAMILY_TERMS` 追加 `cinematic realism`/`realistic`/`realism`（core E2E 实测残留），短语在裸词前避免正则交替截断。
+- **陈旧文件清理**：gpu0（/opt/ComfyUI/instances/gpu0/output）41→0、pc02（C:\ComfyUI\output）4→0（含肇事文件 character_char_001_front_00001_.png）、pc01/NAS 为 0。
+
+### TDD 用例（先红后绿）
+
+- `test_style_anchor.py`：test_cinematic_realism_stripped / test_bare_realistic_and_realism_stripped / test_word_boundary_protects_unrealistic_and_surrealism / test_realistic_target_keeps_realistic_in_positive
+- `test_character_agent.py::TestCharacterFilenamePrefixUniqueness`：连续两次 execute → 6 个 prefix 跨次不同、保留 character_id+view 语义
+- `test_storyboard_agent.py::TestStoryboardFilenamePrefixUniqueness`：连续两次 execute → prefix 不同且保留 `storyboard_scene_{id}_` 前缀
+
+### 验证结果
+
+```text
+红灯确认        4 用例失败（2 词表 + 2 filename_prefix），符合 TDD 预期
+绿灯            实现后 test_style_anchor+character+storyboard 62/62 通过
+后端全量        527 passed，82.03% coverage（≥80% 达标），47.82s
+前端 vitest     47 passed（1.19s）
+前端 build      887ms（427.66 kB / gzip 130.77 kB）
+LB 部署         workstation comfyui-lb 重启 active，:8188/system_stats 200
+core 重部署     rsync backend+deploy → core；grep 核验 cinematic realism/uuid4 命中；
+                uvicorn :8100 重启 health 200（pid 387596）
+core E2E 复验   task pipeline-1a92d5f7a966（同 M15.3 参数）— 运行中，验证 drift_scenes 清空
+```
+
+### 注意事项
+
+- LB 的 file_map 是内存映射（LB 重启即失效），与 filename 唯一后缀形成双保险：即使映射缺失回退盲试，uuid8 后缀也使跨后端同名概率可忽略。
+- Windows SSH 远程 PowerShell 命令中 `$_` 会被本地 shell 双引号展开吞掉，须用单引号包裹远程命令整串。
+- 非 KB 画风字符串（如 M14.2 的「日系动画清新」）会经包含/tags 匹配或回退默认画风；前端画风下拉值应与 `styles.json` title 对齐，避免用户自由输入落到兜底。
+- 画风锚定尾是在 LLM 输出后**强制追加**的兜底信号，LLM 系统提示词中的风格子句仍是第一道约束；RAG 优化开启时风格尾在 RAG 之后追加，保证不被重写掉。
+- 场景 prompt 为空时 video prompt 保持空串（H3 以关键帧为主驱动），不强行塞风格尾。
+
+## 2026-08-06 M15.6 复验漂移残留 → M15.7 checkpoint 选型 + M15.8 剧本源头修复
+
+### M15.6 E2E 结果（drift 未消除，再定位根因）
+
+task pipeline-1a92d5f7a966（同 M15.3 参数）全链路跑通 633.8s，但 `drift_scenes=[1,2]` 未消除。M15.4/M15.5 已解决正文冲突词与参考图碰撞，复查日志定位双重残留根因：
+
+1. **SDXL checkpoint 硬编码 majicMIX 写实模型**：`character_agent`/`storyboard_agent` 的 SDXL workflow `ckpt_name` 固定为 `majicMIX realistic 麦橘写实_v7.safetensors`，国漫提示词无法扭转写实模型先验 → 定妆照/关键帧天然偏写实。
+2. **剧本阶段漏传 style 参数**：`pipeline_orchestrator._step_script` 构造 `ScriptRequest` 时未传 `style=request.style`，剧本场景 prompt 按默认写实清洗，国漫任务从源头残留写实冲突词（下游 character/storyboard 清洗方向再正确也无法挽回剧本正文的写实信号）。
+
+### 变更摘要
+
+- **M15.7 按画风写实性选 SDXL checkpoint（style_anchor.py + 双 Agent）**：
+  - 新增常量 `SDXL_CHECKPOINT_REALISTIC="majicMIX realistic 麦橘写实_v7.safetensors"` / `SDXL_CHECKPOINT_ANIME="animagineXL40.safetensors"`；
+  - 新增 `sdxl_checkpoint_for_anchor(anchor)`：`anchor.is_realistic=False` → animagineXL40，写实/None 兜底 → majicMIX；
+  - 双 Agent `_generate_image_via_sdxl` 新增 `anchor` 参数透传，`workflow["1"]["inputs"]["ckpt_name"]` 动态选型替代硬编码。
+
+```python
+def sdxl_checkpoint_for_anchor(anchor: StyleAnchor | None) -> str:
+    """按画风写实性选择 SDXL checkpoint。"""
+    if anchor is not None and not anchor.is_realistic:
+        return SDXL_CHECKPOINT_ANIME
+    return SDXL_CHECKPOINT_REALISTIC
+```
+
+- **M15.8 剧本阶段画风参数补传（pipeline_orchestrator.py）**：`_step_script` 的 `ScriptRequest` 补传 `style=request.style`，剧本场景 prompt 从源头按目标画风清洗。
+
+### TDD 用例
+
+- `test_style_anchor.py::TestSdxlCheckpointSelection` 2 例：非写实（国漫/日漫/卡通3D）→ ANIME；写实（写实电影感/都市情感）→ REALISTIC
+- `test_character_agent.py::TestCharacterCheckpointByStyle` 2 例：国漫/写实请求下三次 ComfyUI 提交的 ckpt_name 全部命中对应常量
+- `test_storyboard_agent.py::TestStoryboardCheckpointByStyle` 2 例：同上断言 workflow ckpt_name
+
+### 验证结果
+
+```text
+M15.7 用例      8/8 passed（1.00s，局部覆盖率 FAIL 为预期）
+后端全量        535 passed（527→535），82.06% coverage（≥80% 达标），47.41s
+前端 vitest     47 passed（1.23s）
+前端 build      881ms（427.66 kB / gzip 130.77 kB）
+core 重部署     rsync backend → core；远端 grep 核验 sdxl_checkpoint_for_anchor
+                （style_anchor 1 + character/storyboard 各 2）与 style=request.style（3 处）命中；
+                uvicorn :8100 重启 health 200
+```
+
+### core E2E 终验（task pipeline-7470e3e104d9，M15.9）
+
+入参：1 集 × 2 镜、校园日常/国漫、定妆照 1 角色、`run_quality_check=true`、`run_visual_check=true`。
+
+```text
+passed=True，总耗时 566.0s，成片 final_pipeline-1785967294.mp4
+script / character / storyboard / video / voice / subtitle / edit / quality / visual_quality 全 OK
+visual_quality: checked=2, drift_scenes=[1,2]（性质已变，见下）
+```
+
+**gpu0 history 实证（checkpoint 选型生效）**：
+
+| prompt | 时间 | ckpt | prefix |
+|--------|------|------|--------|
+| efbaa38c | 05:30:41（M15.6 旧任务） | majicMIX 写实 | storyboard_scene_2_27c10e23 |
+| f3956c61 | 06:03:59 | **animagineXL40** | character_char_001_front_c789d0f3 |
+| d2fe73db | 06:04:29 | **animagineXL40** | character_char_001_side_aa8508a6 |
+| d82b42e0 | 06:04:33 | **animagineXL40** | character_char_001_closeup_eacfb680 |
+| 42ce3c2d | 06:05:13 | **animagineXL40** | storyboard_scene_1_ddde9dbb |
+| c28baca6 | 06:05:18 | **animagineXL40** | storyboard_scene_2_e80c5b80 |
+
+**抽帧人工复核**：定妆照（银灰发动漫少女，蓝制服红领结）、scene 1 视频帧（教室 POV 手持信封，背景动漫学生）、scene 2 视频帧（棕发动漫少女惊恐脸 + 黑西装红领带男性）——**全链路日系动漫画风，M15 画风锚定目标达成，画风漂移（卡通 vs 写实）已消除**。
+
+**残留 drift_scenes=[1,2] 定性：角色外貌保真缺陷（非画风），派生 M16**：
+
+1. **KB 风格词稀释外貌描述**：角色/分镜提示词均正确携带「shoulder-length black short hair... dark blue uniform」，但 KB 国漫 keywords 整串注入（vibrant colors/fantasy elements/elaborate costumes/particle effects）与外貌描述争权重 → 定妆照实际产出银灰发（与剧本「黑色齐肩短发」相悖）。
+2. **animagineXL40 多角色长 prompt 崩塌**：分镜 scene 2（双角色复杂长 prompt）产出人脸拼贴网格而非场景插画；视频链未跟随该关键帧（H3 以文本为主驱动，成片反而正常）。
+3. **漂移判定边缘 case**：scene 1 为 POV 手持信封特写，主角林浅未出镜，VLM 对背景路人（棕发女生）与参考图（银发）比对判漂移——按规则「角色无法辨认 → 不算漂移」应豁免，但背景路人清晰可见，判定有依据但非主创意图。
+
+### 注意事项
+
+- SSH 远程 `pkill -f <pattern>` 时，若同一条远程命令里同时包含 kill 与 start（pattern 会匹配自身 bash 进程），pkill 会杀死自己的会话导致 exit 255、新进程未启动。kill 与 start 必须拆成两条独立 SSH 命令；pattern 用 `[u]vicorn` 方括号技巧防自匹配。
+- animagineXL40 需存在于 ComfyUI checkpoints（NAS 模型库已含）；新增非写实画风时无需改代码，`sdxl_checkpoint_for_anchor` 按 `is_realistic` 自动分流。
+
+## 2026-08-06 配置文件清理 + 核心服务可用性验证
+
+### 变更摘要
+
+- **config.py 配置收敛**：注释死字段 `llm_l1/l2/l3_endpoint`（原指向已退役 Nemotron / 未使用 EXO 端点，无代码引用），LLM/VLM 统一入口说明收敛到 `exo_base_url`（spark02 :8000）；`asr_backend` 默认值从 `qwen3_asr` 改为 `ai_omni`（workstation :9210 faster-whisper large-v3），并补充 `ai_omni_asr_endpoint`/`ai_omni_asr_timeout`；ComfyUI 集群描述明确 LB 入口 `:8188` 与 3 后端（GPU0 `:8189` + pc01 `:8188` + pc02 `:8193`），删除 GPU3 部署信息。
+- **subtitle_agent.py 后端回退**：为 `ai_omni` 主路径增加 try-except，失败时自动回退 `faster-whisper`；同步更新模块/类 docstring，明确默认后端为 `ai_omni`。
+- **asr_server.py 离线化**：在 `/opt/ai-omni-asr/asr_server.py` 顶部强制 `HF_HUB_OFFLINE=1` / `HF_HUB_DISABLE_TELEMETRY=1`，避免 workstation 无外网访问 HuggingFace 导致 `snapshot_download` 网络超时、模型加载挂死；音频解码/转写异常返回 422 而非裸 500。
+- **测试覆盖**：`test_subtitle_agent.py` 新增 `test_ai_omni_backend_success` 与 `test_ai_omni_failure_fallback_to_whisper`，验证 AI-Omni 主路径与失败回退。
+
+### 核心服务可用性验证
+
+```text
+LLM   spark02 :8000 /v1/chat/completions  → 200, "Hi"
+VLM   spark02 :8000 image_url 视觉输入    → 已实测可用（M13.1）
+ComfyUI-LB workstation :8188 /system_stats → 200, queue_running=[], queue_pending=[]
+TTS   workstation :9200 /tts (multipart)  → 200
+ASR   workstation :9210 /v1/audio/transcriptions → 200, {"text":"","language":"zh","duration":1.0,"segments":[]}
+```
+
+### 验证结果
+
+```text
+后端 pytest     16 passed（subtitle_agent 新增 2 用例）
+前端 vitest     47 passed
+前端 tsc        0 错误
+前端 build      成功
+核心服务        LLM/VLM/ComfyUI-LB/TTS/ASR 全部可用
+```
+
+### 注意事项
+
+- `llm_l1_endpoint` 等旧四层字段仅作注释保留，实际调用统一走 `exo_base_url`；如后续需要分层路由，应新增显式引用而非恢复死字段。
+- `qwen3_asr_endpoint` 当前未部署，保留字段仅作未来扩展；生产环境必须显式设置 `ASR_BACKEND=ai_omni` 或依赖新的 config 默认值。
+- AI-Omni ASR 重启后若再次卡在 `Loading model large-v3...`，优先检查 `HF_HUB_OFFLINE=1` 是否生效以及 `/opt/ai-omni-asr/.locks` 是否有僵尸锁。
+
+## 2026-08-05 M14 视觉漂移对照前端开关 + core 全链路实机验证
+
+### 变更摘要
+
+- **M14.1 前端暴露 `run_visual_check` 开关**：`PipelineRunParams` 增 `run_visual_check?: boolean`；PipelineModal 增 `runVc` state + 复选框「成片后执行视觉漂移对照（需角色定妆照，检测跨镜角色漂移）」+ `STEP_LABELS` 增 `visual_quality: "视觉对照"` + `runPipeline` 传参。修复点：会话恢复时 Modal 处于半完成态（复选框引用未声明的 `runVc`），补齐 state/传参/标签三处。
+- **M14.2 core 全链路 E2E**：前端 dist rsync → core :3501；core 首次 9 步全链路（含 visual_quality）实机跑通。
+- **M14.3 全量回归**：后端 509/509（85.07%）、前端 47/47、tsc 0、build 1.32s。
+
+### core 全链路 E2E 实测（task pipeline-bdccf8df382f）
+
+入参：1 集 × 2 镜、校园日常/日系动画清新、`generate_character_refs=true`、`run_quality_check=true`、`run_visual_check=true`、`ai_label_enabled=true`。
+
+```text
+passed=True，总耗时 1329.6s
+script / character / storyboard / video / voice / subtitle / edit / quality(75) / visual_quality 全 OK
+visual_quality: checked=2, drift_scenes=[1,2], failed_scenes=[]
+```
+
+**人工抽帧复核（确认真阳性）**：
+
+| 素材 | 内容 |
+|------|------|
+| char_001 林浅 正面参考图 | 卡通风格卷发男孩，蓝 T 恤 + 灰短裤 + 绿鞋 |
+| scene 1 视频帧（t=2s） | 写实风格校服女生，走廊看通知书 |
+| scene 2 视频帧（t=2s） | 写实风格短发女生，课桌翻书 |
+
+两场景帧与参考图在画风（卡通 vs 写实）、性别呈现、服装上完全不同 → VLM `drift_detected=true` 判定准确，且两场景间角色互相一致（跨镜一致性好，问题是参考图与视频源不一致）。**视觉对照在真实流水线中抓住了上游角色风格与视频生成不一致的真实缺陷**。
+
+### 实机附注（非阻断）
+
+1. 分镜主后端 hunyuanimage（workstation :8600）连接失败，自动回退 SDXL 成功（非致命，3 次重试后回退）。
+2. `asr_backend` 默认值 `qwen3_asr` 不匹配 subtitle_agent 的 `ai_omni`/`firered` 分支 → 落本地 faster-whisper-tiny 兜底，core 首次下载 ~75MB（HF xet 断点续传成功）。建议 core `.env` 置 `ASR_BACKEND=ai_omni` 走 workstation :9210 large-v3（本机 restart 会杀运行中任务，故未在跑批中变更）。
+3. char_002 顾言参考图仅存 ComfyUI :8188 view URL，未落 core 本地 `output/character/`（char_001 有 front/side/back 本地副本）；视觉质检经 HTTP 下载 ComfyUI URL 正常。
+4. core 全链路剧本/角色/分镜 LLM 调用走 `exo_base_url`（spark02 :8000），`llm_l1_endpoint`（指向已退役 Nemotron）为死配置无引用。
+
+### 验证结果
+
+```text
+后端全量        509 passed, 85.07% coverage（≥80% 达标），51.05s
+前端 vitest     47 passed（46→47，新增 M14 run_visual_check 传参用例）
+前端 tsc        0 错误
+前端 build      1.32s（427.66 kB / gzip 130.77 kB）
+core 部署       前端 dist rsync → :3501（bundle grep 命中「视觉漂移对照」）；后端沿用 M13.1 部署（本里程碑无后端代码变更）
+core E2E        pipeline-bdccf8df382f 9 步全绿，visual_quality drift=[1,2] 真阳性
+```
+
+## 2026-08-05 M13.1 漂移检测实测调优（独立 VLM 调用）+ Nemotron 退役切换 spark02
+
+### 背景与问题
+
+M13 初版实机测试暴露三类问题：
+
+1. **真阳性漏报**：漂移指令 `VISUAL_DRIFT_PROMPT_ADDENDUM` 拼接在主画质检查 prompt 末尾，被"画质检查"心智框架稀释，极端换人场景（古装女子 vs 卡通男孩参考图）也漏报。
+2. **VLM 跨图干扰幻觉**：4+ 张图（3 参考图 + 3 帧）同时输入，Nemotron 把卡通男孩侧/背面帧描述成"写实成年女性"。
+3. **占位文本照抄**：模型直接输出 prompt 中的占位说明文字作为 details。
+
+### 变更摘要
+
+- **架构重构**：漂移检测从主画质检查中分离为独立第二次 VLM 调用。`_drift_check` 逐帧并发（`asyncio.gather`）调用 `_drift_check_single_frame`（参考图 + 单帧），任一帧漂移即整体漂移；漂移细节聚合去重取前 3 条。任何异常兜底 `(False, "")` 不阻断主检查。
+- **prompt 重写** `DRIFT_CHECK_PROMPT`：明确四条判定规则（性别/年龄段/画风/人种明显不同 → 漂移；同角色三视图视角差异 → 不算漂移；无法辨认 → 不算漂移；同视角发型/服装/妆容明显不同 → 漂移），要求 details 必须基于图片实际内容描述，**严禁照抄示例文字**。
+- **图像 detail 提升**：`"low"` → `"high"`，保证 VLM 能看清服装/鞋子颜色等细节。
+- **Nemotron 退役**（用户指令 2026-08-05）：workstation GPU3 Nemotron vLLM `systemctl stop + disable`；core 与本地 `.env`、`config.py` 默认值的 `EXO_BASE_URL` / `VISUAL_MODEL_URL` 统一切到 spark02 :8000（`qwen3.6-uncensored` = qwen3.6-35b-a3b-uncensored-heretic FP8，已实测 `image_url` 视觉输入可用——16×16 纯红 PNG 正确回答 "Red"）。模型名不变，零代码改动。
+
+### 关键代码片段
+
+#### 1. 独立漂移检测 prompt（`platform/backend/app/agents/quality_agent.py`）
+
+```python
+DRIFT_CHECK_PROMPT = """前 {ref_count} 张图是角色定妆参考图（三视图：正面/侧面/背面），最后 1 张是视频抽帧。
+请判断视频帧中的角色是否与参考图为同一角色。判定规则：
+- 性别/年龄段/画风（卡通 vs 写实）/人种明显不同，或明显不是同一人 → 判定漂移；
+- 确认是同一角色后，不同视角（正面/侧面/背面）之间的外观差异（如背面看不到面部）→ 不算漂移；
+- 帧模糊、角色占比过小或被遮挡到无法辨认 → 不算漂移，details 填写"无法辨认"；
+- 同视角下发型、服装款式、妆容与参考图明显不同 → 判定漂移。
+输出要求：只输出一个 JSON 对象，包含两个字段：drift_detected / details。
+严禁照抄本说明中的示例文字。"""
+```
+
+#### 2. 逐帧并发判定（`platform/backend/app/agents/quality_agent.py`）
+
+```python
+results = await asyncio.gather(*(
+    self._drift_check_single_frame(ref_paths, frame_path)
+    for _timestamp, frame_path in frames
+))
+drift_hits = [detail for is_drift, detail in results if is_drift]
+if drift_hits:
+    uniq = list(dict.fromkeys(d.strip() for d in drift_hits if d.strip()))
+    return True, "；".join(uniq[:3])
+```
+
+### 实机测试矩阵（core :8100，VLM=spark02 qwen3.6-uncensored）
+
+```text
+T1 真阴性     front帧 vs front参考        → drift=false, score=98  ✓（无误报）
+T2 细微漂移   红T恤男孩 vs 蓝T恤参考      → drift=true,  score=95  ✓
+              细节：蓝T恤+灰短裤+绿鞋 → 红T恤+蓝长裤+棕鞋（具体差异全部命中）
+T3 极端漂移   古装女子 vs 卡通男孩(3参考) → drift=true,  score=65  ✓
+              细节：3D卡通男性儿童 vs 写实成年女性（画风/性别/年龄段，无幻觉）
+```
+
+对比 Nemotron 时代：漂移 details 从模板话（"性别/年龄段/画风明显不同"）升级为基于图像实际内容的具体描述，且无跨图干扰幻觉。
+
+### 回归结果
+
+```text
+后端全量        509 passed, 85.07% coverage（≥80% 达标）
+前端 vitest     46 passed
+前端 tsc        0 错误
+core 部署       config.py rsync 同步；uvicorn :8100 health 200；三例矩阵全绿
+AGENTS.md       GPU3 条目更新：Nemotron 退役、FlashTalk-14B (:9000 ~50GB)、LLM/VLM 走 spark02
+```
+
+### 注意事项
+
+- spark02 vLLM 的 500 "broken PNG file" 报错恰恰证明 image_url 通路存在（已进入图像解码阶段），调试时不要误判为不支持视觉。
+- Nemotron vLLM 崩溃根因：GPU3 被 FlashTalk 占 50GB，引擎初始化 OOM——与用户退役决定一致，未做修复。
+- `drift_detected` details 聚合按帧去重但不同帧措辞略有差异时仍会拼接 2-3 条相似描述，属预期行为。
+
+## 2026-08-05 M13 角色一致性对照视觉检测（VLM 参考图比对）
+
+### 变更摘要
+
+- **M13.1 schemas 扩展**：`QualityVisualRequest` 新增 `reference_image_urls`（角色定妆参考图 URL 列表，空则不做对照）；`QualityVisualResult` 新增 `drift_detected`（默认 False）；`PipelineRunRequest` 新增 `run_visual_check`（默认 False，成片后是否执行视觉漂移对照）。
+- **M13.2 VisualQualityAgent 参考图对照**：新增 `VISUAL_DRIFT_PROMPT_ADDENDUM` 对照指令，引导 VLM 将参考图（消息前部）与视频抽帧（消息后部）逐帧比对脸型/发型/服装/妆容；`_download_reference_image` 并发下载参考图，localhost `/static/` 路径直接映射 `output/` 目录免下载，单张失败返回 None 跳过不阻断；`drift_detected` 解析三层逻辑——VLM 显式输出优先，issues 含 `visual_consistency`+`critical` 兜底判 True，无参考图时恒 False（无对照基础）。
+- **M13.3 pipeline 集成**：`_step_visual_quality` 在剪辑完成后按 `run_visual_check` 开关执行，参考图复用 `_collect_character_reference_images`（与视频步骤同规则），`asyncio.gather` 逐场景检测；报告 `steps.visual_quality` 含 `checked`/`failed_scenes`/`drift_scenes`/`results`；无视频/无参考图 skipped，单场景失败与整体异常均非致命。
+
+### 关键代码片段
+
+#### 1. drift_detected 三层解析（`platform/backend/app/agents/quality_agent.py`）
+
+```python
+drift_detected=bool(ref_paths) and (
+    bool(data.get("drift_detected", False))
+    or any(
+        item.get("category") == "visual_consistency"
+        and item.get("severity") == "critical"
+        for item in data.get("issues", [])
+        if isinstance(item, dict)
+    )
+),
+```
+
+#### 2. 参考图下载本地复用（`platform/backend/app/agents/quality_agent.py`）
+
+```python
+if parsed.hostname in ("localhost", "127.0.0.1") and parsed.path.startswith("/static/"):
+    parts = parsed.path.strip("/").split("/")
+    if len(parts) >= 3:
+        local_dir = Path(__file__).resolve().parent.parent.parent / "output" / parts[1]
+        candidate = local_dir / parts[-1]
+        if candidate.exists():
+            return candidate
+```
+
+#### 3. 流水线视觉质检步骤（`platform/backend/app/services/pipeline_orchestrator.py`）
+
+```python
+if request.run_visual_check:
+    await self._step_visual_quality(task_id, project_id, script, videos, report)
+
+# 报告结构
+report["steps"]["visual_quality"] = {
+    "checked": len(results) - len(failed),
+    "failed_scenes": failed,
+    "drift_scenes": drift_scenes,
+    "results": results,
+}
+```
+
+### 测试结果
+
+```text
+M13 相关单测    新增 11 例（TestVisualDriftDetection 4 + TestDownloadReferenceImage 3 + TestVisualQualityStep 4）
+后端全量        508 passed, 85.17% coverage（≥80% 达标）
+前端 vitest     46 passed (3 files)
+前端 build      937ms（427.38 kB / gzip 130.70 kB）
+core 部署       rsync backend → core；uvicorn :8100 health 200（agents 含 visual_quality_agent）
+                远端 grep 核验 drift_detected：schemas.py×1 / quality_agent.py×4 / pipeline_orchestrator.py×2
+                前端 http.server :3501 200
+```
+
+### 注意事项
+
+- ssh 单条复合命令内 `pkill -f "uvicorn app.main:app"` 会匹配到远程 shell 自身的命令行（含 nohup 启动串）导致自杀（exit 255 无输出）；拆分为 kill-only 与 start+verify 两条 ssh，且 kill 用 `[u]vicorn` 括号技巧。
+- `run_visual_check` 默认 False，前端 PipelineRunParams 暂未暴露该开关；需要时经 API 直传或在后续里程碑接入前端表单。
+- 参考图与视频帧均 `detail: "low"` 送 VLM，参考图在前帧在后的顺序为 prompt 约定，改动时需同步更新 `VISUAL_DRIFT_PROMPT_ADDENDUM` 文案。
+
+## 2026-08-05 M12 H3 精细化优化（SHOT 节拍视觉化 + 动态混音增益 + 多镜漂移标注）
+
+### 变更摘要
+
+- **M12.1 多镜 SHOT 节拍视觉化**：剧本层 `narrative_beat` 经 `_MULTISHOT_BEAT_HINTS_EN` 映射为英文视觉指令，由 `build_multishot_prompt` 追加到多镜 SHOT prompt 行尾（与分镜层 `BEAT_VISUAL_HINTS` 同语义策略，六种节拍：hook/escalation/reversal/cliffhanger/emotional_beat/transition）。`VideoRequest` 新增 `narrative_beat` 字段，`pipeline_orchestrator` 透传剧本层节拍信息。
+- **M12.2 动态混音增益**：`compute_ambience_gain` 纯函数按对白密度（人声时长/视频时长）分三档选择 H3 环境音增益——≥0.85 对白密集档 0.15（约 -16dB）、0.4-0.85 基准档 0.25（约 -12dB）、<0.4 大量留白档 0.40（约 -8dB）；ffprobe 探测失败（0/负值）自动回退基准档，主链路不中断。config 新增 `h3_dynamic_gain_enabled`/`h3_ambience_gain_dense`/`h3_ambience_gain_sparse`。
+- **M12.3 多镜漂移风险标注**：质检层 `_multishot_group_issues` 与 `video_agent.group_scenes_for_multishot` 同规则模拟分组（同集相邻 + 场景数/总时长双上限），≥2 场景成组时逐场景标注 `visual_risk/info`——「多镜联合生成组（N 镜一次推理）: 跨镜角色漂移风险」，suggestion 提示抽查首尾帧或置 `h3_multishot_enabled=False` 回退逐场景生成。仅 `video_backend=h3` 且多镜开启时生效。
+
+### 关键代码片段
+
+#### 1. SHOT 节拍视觉指令注入（`platform/backend/app/agents/video_agent.py`）
+
+```python
+_MULTISHOT_BEAT_HINTS_EN = {
+    "hook": "high-contrast dramatic lighting, oppressive composition, intense expression, instant visual impact",
+    "escalation": "tighter framing, stronger chiaroscuro, confrontational body language, rising tension",
+    "reversal": "frozen beat of subverted expectation, dramatic twist, expressive close-up",
+    "cliffhanger": "withheld information, negative-space composition, suspense, urge to continue",
+    "emotional_beat": "soft light, shallow depth of field, delicate emotional close-up, slowed pace",
+    "transition": "calm establishing framing, visual lead-in, uncluttered composition",
+}
+
+def build_multishot_prompt(requests: list[VideoRequest]) -> str:
+    lines = [H3_MULTISHOT_PROMPT_GUIDE]
+    for idx, req in enumerate(requests, start=1):
+        shot = (req.prompt or "").strip() or "cinematic, high quality, smooth motion"
+        hint = _MULTISHOT_BEAT_HINTS_EN.get((req.narrative_beat or "").strip().lower())
+        lines.append(f"SHOT {idx}: {shot}" + (f" ({hint})" if hint else ""))
+    return "\n".join(lines)
+```
+
+#### 2. 动态混音增益纯函数（`platform/backend/app/agents/edit_agent.py`）
+
+```python
+def compute_ambience_gain(voice_seconds: float, video_seconds: float) -> float:
+    if voice_seconds <= 0 or video_seconds <= 0:
+        return settings.h3_ambience_gain
+    ratio = voice_seconds / video_seconds
+    if ratio >= 0.85:
+        return settings.h3_ambience_gain_dense
+    if ratio >= 0.4:
+        return settings.h3_ambience_gain
+    return settings.h3_ambience_gain_sparse
+```
+
+#### 3. 多镜漂移标注（`platform/backend/app/agents/quality_agent.py`）
+
+```python
+return [
+    QualityCheckItem(
+        category="visual_risk",
+        severity="info",
+        scene_id=s.scene_id,
+        message=f"多镜联合生成组（{len(group)} 镜一次推理）: 跨镜角色漂移风险",
+        suggestion="建议抽查该组首尾帧角色一致性；漂移时整组重抽或改逐场景生成（h3_multishot_enabled=False）",
+    )
+    for group in groups
+    if len(group) >= 2
+    for s in group
+]
+```
+
+### 测试结果
+
+```text
+M12 相关单测   61 passed（test_video_multishot + test_edit_agent + test_quality_agent）
+后端全量       497 passed, 85.17% coverage（≥80% 达标）
+前端 vitest    46 passed (3 files)
+tsc            0 errors
+core 部署      /api/drama/health 200（version 0.11.0）；远端 grep 核验：
+               config.py(h3_dynamic_gain_enabled) / schemas.py(narrative_beat) /
+               edit_agent.py(compute_ambience_gain) / quality_agent.py(_multishot_group_issues) 全部在案
+               前端 http.server :3501 200
+```
+
+### 注意事项
+
+- 动态增益三档阈值（0.85/0.4）与增益值（0.15/0.25/0.40）均为可调配置，实测成片听感后可在 `.env` 覆盖微调。
+- 多镜漂移标注为 `info` 级不阻断流水线；若某组实片出现明显跨镜漂移，优先整组重抽，反复漂移则将该集 `h3_multishot_enabled=False` 回退逐场景生成。
+
+---
+
+## 2026-08-05 M11 H3 专属优化（ref2va 角色一致性 + 多镜叙事 + 原生音频混音）
+
+### 变更摘要
+
+- **M11.1 ref2va 角色一致性**：通过 MiniMaxH3ReferenceToVideo 节点将角色资产库三视图参考图注入视频生成流程。关键技术点：COMFY_AUTOGROW_V3 动态组 API 格式为嵌套 dict（`inputs["ref_images"] = {"ref_image_0": ["10",0], ...}`），扁平键 `ref_image_N` 能通过 prompt 校验但执行时 TypeError。`WORKFLOW_TEMPLATE_H3_R2V` 与 `execute_multi_shot` 动态挂接逻辑同步修复为嵌套结构。
+- **M11.2 多镜叙事联合生成**：同集相邻场景合并为一次多镜推理（单 prompt 多 SHOT），再按帧边界 ffmpeg 切分回各场景视频。`group_scenes_for_multishot` 纯函数贪心分组（同集相邻，受场景数/总时长双上限约束）；`build_multishot_prompt` 组装总览前缀 + SHOT 编号；`_multishot_split_plan` 末段吃到组尾（17k+5 网格吸附余量）；`execute_multi_shot` 失败整组回退逐场景 execute。
+- **M11.3 H3 原生音频混音**：H3 生成的环境音轨与人声按比例混合，环境音增益 0.25（约 -12dB）。
+- **实机验证**：`scripts/smoke_h3_r2v.py` 上传关键帧 + 2 角色参考图 → 256x256/39帧/4步 → success，93KB mp4 含 H.264 视频轨 + AAC 立体声音轨。
+- **core 部署**：rsync platform/ → core（排除 node_modules/.venv/static/outputs）；后端 uvicorn :8100 重启 health 200，前端 http.server :3501 200。
+
+### 关键代码片段
+
+#### 1. ref2va 嵌套 dict 模板（`platform/backend/app/agents/video_agent.py`）
+
+```python
+# 参考图 LoadImage 节点（含关键帧+角色参考图）经 COMFY_AUTOGROW_V3 组接线：
+# API 格式为嵌套 dict：inputs["ref_images"] = {"ref_image_0": ["10",0], ...}
+# （扁平键 ref_image_N 能通过 prompt 校验但执行时 TypeError，不可用）
+"20": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+        "clip": ["2", 0],
+        "vae": ["3", 0],
+        "audio_vae": ["4", 0],
+        "prompt": "{positive_prompt}",
+        "width": 768,
+        "height": 1344,
+        "length": 124,
+        "ref_image_size": "match",
+        "ref_images": {"ref_image_0": ["10", 0]},
+    }
+},
+```
+
+#### 2. 角色参考图动态挂接（嵌套 dict）
+
+```python
+# 角色参考图动态挂接：LoadImage 节点 11/12/... → ref_images 组内 ref_image_1/2/...
+# （COMFY_AUTOGROW_V3 API 格式为嵌套 dict，扁平键执行期 TypeError）
+ref_group = workflow["20"]["inputs"].setdefault("ref_images", {})
+for idx, name in enumerate(ref_names, start=1):
+    node_id = str(10 + idx)
+    workflow[node_id] = {
+        "class_type": "LoadImage",
+        "inputs": {"image": name},
+    }
+    ref_group[f"ref_image_{idx}"] = [node_id, 0]
+```
+
+#### 3. 多镜叙事分组纯函数
+
+```python
+def group_scenes_for_multishot(requests, max_scenes, max_seconds):
+    """同集相邻场景贪心合并为多镜组（保持输入顺序，纯函数）。
+
+    规则：
+    - 仅同集（episode 相同）且在输入列表中相邻的场景可同组
+    - 组内场景数 ≤ max_scenes，组内总时长 ≤ max_seconds
+    - 返回覆盖全部输入的分组；单元素组由调用方走原逐场景路径（≥2 场景才成组）
+    """
+    groups = []
+    current = []
+    current_seconds = 0.0
+    current_episode = None
+    for req in requests:
+        duration = float(req.duration_seconds)
+        if (
+            current
+            and req.episode == current_episode
+            and len(current) < max_scenes
+            and current_seconds + duration <= max_seconds
+        ):
+            current.append(req)
+            current_seconds += duration
+        else:
+            if current:
+                groups.append(current)
+            current = [req]
+            current_seconds = duration
+            current_episode = req.episode
+    if current:
+        groups.append(current)
+    return groups
+```
+
+#### 4. 多镜切分边界计算（末段吃到组尾）
+
+```python
+def _multishot_split_plan(durations_seconds, total_frames, fps=24):
+    """按各场景时长累计帧偏移计算切分边界，最后一场吃到组尾。
+
+    组总帧数经 17k+5 网格吸附后可能略大于各场景时长之和，
+    余量全部归末段；返回每场景 (start_frame, end_frame) 帧区间（左闭右开）。
+    """
+    plan = []
+    start = 0
+    last = len(durations_seconds) - 1
+    for i, duration in enumerate(durations_seconds):
+        end = total_frames if i == last else start + round(float(duration) * fps)
+        plan.append((start, end))
+        start = end
+    return plan
+```
+
+### 回归结果
+
+| 项目 | 命令 | 结果 |
+|------|------|------|
+| 后端全量 | `pytest tests/ -v --tb=short` | **480/480 passed**（覆盖率 85.02%） |
+| r2v 实机冒烟 | `./.venv/bin/python scripts/smoke_h3_r2v.py` | SMOKE PASS（93KB mp4，音视频双轨） |
+| core 部署 | rsync + uvicorn 重启 | health 200 / front 200 |
+
+---
 
 ## 2026-08-04 M9.8 RAG 六路检索线程化（事件循环卡顿修复）
 
@@ -3153,3 +4470,242 @@ docker restart xdit-hunyuanvideo
 
 - NAS 上残留 5 个测试文件（`.e2e_big.bin` 500MB、`.e2e_test_rw.bin`、`.e2e_ro.txt`、`.e2e_dir/`、`.e2e_test/`），trae-sandbox 拦截 rm 无法自动清理，需手动删除。
 - xdit_request_timeout=1800s 对 720p/8s（约 67 分钟）仍不足，长视频场景需调至 5400s 或拆段生成。
+
+---
+
+## M10 MiniMax H3 视频后端切换（2026-08-04）
+
+### 用户信息核实（硬性规则：先 SSH 实测再回答）
+
+| 用户陈述 | 实测结果 | 结论 |
+|---|---|---|
+| workstation 已部署 MiniMax H3 | `/home/merlin/ComfyUI-h3-eval/` 独立实例 :8195，ComfyUI 0.30.0，`CUDA_VISIBLE_DEVICES=1` | ✅ 属实 |
+| H3 33B H3-Omni-Transformer | NAS 实存 `minimax_h3_fl2va_bf16`(66GB≈33B×2B) + `fl2va/ref2va_pruned_int8_convrot`(21GB×2) | ✅ 属实 |
+| Qwen3-VL-32B 文本编码器 | `qwen3vl_32b_minimax_h3_bf16`(51.5GB) + `nvfp4_awq`(15.7GB)，CLIPLoader type=minimax | ✅ 属实 |
+| 2K / 15s / 原生立体声 | 节点 tooltip：训练范围 124-362 帧@24fps（≈5-15s）；官方 API 支持 768P/2K；双 VAE 音视频联合解码 | ✅ 属实（联网调研亦确认已开源） |
+| 官方模板无负面/无 CFG | 官方 `video_minimax_h3_i2v.json` 子图展开：BasicGuider 单条件 + SamplerCustomAdvanced，无 CLIPTextEncode | ✅ 属实 |
+
+### 官方模板逐节点比对（object_info + 模板 JSON 双重验证）
+
+UNETLoader(fl2va INT8, default) / CLIPLoader(qwen3vl NVFP4, minimax, default) / VAELoader×2(video fp16 + audio fp32) / MiniMaxH3ImageToVideo(clip,视频VAE,first_frame,prompt,w,h,length → CONDITIONING+联合LATENT) / RandomNoise / KSamplerSelect(res_multistep) / BasicScheduler(simple,20,denoise=1) / BasicGuider / SamplerCustomAdvanced / VAEDecode+VAEDecodeAudio / CreateVideo(fps=24,8bit) / SaveVideo — 与 `WORKFLOW_TEMPLATE_H3` 15 节点完全一致。帧数公式 `_snap_h3_frames` ≡ 官方 ComfyMathExpression `max(5,round(a*24))+(5-(max(5,round(a*24))%17))%17`。
+
+### 测试结果
+
+```text
+后端全量     436 passed, 84.48% coverage
+前端 vitest  46 passed (3 files)
+tsc          0 errors
+build        954ms
+H3 单测      TestSnapH3Frames 3 + TestVideoAgentH3（成功/回退） 全过
+实机冒烟     scripts/smoke_h3.py：256x256/39帧/4步 → success，64KB mp4
+产物验证     H.264 视频轨(avc1) + AAC 立体声 32kHz 音轨(mp4a)；时长 1.625s = 39帧/24fps 精确吻合
+core 部署    health 200 / front 200；修正 core .env VIDEO_BACKEND=comfyui→h3（环境变量覆盖了 config.py 新默认值）
+```
+
+### 注意事项
+
+- GPU1 显存 96.7/97.8GB 接近满载（H3 常驻 39.3GB + liveact 37.5GB + Qwen3-Embedding 19GB + ComfyUI#2 0.8GB），生产参数 768x1344/124帧/20步 单场景生成时需观察 OOM 风险。
+- H3 支持多镜叙事 prompt（官方示例含 "SHOT 1: ... SHOT 2: ..."）与 ref2va 参考图（最多 9 张，角色一致性）— 列为后续优化方向。
+
+---
+
+## M22 路线 B：LongCat-Video 全量基准 + A/B 对比（2026-08-11）
+
+### 变更
+
+- `scripts/benchmark_longcat.py`：新增 `_TextEncoderStub`（仅承载 `AutoConfig.d_model`）——预编码缓存模式下 `pipe.text_encoder=None` 导致 `_cache_clean_latents` 构造空 embeds 时 `AttributeError: 'NoneType' has no attribute 'config'`（单卡 cp_size=1 唯一触达点，pipeline_longcat_video.py:333）；缓存/回退两路径均挂桩，缓存未命中报清晰错误
+- `scripts/run_route_ab_comparison.py`：REPORT_DIR 修正为 platform/reports/M22.2（原 parents[3] 落盘仓库根目录）
+- 运行方式升级为 `systemd-run` 瞬态服务（`longcat-bench-full.service`）：setsid+nohup 仍在 ssh 会话 scope 内，空闲连接断开被 systemd-logind SIGTERM（本次实锤两轮）
+
+### 测试结果
+
+```text
+后端单测     749 passed, 83.71% coverage（≥80% 门槛）
+前端 vitest  47 passed；tsc 0 errors
+全量基准     stage1(480p) 11段 8808.6s / 893帧 / 59.5s / gen_fps=0.101
+             refine(720p BSA) 11段 2151.9s / 1786帧 / 59.5s / gen_fps=0.83
+             壁钟总计 11010.4s；GPU2 峰值 86233MiB / 利用率均值 98.7%；RAM 峰值 36.0GiB
+MOS 对比     路线A(H3帧链)=4.42（画质4.5/运动4.33/时序3.83/文本5.0）
+             路线B(LongCat原生)=4.83（画质5.0/运动4.33/时序5.0/文本5.0）
+效率对比     A 78.6 vs B 185.0 壁钟秒/视频秒（A 快 2.4 倍）
+报告         platform/reports/M22.2/route_ab_comparison_20260811_112909.{json,md}
+```
+
+### 注意事项
+
+- 路线 B refine 峰值 86.2GiB 与 H3（GPU2 常驻 48.9GiB）互斥，基准需维护窗口独占 GPU2（本次暂停 H3/ASR 3.1h，完成后已恢复 200）
+- 恢复 ASR 时发现 05:08 手动 screen 残留的 asr_server.py（PID 1176566）占用 :9210，toiv-asr bind 失败 EADDRINUSE 崩溃循环 112 次（/health 200 实为残留进程应答，具欺骗性）；kill 残留后 systemd 干净接管，active + 200。教训已固化 AGENTS.md 易错点 12 错误3
+- workstation 上有并行运维方（用户/其他 Agent）：基准曾两轮被主动 SIGTERM（04:07 sudo kill -TERM + pkill -9），第三轮带 Description 的 systemd-run 未被干预
+- 结论：默认路线 A（已集成 M21.3，快 2.4 倍）；路线 B 适合质量敏感场景（时序一致性 5.0 无接缝跳变）
+- 收官回归（2026-08-11 11:45）：后端 tests/unit 749 passed / 83.71%；前端 vitest 47 passed。注意全量 pytest（含 integration）会挂起等待真实服务，标准回归口径为 tests/unit
+
+---
+
+## M23 项目审查：AGENTS 统一版 + 激进清理 + 下载器打通 + LTX-2.5 双引擎（2026-08-14）
+
+### 变更
+- **AGENTS.md 统一版**：融合 ToIV 最新事实（设备 18 台、LTX-2.5 :8198、LongCat :8197、M6 超分 fleet :8261-8263、ASR 迁 studio02 :9212、VLM 迁 studio04 :9303、SenseVoice :9211、JoyCaption :9304、北京入口）；新增第一/二硬性规则、易错点 13-19、第八节项目架构速览
+- **激进清理**（实测 :8288/:8289/:8290/:8301 CLOSED、:8600 损坏、:8601 未部署、pc01 LTX-2B 被 :8198 替换）：删 xdit/latentsync/postprocess/ltx_video/image 5 服务 + lip_sync/postprocess 2 agent + 7 测试 + 5 脚本；image_backend→sdxl、video_backend 收敛 h3/comfyui；摘 langgraph/react-query 死依赖；版本统一 0.4.0
+- **下载器↔工作台打通**：新建 model_registry_service（融合 lora_manifest trigger_words/weight + 下载器 models.json 已下载事实，按 filename 标注 downloaded）+ GET /api/drama/models/registry + 前端 getModelRegistry；前端同步删除唇形/后处理残留
+- **LTX-2.5 双引擎**：新建 ltx25_video_service（T2V/I2V/FLF2V distilled 两阶段）+ prompt_expander（ShotSpec IR + H3ContextIR/LTXProse 双编译器 + validate_h3_prompt + recommended_quality_params）+ route_video_engine 路由（台词/参考→H3，长镜/运动→LTX，回退链 ltx→h3→comfyui）
+- **liblib.tv 对标方案**：docs/LIBLIB_BENCHMARK_PROPOSAL.md（10 条借鉴点，不实现）
+- **文档更新**：platform/README、TECHNICAL_DESIGN、DEPLOYMENT、根 README、USER_GUIDE 全部更新至当前架构
+
+### 测试结果
+```text
+后端单测   676 passed / 1 failed（test_rag_service 嵌入模型下载需外网，基线既有环境性失败）/ 83.52% coverage
+前端 vitest 42 passed；tsc 0 errors；build 868ms
+新增用例   LTX-2.5 服务 18 + 提示词扩写 26 + 引擎路由 21 + 模型注册表 3
+实机核验   LTX-2.5(:8198)/LongCat(:8197)/ASR(:9210)/H3(:8195) LISTEN 200
+```
+
+### 注意事项
+- LTX-2.5 工作流节点名/权重文件名基于官方模板，**实机接入前必须 curl :8198/object_info 核验**（清单见 ltx25_video_service.py docstring）
+- 路线 B LongCat 仍未工程化（worker 封装接入 pipeline 待后续）
+- 角色资产库缺口决策（M18.2 拦截后陈旧资产污染 drift 量化）仍待用户决策
+
+---
+
+## M25.9 DramaClaw 架构重构：模型网关 + 失败模式注册表 + 线稿先行两段式（2026-08-15）
+
+### 变更
+- **P1 模型网关** `platform/backend/app/services/model_gateway.py`：DramaClaw litellm/NewAPI 外部网关的本地化平替——能力注册表（llm→spark02 :8000 / vision / image→ComfyUI-LB :8188 / video_h3→:8195 / video_ltx→:8198 / tts→:9200 / asr→:9210/studio02 :9212 / embedding→:9302）统一健康路由 + 探测缓存 + 调用指标；API 接入 drama.py 路由
+- **P2 失败模式注册表（C2）** `platform/backend/app/services/failure_registry.py`：JSON 单库线程安全；FailureMode 五元组（detection 门禁判定问句/prevention_rule/correction_template/negative_prompt_clause/gate_enabled）；`build_negative_prompt_clause(layer)` 按层拼接注入生成负向提示词；预置 collage_mismatch（M16.2 拼贴失真）/black_and_white_drift/legible_text_leak；VLM 门禁回写命中率
+- **P3 线稿先行后端（C1）**：`storyboard_agent._generate_image_via_sdxl` 新增 sketch/seed_override 参数——sketch 模式 8 步/CFG4.0/512×896 快速构图，refine_seed 非空时同 seed 精绘防构图漂移；返回 (url, seed) 元组；`StoryboardRequest.sketch_mode/refine_seed` + `StoryboardResult.is_sketch/sketch_seed`；config 新增 sketch_mode_enabled/sketch_steps/sketch_cfg/sketch_width/sketch_height
+- **P4 线稿先行前端**：`StoryboardModal.tsx` 两段式确认流——线稿先行开关（手动修正场景默认开）→「生成线稿」→ 预览卡（图+seed）→「采用构图并精绘」（refine_seed 同 seed）/「重出线稿」/「弃用」；切场景自动丢弃线稿；`client.ts` StoryboardData + generateStoryboard 参数扩展（sketch_mode/refine_seed）
+- **测试**：新增 test_model_gateway.py（健康路由/指标/离线报错）、test_failure_registry.py（CRUD/种子/negative 注入/API）；test_storyboard_agent.py 新增 TestSketchMode（sketch 工作流参数/seed 一致性/外观校验跳过）+ 适配元组返回值
+- **P5 网关全链路接线**（审计发现网关此前仅挂 API 路由未被业务调用，本轮回补真实接线）：
+  - `model_gateway`：注册表动态化（`_spec` 每次从 settings 构建，配置/monkeypatch 热生效）+ image 能力补回退链（hq→fast）+ 新增 video_comfy 能力（video_a/video_b）+ `openai_base_url()` 幂等 helper
+  - `base.py`：LLM base_url 经 `model_gateway.openai_base_url("llm")` 解析（实例 + 共享客户端两处）；`call_llm` 记录网关调用指标（延迟/错误）；图像/视频 worker 候选选举全部改走 `model_gateway.endpoints("image"/"video_comfy")`
+  - 服务层：`tts_service` 端点经网关 tts 能力；`ltx25_video_service` ×3 + `long_video_service` + `video_agent` ×3（H3 fl2va/ref2va/多镜联合）+ `_pick_alternate_worker` 全部经网关 video_ltx/video_h3/video_comfy 能力
+  - `subtitle_agent` ASR 经 `model_gateway.route("asr")` 健康路由：studio02 whisper.cpp :9212（主）→ workstation faster-whisper :9210（回退），fail-open 后由 faster-whisper 本地兜底
+  - conftest 新增 `_mock_gateway_probe` autouse fixture：单测不发起真实健康探测
+  - VLM 调用点保持 settings.visual_model_url 直读（单端点无回退链，网关 vlm 能力负责健康监控与展示，机械替换无路由收益且有破坏既有断言风险）
+
+### 测试结果
+```text
+分镜单测    60 passed（含 TestSketchMode 新用例）
+前端 vitest 110 passed（8 files）；tsc 0 errors
+P5 接线     网关联动测试 186 passed（gateway/base/subtitle/tts/ltx25/route/video_agent/long_video/multishot）
+收官回归    后端 791 passed / 87.04% coverage（tests/unit + integration/test_drama+test_progress）
+```
+
+### 注意事项
+- 线稿参数仅为精绘 1/3 耗时（8 步 vs 25 步），返工成本钉死在最便宜阶段；同 seed 保证线稿→精绘构图零漂移
+- sketch_mode 不影响一键全链路无人值守管线（orchestrator 不传 sketch_mode，直出精绘）；仅前端手动分镜修正场景两段式
+- failure_registry 存储于 output/verification/failure_modes.json，首次运行自动落库预置模式
+
+---
+
+## 前端浏览器全面验证 + 真机集成流转 + T3 节点日志埋点（2026-08-15）
+
+### 变更
+- **T3 日志埋点**：新增 `app/core/node_logger.py`（`node_log`/`node_span` 结构化节点日志：时间戳/节点标识/关键参数/状态 start-ok-error/耗时/异常，单值 200 字符截断、换行压平）；埋点覆盖 pipeline_orchestrator 8 步骤 span（含 task_id/场景数/画风/后端等参数）、`gateway.route`（capability+选中端点/离线报错）、`llm.chat`（模型/流式/耗时/产出字符数）、`comfyui.submit`/`comfyui.poll`（worker/prompt_id/节点数/轮询耗时/超时）；`main.py` 补 `logging.basicConfig(INFO, 带时间戳)`——此前 root 默认 WARNING，全部业务 logger.info 被静默
+- **前端缺陷修复**（浏览器验证发现）：`.modal-actions` 改 sticky 底栏 + 不透明背景（矮视口下主 CTA 曾被卷出滚动区不可见）；VideoModal/VoiceModal/Canvas 节点标题口径 Wan 2.2/edge-tts → H3/LTX-2.5/IndexTTS-2（与真实架构对齐）
+
+### 测试结果
+```text
+后端回归    797 passed / 87.07%（含 test_node_logger 6 新用例）
+前端        tsc 0 errors；vitest 110 passed
+真机集成    网关 12/12 能力 UP（llm/vlm/vlm_heavy/image/video_comfy/video_h3/video_ltx/tts/asr/embedding/music_caption/demucs）
+            真实 LLM agent/assist 扩写流转成功（4.6s）；分镜全链路 LLM 改写→SDXL LB→636KB 实图 200
+            真实 VLM quality/visual 推理成功（真实 mp4 抽帧→score 85+中文质检报告：识别乱码招牌/透视融合问题）
+            真实 TTS voice/generate 合成成功（IndexTTS-2→18.5KB MP3 200）
+            真实 ASR subtitle/generate 转写成功（TTS 音频→网关路由 studio02 :9212→SRT「歡迎光臨，請問需要點什麼？」2.68s 段，TTS→ASR 台词闭环一致）
+            节点日志真实产出：node=llm.chat/comfyui.submit/comfyui.poll/gateway.route 带时间戳+耗时+参数
+浏览器验证  12 项全过（五区布局/深色令牌/字体/8 模态交互/线稿先行开关联动「生成线稿↔生成分镜」/
+            任务中心/MiniMap/响应式 1440-1024-768/按钮 hover+禁用态/零 emoji）
+修复复核    粘性底栏 1280×800 不滚动/滚到底均完整可见且无透出；两模态标题口径正确（5 项通过）
+```
+
+### 注意事项
+- 主题切换 Palette 图标已注册但未接线（UI 无入口）——多配色功能待用户决策是否补齐
+- AssetLibraryPanel 残留面板开关调试 console.log，生产构建前建议清理
+- 角色库存在失效缩略图资产（优雅降级显示占位块），建议后端清理失效资产
+
+---
+
+## M26 全面测试工程：后端 100% 语句覆盖（2026-08-16）
+
+### 变更
+- **单元测试补齐（355 用例 / 12 个 boost 文件）**：8 个并行 Agent 按覆盖率缺口逐行补齐——quality_agent(63)/rag_service(40)/drama 路由(45)/script_agent(19)/ai_optimizer(10)/character_agent(20)/drift_metrics(19)/storyboard_agent(19)/base(27)/video_agent(23)/orchestrator(19)/19 小模块(51)；覆盖函数/方法/边界/异常/fail-open/懒加载/批量隔离全维度，全 mock 离线可跑
+- **4 行不可达死代码**：rag_service:158（glob 永不匹配）/ drift_metrics:182（denom 数学恒正）/ video_agent:1360（循环必经 return）/ long_video_planner:208（守卫必非空）——逐一证明后按标准 `# pragma: no cover` 标注
+- **缺陷修复 D1**：pyproject markers 声称 slow「默认跳过」但 addopts 未配置，全量 pytest 被 3 个真机长超时用例挂死 → addopts 补 `-m 'not slow'`
+- **前端**：安装 @vitest/coverage-v8@2.1.9，测得基线 37.99%（modal 组件多数 ~1%）
+- **测试报告**：platform/reports/TEST_REPORT_2026-08-16.md（范围/基线/四层测试/缺陷 D1-D5/遗留建议）
+
+### 测试结果
+```text
+后端     815→1170 passed / 87.83%→100.00%（5877 语句 0 未覆盖，27.5s）
+前端     110 vitest passed / 覆盖率基线 37.99%
+Rust     46 passed / 10 ignored（网络/GUI）
+系统     10 服务端点全 UP；LLM/Embedding 真实调用；SDXL 三路/animagine/LTX T2V 真机冒烟全过
+验收     8 步编排/角色一致性/双引擎路由/网关能力/前端交互 全过
+```
+
+### 注意事项
+- 前端覆盖率 38% 为下一补齐目标（panels→modals→store，预估 ~300 用例量级）
+- 3 个 slow 真机用例（h3_turbo_ab/long_video_drift_56s/long_video_poc）建议夜间窗口 `-m slow` 执行
+- 分支覆盖率（--cov-branch）未纳入本轮口径，可作下一阶目标
+
+---
+
+## M26.4 前端覆盖率补齐：37.99% → 100%（2026-08-16）
+
+### 变更
+- **6 个并行 Agent 补 405 用例**（110→515 vitest）：modals 10 组件全量（Script/Storyboard/Video/Voice/Quality/Edit/Pipeline/Subtitle/VisualQuality/Character）、Canvas/DramaNode/layout、CharacterPreviewPanel/NodeDetailPanel/ProgressBar/AgentBar、App/api-client/store/useProgress/main + 各处小尾巴；全部 RTL+jsdom，mock 后端/媒体/SSE
+- **真实 bug 修复 ×2**：① NodeDetailPanel「保存并重新生成」premise 校验死锁（已有剧本态无创意输入框 → validateScriptForm 必失败，该按钮自始不可用）→ validateScriptForm 增加 skipPremise 选项并附回归测试 ×2；② layout.ts loading 高度死分支（isFutureNode 要求 !loading，`future ? 14 : 18` 的 14 恒不可达）→ 固定 18
+- **死代码清理**：DramaNode 删除未引用的 GENRE_PRESETS/truncate/useDramaStore import；NodeDetailPanel 两处 `: prev` 死三元改非空断言；CharacterPreviewPanel startSearch 冗余守卫（唯一调用方已同条件守卫）删除
+- **记录未修问题**（见报告）：VideoModal render 期 setTimeout 副作用、client.ts resolveTaskUrl 端口泄漏（远程部署 SSE 会断）、CharacterPreviewPanel 切角色不重研、PipelineModal chip border 简写冲突
+
+### 测试结果
+```text
+前端   110→520 passed（33 文件）/ 语句 100% / 行 100% / 函数 100% / 分支 94.55% / tsc 0 errors
+后端   1170 passed / 100.00%（未受影响）
+```
+
+### 收官补测（同日，+5 例）
+- App.boost.test +4：顶栏「一键成片」/「新建剧本」onClick 打开对应模态；EditModal/QualityModal onClose 接线（stub 已有 edit-close/quality-close 按钮但无触发用例）
+- PipelineModal.test +1：变现模式 IAP→IAA 切换提交参数断言（IAA chip onClick 从未被调用）
+- 函数覆盖 98.57% → **100%**（App.tsx 4 个 + PipelineModal.tsx 1 个未触达内联 handler 全部收口）
+
+### 注意事项
+- 分支覆盖残余缺口均为 UI 不可达防御分支（disabled 按钮 guard、null 态不渲染分支），已逐条核对
+- VideoModal 陈旧 SSE failed 事件过滤属脆弱设计（仅时序规避），建议后续加任务 id 校验
+
+---
+
+## M27 系统设置全面更新：NAS 模型库 + 下载整合 + NSFW 门禁（2026-08-16）
+
+### 需求
+1. 整合主项目（Rust 下载器）模型下载能力到工作台，与系统其他功能无缝衔接
+2. NAS 存储已有模型可视化浏览（名称/大小/类型/修改日期）
+3. 新增 NSFW 成人向内容访问与管理功能
+4. 符合系统架构规范，可维护可扩展
+5. 完整单元测试 + 集成测试
+
+### 变更
+- **后端 3 新服务 + 1 新路由**（`app/services/nas_library_service.py` / `model_download_service.py` / `settings_service.py` + `app/routers/models.py`，main.py 注册 models.router + settings_router）：
+  - `nas_library_service`：扫描白名单子目录（checkpoints/loras/vae/embeddings/controlnet/upscale_models 等），输出 NasModelEntry（name/size_bytes/type/rel_path/modified_at/nsfw）；TTL 缓存（`nas_library_cache_ttl`）+ refresh 强扫 + 类型过滤 + 名称模糊搜索 + NSFW 过滤；不可读文件 fail-open 跳过
+  - `model_download_service`：Civitai 搜索（`GET /api/models/search`，透传 query/nsfw 参数）+ 后台线程下载任务（task_id/进度/速度/状态机 pending→running→done|error|cancelled/取消标志/SHA256 校验不匹配标 error）；`sanitize_filename` 防路径穿越 + 子目录白名单；下载根目录与 NAS 库同源（`resolve_download_root()`），完成即入库
+  - `settings_service`：NSFW 开关持久化 JSON；PIN 采用 salt(8B hex)+sha256 存储；首次开启强制设 PIN（4-12 位数字校验）；支持解锁/锁定/修改 PIN；线程锁保护
+  - 门禁联动：库列表 `include_nsfw` 需已解锁才生效；NSFW 下载（显式标记或文件名命中关键词）未解锁一律 403
+- **配置**：config.py 新增 `nas_model_roots` / `download_root` / `nas_library_cache_ttl` / `civitai_api_base` / `nsfw_keywords`；schemas.py 新增 NasModelEntry/NasLibraryResponse/ModelDownloadRequest/DownloadTask/NsfwStatus/NsfwSetRequest
+- **前端**：
+  - `ModelLibraryPanel`（三页签：注册表=原 LoraRegistryList / NAS 模型=类型徽章+大小+日期+搜索+刷新 / 下载=Civitai 搜索→版本选择→一键下载→任务进度条+取消）+ NSFW 锁按钮（Lock/LockOpen 状态图标）
+  - `NsfwGateModal` 四模式：首设 PIN（新 PIN+确认一致性校验）/ 解锁（输 PIN）/ 锁定 / 修改 PIN；错误内联展示，busy 防重复提交
+  - store 新增 `nsfwEnabled`/`nsfwHasPin` + `setNsfwState`，App 启动 `getNsfwStatus` 同步；api/client.ts 新增 getNasLibrary/searchCivitaiModels/startModelDownload/getDownloadTasks/cancelDownload/getNsfwStatus/setNsfwEnabled
+  - index.css 新增模型库/下载任务/NSFW 模态样式（沿用 MiniMax 深色令牌，零硬编码色值）
+
+### 测试结果
+```text
+后端   1170→1248 passed（+78：nas_library 18 / download 24 / settings 22 / router 14）/ 100.00% 语句覆盖保持
+前端   520→569 vitest passed（+49：ModelLibraryPanel 26 / NsfwGateModal 19 / client+store 4）/ tsc 0 errors
+修复   ① Path.touch(times=) 跨平台不兼容 → os.utime；② 类型徽章文本与筛选 chip 冲突 → container.querySelector('.asset-badge') 定向断言；
+       ③ 修改日期断言时区漂移 → new Date(mtime*1000) 动态期望值；④ NSFW 模态测试 store 状态不同步 → beforeEach mock 与 store 对齐
+```
+
+### 注意事项
+- HuggingFace 搜索未接入本轮（主项目 Rust 端能力），Civitai 已覆盖主要模型来源；如需 HF 源后续按同一任务框架扩展
+- PIN 为本地单机门禁（防误触/防旁观），非账户级权限体系；多用户场景需另设计
+- 下载任务为进程内线程管理，后端重启任务列表清空（已下载文件不受影响）

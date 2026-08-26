@@ -6,7 +6,8 @@ import {
   StoryboardData,
 } from "../../api/client";
 import { useDramaStore } from "../../store/useDramaStore";
-import { Check } from "../ui/Icon";
+import { Check, Image, Sparkles } from "../ui/Icon";
+import { PromptToolkit } from "../common/PromptToolkit";
 import {
   STYLE_OPTIONS,
   modalScrollStyle,
@@ -15,6 +16,13 @@ import {
   textareaStyle,
   ComboInput,
 } from "./shared";
+
+/** M25.9 C1 线稿预览（线稿先行两段式确认流：先看构图，确认后同 seed 精绘防漂移）。 */
+interface SketchPreview {
+  image_url: string;
+  sketch_seed: number;
+  prompt_used: string;
+}
 
 export function StoryboardModal({
   scenes,
@@ -35,6 +43,9 @@ export function StoryboardModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // M25.9 C1 线稿先行：手动分镜修正场景默认开启两段式确认流
+  const [sketchFirst, setSketchFirst] = useState(true);
+  const [sketchPreview, setSketchPreview] = useState<SketchPreview | null>(null);
 
   const selectedScene = scenes.find((s) => s.scene_id === selectedSceneId) || null;
 
@@ -42,10 +53,14 @@ export function StoryboardModal({
     if (selectedScene) {
       setEditDescription(selectedScene.description);
       setEditPrompt(selectedScene.prompt);
+      // 切换场景时丢弃上一个场景的线稿（seed 不跨场景复用）
+      setSketchPreview(null);
+      setError(null);
     }
   }, [selectedSceneId]);
 
-  const handleGenerate = async () => {
+  /** 统一调用分镜生成；sketch 参数化见 M25.9 C1。 */
+  const runGenerate = async (opts: { sketchMode: boolean; refineSeed?: number }) => {
     if (!selectedScene) return;
     setLoading(true);
     setError(null);
@@ -54,9 +69,21 @@ export function StoryboardModal({
         scene: { ...selectedScene, description: editDescription, prompt: editPrompt },
         characters,
         style,
+        sketch_mode: opts.sketchMode,
+        refine_seed: opts.refineSeed ?? null,
       });
       if (resp.success && resp.data) {
-        onSuccess(resp.data);
+        if (opts.sketchMode) {
+          // 线稿阶段：仅展示预览，不写回 store，等待用户确认构图
+          setSketchPreview({
+            image_url: resp.data.image_url,
+            sketch_seed: resp.data.sketch_seed ?? 0,
+            prompt_used: resp.data.prompt_used,
+          });
+        } else {
+          // 精绘/直出阶段：正式结果回写
+          onSuccess(resp.data);
+        }
       } else {
         setError(resp.error || "生成失败");
       }
@@ -65,6 +92,17 @@ export function StoryboardModal({
     } finally {
       setLoading(false);
     }
+  };
+
+  /** 一段式直出（线稿先行关闭）。 */
+  const handleGenerate = () => runGenerate({ sketchMode: false });
+  /** 两段式第一步：低步数线稿快速看构图。 */
+  const handleSketch = () => runGenerate({ sketchMode: true });
+  /** 两段式第二步：采用线稿构图，同 seed 精绘（防构图漂移）。 */
+  const handleRefine = () => {
+    if (!sketchPreview) return;
+    runGenerate({ sketchMode: false, refineSeed: sketchPreview.sketch_seed });
+    setSketchPreview(null);
   };
 
   const handleSave = () => {
@@ -105,6 +143,29 @@ export function StoryboardModal({
               <label className="modal-label">画风</label>
               <ComboInput value={style} onChange={setStyle} options={STYLE_OPTIONS} />
             </div>
+            <div className="modal-field">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "12px",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={sketchFirst}
+                  onChange={(e) => {
+                    setSketchFirst(e.target.checked);
+                    setSketchPreview(null);
+                  }}
+                  disabled={loading}
+                />
+                线稿先行（低步数快速看构图，确认后同 seed 精绘防漂移）
+              </label>
+            </div>
             {selectedScene && (
               <div style={sectionStyle}>
                 <div style={sectionTitleStyle}>场景信息（可编辑）</div>
@@ -138,6 +199,12 @@ export function StoryboardModal({
                   value={editPrompt}
                   onChange={(e) => setEditPrompt(e.target.value)}
                 />
+                <PromptToolkit
+                  text={editPrompt}
+                  onChange={setEditPrompt}
+                  context="短剧分镜画面提示词"
+                  disabled={loading}
+                />
                 {selectedScene.dialogue && (
                   <div
                     style={{
@@ -150,6 +217,65 @@ export function StoryboardModal({
                     「{selectedScene.dialogue}」
                   </div>
                 )}
+              </div>
+            )}
+            {sketchFirst && sketchPreview && (
+              <div style={sectionStyle}>
+                <div style={sectionTitleStyle}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    <Image size={13} /> 线稿预览 · seed {sketchPreview.sketch_seed}
+                  </span>
+                </div>
+                <img
+                  src={sketchPreview.image_url}
+                  alt="分镜线稿预览"
+                  style={{
+                    width: "100%",
+                    borderRadius: "6px",
+                    border: "1px solid var(--border)",
+                    display: "block",
+                  }}
+                />
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text-secondary)",
+                    marginTop: "4px",
+                  }}
+                >
+                  构图满意则「采用构图并精绘」，不满意可改提示词后「重出线稿」。
+                </div>
+                <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                  <button
+                    className="topbar-btn topbar-btn-primary"
+                    onClick={handleRefine}
+                    disabled={loading}
+                    style={{ flex: 1 }}
+                  >
+                    {loading ? (
+                      <span className="loading"></span>
+                    ) : (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        <Sparkles size={14} /> 采用构图并精绘
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    className="topbar-btn"
+                    onClick={handleSketch}
+                    disabled={loading}
+                    style={{ flex: 1 }}
+                  >
+                    重出线稿
+                  </button>
+                  <button
+                    className="topbar-btn"
+                    onClick={() => setSketchPreview(null)}
+                    disabled={loading}
+                  >
+                    弃用
+                  </button>
+                </div>
               </div>
             )}
           </>
@@ -174,10 +300,10 @@ export function StoryboardModal({
           )}
           <button
             className="topbar-btn topbar-btn-primary"
-            onClick={handleGenerate}
+            onClick={sketchFirst ? handleSketch : handleGenerate}
             disabled={loading || !selectedScene}
           >
-            {loading ? <span className="loading"></span> : "生成分镜"}
+            {loading ? <span className="loading"></span> : sketchFirst ? "生成线稿" : "生成分镜"}
           </button>
         </div>
       </div>

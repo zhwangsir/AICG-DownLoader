@@ -19,6 +19,11 @@ from app.agents.base import BaseAgent
 from app.config import settings
 from app.models.schemas import AgentResponse, Script, ScriptRequest
 from app.services.rag_service import rag_service
+from app.services.style_anchor import (
+    resolve_style_anchor,
+    sanitize_style_conflicts,
+    style_prompt_clause,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +278,7 @@ F. 变现模式结构模板（{monetization_mode}）：
 1. 角色描述要详细到可以生成定妆照（五官、发型、服装、气质）
 2. 画面描述要具体（场景、光线、构图、人物状态）
 3. **英文 prompt 必须完整翻译 description 中的核心视觉元素**，包含：
-   - 画质关键词：cinematic, 8k, photorealistic, highly detailed
+   {style_clause}
    - 镜头语言：shot_type 对应的英文（extreme close-up/close-up/medium shot/full shot/wide shot）
    - 场景细节：location、关键道具、光线氛围（如 dim yellow lighting, neon signs）
    - 角色外观：出场角色的核心特征（发色、服装、表情），与 characters.description 一致
@@ -281,12 +286,12 @@ F. 变现模式结构模板（{monetization_mode}）：
    - 情绪氛围：emotion 对应的英文氛围词（eerie/tense/romantic）
    - 彩色风格：默认生成彩色画面，禁止黑白（除非剧情明确要求）
    - 反面示例（禁止）："cinematic 8k detailed store interior" （过于简略，丢失核心剧情元素）
-   - 正面示例："cinematic medium shot, late-night convenience store interior, dim yellow fluorescent lighting, young Chinese female clerk with shoulder-length black wavy hair in white t-shirt and denim jacket standing behind checkout counter, staring at surveillance monitor showing her own doppelganger waving back, eerie tension, photorealistic, 8k"
+   - 正面示例："cinematic medium shot, late-night convenience store interior, dim yellow fluorescent lighting, young Chinese female clerk with shoulder-length black wavy hair in white t-shirt and denim jacket standing behind checkout counter, staring at surveillance monitor showing her own doppelganger waving back, eerie tension, 8k, highly detailed"
 4. 台词要口语化、有张力，单条不超过 30 字
 5. 竖屏 9:16 构图思维：人物特写优先，重要信息放画面中下部
 6. JSON 字符串值中的双引号必须用 \\" 转义，不要使用未转义的英文双引号
 7. 如果需要引用文字，请用中文引号「」或单引号
-8. negative_prompt 默认包含：black and white, monochrome, blurry, low quality, deformed, cartoon, anime, text, watermark, extra fingers, bad anatomy
+8. negative_prompt 默认包含：{style_negative_terms}
 9. synopsis 必填，30-60字概括全剧核心悬念
 
 直接输出纯 JSON，不要用 markdown 代码块包裹，不要输出任何解释性文字。
@@ -308,15 +313,34 @@ class ScriptAgent(BaseAgent):
             if reference:
                 logger.info("剧本 Agent 搜索到参考资料: %d 字符", len(reference))
 
+            # M15.1 画风锚定：将用户画风解析为英文风格关键词，注入系统提示词，
+            # 替代原硬编码 photorealistic（避免与角色定妆照/分镜关键帧画风脱节）
+            # M16.1：风格词与外貌词权重分离（场景 prompt 是风格词下游传递的源头，
+            # 必填收窄为风格名，KB 整串降可选，避免与场景内角色外貌描述争权重）
+            anchor = resolve_style_anchor(request.style)
+            realism_tail = ", photorealistic" if anchor.is_realistic else ""
+            style_clause = style_prompt_clause(anchor, target="全剧画面") + (
+                f"\n   - 画质关键词：cinematic, 8k, highly detailed{realism_tail}"
+            )
+            conflict_neg = anchor.negative_en or (
+                "cartoon, anime" if anchor.is_realistic else "realistic, photorealistic, live action"
+            )
+            style_negative_terms = (
+                "black and white, monochrome, blurry, low quality, deformed, "
+                f"{conflict_neg}, text, watermark, extra fingers, bad anatomy"
+            )
             system = (
                 SYSTEM_PROMPT
                 .replace("{episodes}", str(request.episodes))
                 .replace("{scenes_per_episode}", str(request.scenes_per_episode))
                 .replace("{monetization_mode}", request.monetization_mode)
+                .replace("{style_clause}", style_clause)
+                .replace("{style_negative_terms}", style_negative_terms)
             )
             user_msg = (
                 f"创意：{request.premise}\n"
                 f"题材：{request.genre}\n"
+                f"画风：{request.style}\n"
                 f"集数：{request.episodes}\n"
                 f"每集分镜数：{request.scenes_per_episode}\n"
                 f"变现模式：{request.monetization_mode}\n"
@@ -373,9 +397,20 @@ class ScriptAgent(BaseAgent):
             if issues:
                 logger.warning("剧本结构校验未完全通过（%d 个问题），放行: %s", len(issues), issues)
 
-            # RAG 增强：基于知识库优化每个场景的生成提示词
+            # RAG 增强：基于知识库优化每个场景的生成提示词（M15.1：style_hint 用画风而非题材）
             if settings.rag_optimize_enabled:
-                await self._rag_enhance_scenes(clean_scenes, request.genre)
+                await self._rag_enhance_scenes(clean_scenes, request.style)
+
+            # M15.4 画风冲突清洗：LLM/RAG 产出的场景提示词常自带与目标画风互斥的
+            # 风格词（如请求国漫却写 hyperrealistic、负面词反向排斥 anime）。
+            # 在源头清洗正文；风格锚定尾仍由下游（分镜/视频）各自追加，避免重复。
+            for scene in clean_scenes:
+                if scene.get("prompt"):
+                    scene["prompt"] = sanitize_style_conflicts(scene["prompt"], anchor)
+                if scene.get("negative_prompt"):
+                    scene["negative_prompt"] = sanitize_style_conflicts(
+                        scene["negative_prompt"], anchor, negative=True
+                    )
 
             script = Script(
                 project_id=str(uuid.uuid4()),

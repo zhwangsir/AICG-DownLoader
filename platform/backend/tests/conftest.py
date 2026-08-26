@@ -24,10 +24,11 @@ def _patch_settings(monkeypatch):
     monkeypatch.setattr(settings, "comfyui_video_a", "http://localhost:9003")
     monkeypatch.setattr(settings, "comfyui_video_b", "http://localhost:9004")
     monkeypatch.setattr(settings, "backend_port", 8100)
-    # P4.1: 默认走 ComfyUI 路径，保持向后兼容；
-    # 专门测试 xDiT 的用例可局部 monkeypatch settings.video_backend = "xdit"
+    # 默认走 ComfyUI 路径，保持向后兼容；
+    # 测试 H3 的用例可局部 monkeypatch settings.video_backend = "h3"
     monkeypatch.setattr(settings, "video_backend", "comfyui")
-    monkeypatch.setattr(settings, "xdit_endpoint", "http://localhost:8288")
+    # M10: MiniMax H3 专用实例占位；测试 H3 的用例局部 monkeypatch video_backend='h3'
+    monkeypatch.setattr(settings, "h3_comfyui_url", "http://localhost:9005")
     # P4.2: 默认走回退路径（whisper/edge），保持向后兼容；
     # 专门测试 FireRedASR/CosyVoice/IndexTTS 的用例局部 monkeypatch 覆盖
     monkeypatch.setattr(settings, "asr_backend", "whisper")
@@ -35,23 +36,43 @@ def _patch_settings(monkeypatch):
     monkeypatch.setattr(settings, "tts_backend", "edge")
     monkeypatch.setattr(settings, "cosyvoice_endpoint", "http://localhost:8400/v1")
     monkeypatch.setattr(settings, "indextts_endpoint", "http://localhost:9200")
-    # P4.3: 默认走回退路径（sdxl），保持向后兼容；
-    # 专门测试 HunyuanImage/FLUX+PuLID/LTX-Video 的用例局部 monkeypatch 覆盖
+    # 图像后端固定 sdxl（2026-08 起为唯一在线图像后端）
     monkeypatch.setattr(settings, "image_backend", "sdxl")
-    monkeypatch.setattr(settings, "hunyuanimage_endpoint", "http://localhost:8600/v1")
-    monkeypatch.setattr(settings, "flux_pulid_endpoint", "http://localhost:8601/v1")
-    monkeypatch.setattr(settings, "ltx_video_enabled", False)
-    monkeypatch.setattr(settings, "ltx_video_endpoint", "http://localhost:8700/v1")
-    # P4.4: 默认关闭唇形同步与后处理，保持向后兼容；
-    # 专门测试 LatentSync/RealBasicVSR/RIFE/ProPainter/DeepFilterNet3 的用例局部 monkeypatch 覆盖
-    monkeypatch.setattr(settings, "lip_sync_enabled", False)
-    monkeypatch.setattr(settings, "latentsync_endpoint", "http://localhost:8289/v1")
-    monkeypatch.setattr(settings, "postprocess_enabled", False)
-    monkeypatch.setattr(settings, "postprocess_endpoint", "http://localhost:8290/v1")
-    monkeypatch.setattr(settings, "deepfilternet_endpoint", "http://localhost:8301/v1")
+    # LTX-2.5（workstation :8198）占位，默认关闭避免触发预览调用
+    monkeypatch.setattr(settings, "ltx_enabled", False)
+    monkeypatch.setattr(settings, "ltx_comfyui_url", "http://localhost:9006")
     # RAG: 默认关闭提示词优化，避免单元测试触发 fastembed/LLM 调用；
     # 专门测试 RAG 的用例可局部 monkeypatch settings.rag_optimize_enabled = True
     monkeypatch.setattr(settings, "rag_optimize_enabled", False)
+    # M18.2: 默认关闭三视图 VLM 质检，避免既有用例触发 VLM/图片下载调用；
+    # 专门测试质检的用例可局部 monkeypatch settings.character_view_qc_enabled = True
+    monkeypatch.setattr(settings, "character_view_qc_enabled", False)
+    # M18.3: 默认关闭关键帧定妆照 IPAdapter 锚定，避免既有用例触发参考图上传；
+    # 专门测试锚定的用例可局部 monkeypatch settings.storyboard_keyframe_anchor_enabled = True
+    monkeypatch.setattr(settings, "storyboard_keyframe_anchor_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def _redirect_shot_params_root(monkeypatch, tmp_path):
+    """M24.2: 镜头参数快照根目录重定向到临时目录，避免测试污染仓库 output/pipeline/。"""
+    monkeypatch.setattr(
+        "app.services.pipeline_orchestrator.PIPELINE_OUTPUT_ROOT", tmp_path / "pipeline"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _mock_gateway_probe(monkeypatch):
+    """DramaClaw 重构：单元测试不发起真实网关健康探测（默认全部端点健康）。
+
+    专门测试健康路由的用例（test_model_gateway）在测试内再次 monkeypatch
+    ModelGateway._probe，后设置生效，不受本 fixture 影响。
+    """
+    from app.services.model_gateway import ModelGateway
+
+    async def _fake_probe(self, endpoint, health_path):
+        return True, "ok"
+
+    monkeypatch.setattr(ModelGateway, "_probe", _fake_probe)
 
 
 @pytest.fixture

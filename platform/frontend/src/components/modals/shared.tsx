@@ -1,6 +1,5 @@
 import { useId } from "react";
 import type { CSSProperties } from "react";
-import type { PostprocessStep } from "../../api/client";
 
 export const GENRE_OPTIONS = [
   "都市悬疑",
@@ -44,19 +43,10 @@ export const VOICE_OPTIONS = [
 ];
 export const RATE_OPTIONS = ["+0%", "+10%", "-10%", "+20%", "-20%", "+30%", "-30%"];
 
-export const POSTPROCESS_STEP_META: { key: PostprocessStep; label: string; needsAudio?: boolean }[] = [
-  { key: "super_resolution", label: "超分（RealBasicVSR x4）" },
-  { key: "frame_interpolation", label: "插帧（RIFE）" },
-  { key: "inpainting", label: "修复（ProPainter）" },
-  { key: "audio_denoise", label: "降噪（DeepFilterNet3）", needsAudio: true },
-  { key: "final_encode", label: "H.265 编码（VideoToolbox）" },
-];
-
-export const POSTPROCESS_RESOLUTIONS = ["1920x1080", "1080x1920", "2560x1440", "3840x2160"];
-
 export const modalScrollStyle: CSSProperties = {
-  maxHeight: "82vh",
+  maxHeight: "86vh",
   overflowY: "auto",
+  overflowX: "hidden",
 };
 
 export const sectionStyle: CSSProperties = {
@@ -152,7 +142,7 @@ export const primaryBtnStyle: CSSProperties = {
   fontWeight: 600,
   background: "linear-gradient(180deg, var(--accent) 0%, var(--accent-hover) 100%)",
   border: "1px solid var(--accent-hover)",
-  color: "#fff",
+  color: "var(--text-on-accent)",
   borderRadius: 12,
   cursor: "pointer",
   boxShadow: "0 2px 6px var(--accent-glow), 0 6px 16px -4px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.2)",
@@ -175,12 +165,12 @@ export const dangerBtnStyle: CSSProperties = {
   padding: "10px 24px",
   fontSize: 13,
   fontWeight: 600,
-  background: "linear-gradient(180deg, #c45c47, #a34837)",
-  border: "1px solid #a34837",
+  background: "linear-gradient(180deg, #f63b6f, #d42a58)",
+  border: "1px solid #d42a58",
   color: "#fff",
   borderRadius: 10,
   cursor: "pointer",
-  boxShadow: "0 2px 6px rgba(196,92,71,0.25), 0 6px 16px -4px rgba(196,92,71,0.25), inset 0 1px 0 rgba(255,255,255,0.15)",
+  boxShadow: "0 2px 6px rgba(246,59,111,0.25), 0 6px 16px -4px rgba(246,59,111,0.25), inset 0 1px 0 rgba(255,255,255,0.15)",
   transition: "all 0.2s var(--ease-out)",
 };
 

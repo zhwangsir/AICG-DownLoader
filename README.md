@@ -1,3 +1,17 @@
+# AIGCPannel
+
+融合项目：ComfyUI 模型下载器 + AI 短剧工作台（`platform/`）+ DashBox 引擎（`dashbox/`）。
+产品显示名 **AIGCPannel**。远程仓仍是 `AICG-DownLoader`（Gitee/GitHub 先别改）。
+
+- 工作台：`./start-aigcpannel.sh`（backend `:8100` + frontend `:3501`）
+- 引擎：`./start-engine.sh`（DashBox docker，默认 Web `:8080` / API `:8780`；加 `--up` 才拉起）
+- 状态：`GET /api/panel/status`（`config` / `models.json` 是否可读）
+
+根 [`NOTICE`](NOTICE)：`dashbox/` 为 Elastic License 2.0，不要改品牌文件。crate / 配置目录名仍是 `comfy-downloader`。
+集群真相：[`../ToIV/AGENTS.md`](../ToIV/AGENTS.md)。
+
+---
+
 # AICG-DownLoader · ComfyUI 模型下载器
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -7,6 +21,14 @@
 为本地 ComfyUI 用户设计：不碰命令行，把 Civitai / HuggingFace 上的模型下载到 ComfyUI 正确的子目录里。
 
 > 下载安装包请到 [GitHub Releases](https://github.com/zhwangsir/AICG-DownLoader/releases) 页。
+
+## 姊妹项目：AI 短剧工作台（platform/）
+
+本仓库除下载器外，还包含 `platform/` 目录下的 **AI 短剧一条龙工作台**——一个从「一句话创意」到「可播放短剧成片」的内容生产平台（Python FastAPI 后端 + React/TS 前端，LLM/图像/视频/TTS/ASR 全链路 Agent 管线）。
+
+两者关系：下载器负责把 Civitai / HuggingFace 模型可靠地下载到 ComfyUI 模型目录；工作台负责用这些模型生产内容。两侧通过 **模型注册表**（工作台 `GET /api/drama/models/registry`，融合下载器 `models.json` 与工作台 `lora_manifest`）打通——下载器下载的模型可直接被工作台发现与引用，工作台后端也会共享下载器的 `config.json` 配置。
+
+工作台的架构、启动方式见 [platform/README.md](platform/README.md)，部署见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 功能
 

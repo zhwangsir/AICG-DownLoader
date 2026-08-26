@@ -1,5 +1,5 @@
 packages:
   - '.'
+# esbuild 需要 postinstall 构建脚本（下载平台二进制），明确允许
 allowBuilds:
-  '0': esbuild
-  esbuild: set this to true or false
+  esbuild: true

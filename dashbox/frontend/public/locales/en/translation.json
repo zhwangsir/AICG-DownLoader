@@ -4034,7 +4034,25 @@
       "tabs": {
         "nas": "Local Models",
         "download": "Download",
-        "studio": "Image Studio"
+        "studio": "Image Studio",
+        "works": "Works"
+      },
+      "works": {
+        "filterAll": "All",
+        "filterAnime": "Anime",
+        "filterReal": "Realistic",
+        "filter3d": "3D",
+        "featureAvmux": "AV Native",
+        "featureRefImg": "Ref Image",
+        "featureRefVideo": "Ref Video",
+        "featureCombat": "Combat",
+        "featureMicroexp": "Micro-exp",
+        "featureDialogue": "Dialogue",
+        "featureFullAct": "Full Action",
+        "searchPlaceholder": "Search works…",
+        "refresh": "Refresh works",
+        "loadError": "Failed to load works",
+        "empty": "No works yet — refresh after generation completes"
       },
       "studio": {
         "title": "Image Studio",

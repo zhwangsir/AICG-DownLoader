@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   generateScript,
   ScriptData,
@@ -33,12 +33,22 @@ export function ScriptModal({
   onUpdate: () => void;
 }) {
   const updateScriptField = useDramaStore((s) => s.updateScriptField);
+  // AgentBar 创意草稿预填（LibTV 底部输入框 → 剧本模态），读后即清
+  const draftPremise = useDramaStore((s) => s.draftPremise);
+  const setDraftPremise = useDramaStore((s) => s.setDraftPremise);
   const [mode, setMode] = useState<"new" | "edit">(scriptData ? "edit" : "new");
 
   // 新建模式
   const [premise, setPremise] = useState(
-    scriptData ? `${scriptData.genre}，${scriptData.title}` : "都市悬疑，外卖员发现客户是凶手"
+    scriptData
+      ? `${scriptData.genre}，${scriptData.title}`
+      : draftPremise || "都市悬疑，外卖员发现客户是凶手"
   );
+  useEffect(() => {
+    if (draftPremise) setDraftPremise("");
+    // 仅在挂载时执行一次（读后即清）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [genre, setGenre] = useState(scriptData?.genre || "都市悬疑");
   const [episodes, setEpisodes] = useState(1);
   const [scenesPerEpisode, setScenesPerEpisode] = useState(5);

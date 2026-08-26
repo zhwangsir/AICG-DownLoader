@@ -1,8 +1,8 @@
 {
-  "project": "AICG-DownLoader-main",
-  "version": "0.15.3",
-  "last_updated": "2026-08-04",
-  "description": "ComfyUI 模型下载器 + AI 短剧生成平台。里程碑状态追踪文件，记录历史交付与当前会话优先级任务进度。",
+  "project": "AIGCPannel",
+  "version": "0.34.0",
+  "last_updated": "2026-08-27",
+  "description": "AIGCPannel：下载器 + 短剧工作台 + DashBox 引擎。第一波融合已落盘（未 commit/push）。远程仓仍为 AICG-DownLoader。",
   "milestones": {
     "M0": {
       "name": "项目骨架",
@@ -399,107 +399,1076 @@
           "notes": "审计发现三处游离调用点（ai_optimizer.optimize_content 智能体辅助高频路径 / rag_service.optimize_prompt / drama 智能体辅助端点）每次请求新建 AsyncOpenAI（隐式新建 httpx 连接池）且从不关闭：高频下累积泄漏 socket，每次重建 TCP 连接徒增延迟。base.py 新增 get_shared_llm_client() 懒加载单例（trust_env=False 与 BaseAgent 一致）+ close_shared_llm_client()，三处全部改复用；main.lifespan shutdown 统一关闭。test_base 新增 TestSharedLLMClient 3 用例（单例复用/close 后可重新懒加载/未初始化 close 幂等）；test_rag_service 4 处打桩由 AsyncOpenAI 改为 get_shared_llm_client。全量回归 426/426（84.33%）"
         }
       ]
+    },
+    "M10": {
+      "name": "MiniMax H3 视频后端切换（原生音视频联合生成）",
+      "status": "delivered",
+      "summary": "主视频后端从 xdit/HunyuanVideo 切换为 MiniMax H3（33B H3-Omni-Transformer + Qwen3-VL-32B 文本编码器，2K 直出 / 最长 15s / 原生立体声）。WORKFLOW_TEMPLATE_H3 与官方 video_minimax_h3_i2v 模板逐节点比对一致：无负面提示词/无 CFG（BasicGuider 单条件蒸馏）、res_multistep + simple/20 步、帧数对齐 17k+5 网格（_snap_h3_frames 公式与官方 ComfyMathExpression 相同）、双 VAE 分别解码视频/音频后 CreateVideo 合成。实机验证：workstation :8195 独立实例（ComfyUI-h3-eval, GPU1, 模型走 NAS extra_model_paths），冒烟 256x256/22帧/4步成功，产物 mp4 含 H.264 视频轨 + AAC 立体声 32kHz 音轨（时长 1.625s 与 39 帧/24fps 精确吻合）。全量回归：后端 436/436（84.48%）、前端 vitest 46/46、tsc 0 错误、build 954ms。已部署 core 并修正 core .env VIDEO_BACKEND=comfyui→h3（此前覆盖默认值导致未生效）。用户信息核实：H3 开源、33B、Qwen3-VL-32B、2K/15s/立体声、fl2va/ref2va INT8 — 全部属实。",
+      "subtasks": [
+        {
+          "id": "M10.1",
+          "name": "config.py H3 配置组",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/config.py"
+          ],
+          "notes": "video_backend 默认 'h3'；新增 h3_comfyui_url=:8195 / h3_unet_name(fl2va INT8) / h3_clip_name(qwen3vl NVFP4) / 双 VAE / 768x1344 竖屏 / steps=20 / res_multistep / simple / timeout 1800s"
+        },
+        {
+          "id": "M10.2",
+          "name": "video_agent H3 后端实现",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py"
+          ],
+          "notes": "WORKFLOW_TEMPLATE_H3（15 节点，对齐官方 i2v 子图展开）；_execute_via_h3 直连专用实例不走 LB；h3/xdit 失败自动回退 ComfyUI/Wan2.2；_snap_h3_frames = 官方 max(5,round(sec*24))+(5-n%17)%17"
+        },
+        {
+          "id": "M10.3",
+          "name": "H3 单元测试",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_video_agent.py",
+            "platform/backend/tests/conftest.py"
+          ],
+          "notes": "TestSnapH3Frames 3 用例（5s=124/网格性/15s=362）；TestVideoAgentH3 成功路径断言节点结构+无 CLIPTextEncode+H3 实例直连，回退路径覆盖；conftest 占位 h3_comfyui_url"
+        },
+        {
+          "id": "M10.4",
+          "name": "实机冒烟验证",
+          "status": "completed",
+          "files": [
+            "platform/backend/scripts/smoke_h3.py"
+          ],
+          "notes": "上传关键帧→提交模板→轮询→下载全链路 PASS；输出 SaveVideo images key 与 _extract_video_url 兼容；afinfo+atom 双重确认音视频双轨"
+        },
+        {
+          "id": "M10.5",
+          "name": "core 部署与 .env 修正",
+          "status": "completed",
+          "files": [],
+          "notes": "rsync app/tests/scripts/dist → core；发现并修正 core .env VIDEO_BACKEND=comfyui（覆盖了 config.py 新默认值 h3）；重启 uvicorn health 200"
+        }
+      ]
+    },
+    "M11": {
+      "name": "H3 专属优化（ref2va 角色一致性 + 多镜叙事 + 原生音频混音）",
+      "status": "delivered",
+      "summary": "基于 MiniMax H3 独有特性完成三项深度优化：①ref2va 角色一致性——通过 MiniMaxH3ReferenceToVideo 节点将角色资产库三视图参考图注入视频生成流程，解决跨分镜角色一致性问题；②多镜叙事联合生成——同集相邻场景合并为一次多镜推理（单 prompt 多 SHOT），再按帧边界 ffmpeg 切分回各场景视频，提升跨镜连续性；③H3 原生音频混音——将 H3 生成的环境音轨与人声按比例混合（环境音增益 0.25 ≈ -12dB），增强视频音频质量。关键技术点：COMFY_AUTOGROW_V3 动态组 API 格式为嵌套 dict（inputs[\"ref_images\"] = {\"ref_image_0\": [\"10\",0], ...}），扁平键 ref_image_N 能通过 prompt 校验但执行时 TypeError；多镜切分末段吃到组尾（17k+5 网格吸附余量）。实机验证：r2v 冒烟 256x256/39帧/4步成功，输出含音视频双轨。全量回归：后端 480/480（85.02%）、前端 vitest 46/46、tsc 0 错误。已部署 core（rsync + uvicorn 重启 health 200，前端 http.server 200）。",
+      "subtasks": [
+        {
+          "id": "M11.1",
+          "name": "ref2va 角色一致性（角色资产库 + 参考图注入）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/tests/unit/test_video_agent.py",
+            "platform/backend/scripts/smoke_h3_r2v.py"
+          ],
+          "notes": "WORKFLOW_TEMPLATE_H3_R2V 模板（与 fl2va 共用 CLIP/双VAE/采样链/解码尾部，差异：UNETLoader 加载 ref2va 模型 + MiniMaxH3ReferenceToVideo 节点无 first_frame 有 audio_vae/ref_image_size）；H3_R2V_PROMPT_GUIDE 固定引导（<Picture 1>=关键帧构图参考，<Picture 2>起=角色定妆三视图外观锁定）；角色参考图动态挂接 LoadImage 11/12/... → ref_images 组内 ref_image_1/2/...（COMFY_AUTOGROW_V3 API 格式为嵌套 dict，扁平键执行期 TypeError）；参考图总数（含关键帧）≤ h3_ref_max_images=9"
+        },
+        {
+          "id": "M11.2",
+          "name": "多镜叙事联合生成（场景分组 + 多 SHOT prompt + ffmpeg 切分）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_video_multishot.py"
+          ],
+          "notes": "group_scenes_for_multishot 纯函数（同集相邻场景贪心合并，受场景数/总时长双上限约束）；build_multishot_prompt 组装 H3_MULTISHOT_PROMPT_GUIDE + SHOT 编号；_multishot_split_plan 按各场景时长累计帧偏移计算切分边界（末段吃到组尾）；execute_multi_shot 一次 H3 工作流 → 下载组视频 → ffmpeg 逐场景切分（libx264 + aac 重编码保证帧精度）；组推理失败/切分失败整组回退为逐场景 execute"
+        },
+        {
+          "id": "M11.3",
+          "name": "H3 原生音频混音（环境音轨 + 人声按比例混合）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/edit_agent.py"
+          ],
+          "notes": "H3 生成的环境音轨与人声按比例混合，环境音增益 0.25（约 -12dB），增强视频音频质量"
+        },
+        {
+          "id": "M11.4",
+          "name": "core 部署验证",
+          "status": "completed",
+          "files": [],
+          "notes": "rsync platform/ → core（排除 node_modules/.venv/static/outputs）；后端 uvicorn :8100 重启 health 200，前端 http.server :3501 200"
+        }
+      ]
+    },
+    "M12": {
+      "name": "H3 精细化优化（SHOT 节拍视觉化 + 动态混音增益 + 多镜漂移标注）",
+      "status": "delivered",
+      "summary": "在 M11 多镜/混音基础上完成三项精细化优化：①多镜 SHOT 节拍视觉化——剧本层 narrative_beat 经 _MULTISHOT_BEAT_HINTS_EN 映射为英文视觉指令注入多镜 SHOT prompt 行尾（与分镜层 BEAT_VISUAL_HINTS 同策略，hook=高对比戏剧光/cliffhanger=留白悬念等 6 种节拍）；②动态混音增益——compute_ambience_gain 纯函数按对白密度（人声/视频时长比）分三档调 H3 环境音增益：≥0.85 密集档 0.15（-16dB）、0.4-0.85 基准档 0.25（-12dB）、<0.4 稀疏档 0.40（-8dB），探测失败自动回退基准档不阻断主链路；③多镜漂移风险标注——质检层 _multishot_group_issues 与 video_agent 同规则模拟分组，≥2 场景成组时逐场景标注「跨镜角色漂移风险」并给出复核/回退建议。全量回归：后端 497/497（85.17%）、前端 vitest 46/46、tsc 0 错误。已部署 core（uvicorn :8100 health 200，M12 三处代码标记远端核验在案）。",
+      "subtasks": [
+        {
+          "id": "M12.1",
+          "name": "多镜 SHOT 节拍视觉化",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_video_multishot.py"
+          ],
+          "notes": "VideoRequest 新增 narrative_beat 字段；pipeline_orchestrator 透传剧本层节拍；_MULTISHOT_BEAT_HINTS_EN 六节拍英文视觉指令映射；build_multishot_prompt 在 SHOT 行尾追加 (hint)；TestBuildMultishotPromptBeats 覆盖 hook 注入/不同节拍不同指令"
+        },
+        {
+          "id": "M12.2",
+          "name": "动态混音增益（按对白密度分档）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/edit_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_edit_agent.py"
+          ],
+          "notes": "compute_ambience_gain 纯函数三档分档（dense 0.15 / 基准 0.25 / sparse 0.40）；config 新增 h3_dynamic_gain_enabled/h3_ambience_gain_dense/h3_ambience_gain_sparse；_process_segment 探测人声+视频时长后动态传入 _build_native_mix_cmd(gain=...)；TestDynamicAmbienceGain 覆盖三档边界与非法时长回退"
+        },
+        {
+          "id": "M12.3",
+          "name": "多镜漂移风险标注",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/quality_agent.py",
+            "platform/backend/tests/unit/test_quality_agent.py"
+          ],
+          "notes": "_multishot_group_issues 与 group_scenes_for_multishot 同规则模拟分组（同集相邻+场景数/总时长双上限）；≥2 场景成组逐场景打 visual_risk/info 标，suggestion 提示抽查首尾帧或 h3_multishot_enabled=False 回退逐场景；仅 video_backend=h3 且 multishot 开启时生效；TestMultishotDriftLabel 覆盖成组标注"
+        },
+        {
+          "id": "M12.4",
+          "name": "core 部署与远端核验",
+          "status": "completed",
+          "files": [],
+          "notes": "rsync platform/ → core；uvicorn :8100 重启 /api/drama/health 200（version 0.11.0）；远端 grep 核验 config.py(h3_dynamic_gain_enabled)/schemas.py(narrative_beat)/edit_agent.py(compute_ambience_gain)/quality_agent.py(_multishot_group_issues) 全部在案；前端 http.server :3501 200"
+        }
+      ]
+    },
+    "M13": {
+      "name": "角色一致性对照视觉检测（VLM 参考图比对）",
+      "status": "delivered",
+      "summary": "在 M12 多镜漂移「风险标注」（纯规则推测）之上落地「实锤检测」：视觉质检 Agent 支持将角色资产库定妆三视图参考图与视频抽帧一同送入 VLM 逐帧对照，检测脸型/发型/服装/妆容漂移。①schemas——QualityVisualRequest 新增 reference_image_urls、QualityVisualResult 新增 drift_detected、PipelineRunRequest 新增 run_visual_check（默认 False）；②VisualQualityAgent——VISUAL_DRIFT_PROMPT_ADDENDUM 对照指令（参考图在前、视频帧在后），_download_reference_image 支持 localhost /static/ 本地复用免下载、单张失败跳过不阻断，drift_detected 解析带兜底（VLM 未显式输出但 issues 含 visual_consistency/critical 时判 True，无参考图时恒 False）；③pipeline 集成——run_visual_check=True 时成片后对每个视频场景调 visual_quality_agent，报告 steps.visual_quality 含 checked/failed_scenes/drift_scenes/results，无参考图 skipped、单场景失败非致命。全量回归：后端 508/508（85.17%）、前端 vitest 46/46、build 937ms。已部署 core（uvicorn :8100 health 200，前端 :3501 200，drift_detected 标记远端核验在案）。",
+      "subtasks": [
+        {
+          "id": "M13.1",
+          "name": "schemas 扩展（参考图输入 + 漂移结果输出）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/models/schemas.py"
+          ],
+          "notes": "QualityVisualRequest.reference_image_urls（空列表不做对照）；QualityVisualResult.drift_detected 默认 False；PipelineRunRequest.run_visual_check 默认 False"
+        },
+        {
+          "id": "M13.2",
+          "name": "VisualQualityAgent 参考图对照检测",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/quality_agent.py"
+          ],
+          "notes": "VISUAL_DRIFT_PROMPT_ADDENDUM 引导 VLM 逐帧对照脸型/发型/服装/妆容并输出 drift_detected；asyncio.gather 并发下载参考图，失败单张返回 None 跳过；_download_reference_image 对 localhost /static/ 路径直接映射 output/ 目录免下载；drift_detected 兜底逻辑：显式输出优先，visual_consistency+critical 兜底，无参考图恒 False"
+        },
+        {
+          "id": "M13.3",
+          "name": "pipeline 集成视觉质检步骤",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/pipeline_orchestrator.py"
+          ],
+          "notes": "_step_visual_quality 在 edit 之后按 run_visual_check 开关执行；参考图复用 _collect_character_reference_images（与视频步骤同规则）；asyncio.gather 逐场景检测，报告 checked/failed_scenes/drift_scenes/results；无视频/无参考图 skipped，异常非致命"
+        },
+        {
+          "id": "M13.4",
+          "name": "TDD 测试 + 全量回归",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_visual_quality_agent.py",
+            "platform/backend/tests/unit/test_pipeline_orchestrator.py"
+          ],
+          "notes": "新增 11 用例：TestVisualDriftDetection 4 例（参考图前置顺序+prompt 拼接+显式 drift_detected、critical 兜底、无参考图恒 False、下载失败跳过）、TestDownloadReferenceImage 3 例（本地静态复用/下载异常 None/空 URL None）、TestVisualQualityStep 4 例（默认不执行、drift_scenes 收集+URL 透传、无参考图 skipped、单场景失败非致命）；mocks fixture 补 visual_quality_agent 打桩。全量：后端 508/508（85.17%）、前端 46/46、build 937ms"
+        },
+        {
+          "id": "M13.5",
+          "name": "core 部署与远端核验",
+          "status": "completed",
+          "files": [],
+          "notes": "rsync backend → core（排除 .venv/output/__pycache__）；uvicorn :8100 重启 health 200（agents 含 visual_quality_agent），前端 :3501 200；远端 grep 核验 drift_detected 标记在 schemas/quality_agent/pipeline_orchestrator 三处在案。注意：ssh 单条命令内 pkill -f 会自匹配杀掉远程 shell（exit 255），须拆分为 kill/启动两条 ssh"
+        },
+        {
+          "id": "M13.6",
+          "name": "实机调优：独立漂移检测 + Nemotron 退役切 spark02",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/quality_agent.py",
+            "platform/backend/tests/unit/test_visual_quality_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/.env"
+          ],
+          "notes": "实机矩阵暴露三问题（拼接 prompt 被画质框架稀释致极端换人漏报；4+ 图并发输入致 Nemotron 跨图幻觉；占位文本被照抄），重构为 _drift_check 独立 VLM 调用：DRIFT_CHECK_PROMPT 四判定规则 + 严禁照抄约束、逐帧并发（参考图+单帧）、detail low→high、细节去重聚合前 3 条。Nemotron vLLM 按用户指令退役（stop+disable），EXO_BASE_URL/VISUAL_MODEL_URL 切 spark02 :8000 qwen3.6-uncensored（实测视觉可用）。core 三例矩阵全绿：T1 真阴性 drift=false(98)、T2 换装 drift=true(95, 颜色级细节)、T3 换人 drift=true(65, 无幻觉)。回归：后端 509/509（85.07%）、前端 46/46"
+        }
+      ]
+    },
+    "M14": {
+      "name": "视觉漂移对照前端开关 + core 全链路实机验证",
+      "status": "delivered",
+      "summary": "前端 PipelineModal 暴露 run_visual_check 开关并透传后端；core 首次 9 步全链路 E2E（含 visual_quality）跑通，漂移真阳性命中",
+      "subtasks": [
+        {
+          "id": "M14.1",
+          "name": "前端暴露 run_visual_check 开关",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/api/client.ts",
+            "platform/frontend/src/components/modals/PipelineModal.tsx",
+            "platform/frontend/src/api/client.test.ts"
+          ],
+          "notes": "PipelineRunParams 增 run_visual_check? 字段；PipelineModal 增 runVc state + 复选框（成片后执行视觉漂移对照）+ STEP_LABELS 增 visual_quality=视觉对照 + runPipeline 传参；client.test.ts 新增 M14 传参用例（47/47，46→47）"
+        },
+        {
+          "id": "M14.2",
+          "name": "core 全链路 run_visual_check=true 实机验证",
+          "status": "completed",
+          "notes": "前端 dist rsync → core :3501（bundle 含视觉漂移对照）。core 首次 9 步全链路 E2E：task pipeline-bdccf8df382f，1集×2镜+角色定妆照+run_visual_check=true，passed=True，1329.6s。visual_quality: checked=2, drift_scenes=[1,2], failed=[]。人工抽帧比对确认真阳性：参考图为卡通卷发男孩（蓝T恤灰短裤绿鞋），视频帧为写实校服女生（画风/性别/服装全不同），VLM 判定准确。附注：分镜 hunyuanimage :8600 不通自动回退 SDXL（非致命）；asr_backend 默认 qwen3_asr 不匹配 Agent 分支→core 本地 faster-whisper-tiny 兜底（首次下载 ~75MB）；char_002 参考图仅存 ComfyUI URL 未落 core 本地"
+        },
+        {
+          "id": "M14.3",
+          "name": "全量回归 + 文档更新",
+          "status": "completed",
+          "notes": "后端 509/509（85.07%）、前端 vitest 47/47、tsc 0、build 1.32s（427.66 kB / gzip 130.77 kB）"
+        }
+      ]
+    },
+    "M15": {
+      "name": "全链路画风锚定（剧本/角色/分镜/H3 视频风格一致）",
+      "status": "delivered",
+      "summary": "新增 style_anchor 服务解析 KB 画风为英文风格关键词 + 写实性分类；剧本/角色/分镜/视频四处提示词统一注入风格尾与冲突画风负面词，替代各处硬编码 photorealistic，根治角色定妆照与 H3 视频画风脱节（M14.2 漂移真阳性根因）",
+      "subtasks": [
+        {
+          "id": "M15.1",
+          "name": "style_anchor 服务 + 四链路画风注入",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/style_anchor.py",
+            "platform/backend/app/agents/script_agent.py",
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/app/services/pipeline_orchestrator.py"
+          ],
+          "notes": "style_anchor：title/id/包含/tags 四级匹配 styles.json，StyleAnchor 含 keywords_en/style_name_en/negative_en/is_realistic；style_positive_tail/style_negative_tail 生成锚定尾。script_agent 系统提示词注入风格子句；character_agent _build_style_system 模板化 + 搜索词/兜底/RAG 指令去硬编码 photorealistic + 三视图强制风格尾；storyboard_agent 同样改造 + POSITIVE_SUFFIX 中性化；pipeline_orchestrator._step_video 为 VideoRequest prompt 追加风格尾、negative_prompt 注入冲突画风（国漫排斥 photorealistic / 写实排斥 anime）"
+        },
+        {
+          "id": "M15.2",
+          "name": "TDD 锚定注入用例 + 全量回归",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_style_anchor.py",
+            "platform/backend/tests/unit/test_character_agent.py",
+            "platform/backend/tests/unit/test_pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py",
+            "platform/backend/tests/unit/test_character_library.py"
+          ],
+          "notes": "新增 20 例：TestStyleTails 5（正负锚定尾/空字段兜底）、TestCharacterStyleAnchoring 3（国漫/写实风格尾 + 搜索词锚定）、TestVideoStyleAnchoring 3（写实/国漫注入 + 空 prompt 不塞尾）、test_style_anchor 原有 9 例；storyboard/character_library 3 处断言同步风格尾。回归：后端 531/531（85.47%）、前端 vitest 47/47、build 950ms"
+        },
+        {
+          "id": "M15.3",
+          "name": "core 实测验证（国漫画风 E2E）",
+          "status": "completed",
+          "notes": "task pipeline-088b6ccb4b9b（1集×2镜、style=国漫、定妆照1角色、run_visual_check=true）全链路跑通，但漂移检测仍报 drift_scenes=[2]：剧本 LLM 场景 prompt 残留 hyperrealistic 且负面词反向排斥 anime/cartoon（正文冲突信号抵消风格尾）；分镜 scene1 SDXL 回退 400（pc02 重启瞬时缺 checkpoint，自恢复）。派生 M15.4 正文清洗与 M15.5 参考图碰撞根治"
+        },
+        {
+          "id": "M15.4",
+          "name": "LLM 正文冲突风格词清洗（sanitize_style_conflicts）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/style_anchor.py",
+            "platform/backend/app/agents/script_agent.py",
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/tests/unit/test_style_anchor.py"
+          ],
+          "notes": "style_anchor 新增 sanitize_style_conflicts：_REALISM_FAMILY_TERMS/_ANIME_FAMILY_TERMS 两族互斥，词边界正则（保护 unrealistic）；正向词删对立家族、反向词删目标家族，质量词保留，标点收口。script/character/storyboard 三链路在追加风格尾前先清洗 LLM 产出。新增 TestSanitizeStyleConflicts 9 例"
+        },
+        {
+          "id": "M15.5",
+          "name": "参考图跨后端同名碰撞根治 + 冲突词表补充 + LB /view 加固",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/app/services/style_anchor.py",
+            "platform/deploy/comfyui-lb/comfyui-lb.py",
+            "platform/backend/tests/unit/test_character_agent.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py",
+            "platform/backend/tests/unit/test_style_anchor.py"
+          ],
+          "notes": "根因（pipeline-3ba8b3b3e304 复查）：pc02 重启后 SaveImage 计数器归零生成 character_char_001_front_00001_.png，LB /view 按 BACKENDS 顺序盲试命中 gpu0 同名写实陈旧图 → H3 ref2va 与漂移检测拿到错误参考图。修复三件套：① character/storyboard filename_prefix 追加 uuid8 唯一后缀；② LB /view 从 history 响应学习 filename→backend 映射精确路由（盲试仅作回退），已部署 workstation 重启 :8188 200；③ 冲突词表补 cinematic realism/realistic/realism（core E2E 实测残留）。陈旧文件清理：gpu0 41→0、pc02 4→0、pc01/NAS 为 0。TDD：4 用例先红后绿，相关三文件 62/62 通过"
+        },
+        {
+          "id": "M15.6",
+          "name": "core 重部署 + 国漫 E2E 复验（drift 未消除，再定位根因）",
+          "status": "completed",
+          "notes": "全量回归：后端 527/527（82.03%）、前端 vitest 47/47、build 887ms。rsync backend+deploy → core，grep 核验 cinematic realism/uuid4 命中；uvicorn :8100 重启 health 200（pid 387596）。task pipeline-1a92d5f7a966（同 M15.3 参数）全链路跑通（633.8s），但 drift_scenes=[1,2] 未消除。复查定位双重残留根因：① SDXL workflow ckpt_name 硬编码 majicMIX 写实模型，国漫提示词无法扭转模型先验；② pipeline_orchestrator._step_script 漏传 style 参数，剧本场景 prompt 按默认写实清洗，国漫任务源头残留写实冲突词。派生 M15.7/M15.8"
+        },
+        {
+          "id": "M15.7",
+          "name": "按画风写实性选 SDXL checkpoint",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/style_anchor.py",
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/tests/unit/test_style_anchor.py",
+            "platform/backend/tests/unit/test_character_agent.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py"
+          ],
+          "notes": "style_anchor 新增 SDXL_CHECKPOINT_REALISTIC=majicMIX_v7 / SDXL_CHECKPOINT_ANIME=animagineXL40 + sdxl_checkpoint_for_anchor(anchor)：非写实画风→animagineXL40，写实/兜底→majicMIX。character_agent/storyboard_agent._generate_image_via_sdxl 新增 anchor 参数透传，workflow[1].inputs.ckpt_name 动态选型替代硬编码。TDD：TestSdxlCheckpointSelection 2 例（helper）+ TestCharacterCheckpointByStyle 2 例 + TestStoryboardCheckpointByStyle 2 例（双 Agent workflow ckpt 断言），8/8 通过"
+        },
+        {
+          "id": "M15.8",
+          "name": "剧本阶段画风参数补传（源头清洗修复）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/pipeline_orchestrator.py"
+          ],
+          "notes": "_step_script 调 ScriptRequest 漏传 style=request.style → 剧本场景 prompt 按默认写实清洗，国漫任务残留 cinematic realism 等冲突词。补传后剧本阶段即按目标画风 sanitize，与 character/storyboard 清洗方向一致"
+        },
+        {
+          "id": "M15.9",
+          "name": "core 重部署（M15.7+M15.8）+ 国漫 E2E 终验（画风链修复确认）",
+          "status": "completed",
+          "notes": "全量回归：后端 535/535（82.06%）、前端 vitest 47/47、build 881ms。rsync backend → core；远端 grep 核验 sdxl_checkpoint_for_anchor 与 style=request.style 命中；uvicorn :8100 重启 health 200。task pipeline-7470e3e104d9 全链路跑通（566.0s，成片 final_pipeline-1785967294.mp4）。gpu0 history 实证：角色三视图+分镜两场景全部 animagineXL40（05:30 旧任务 majicMIX 对照）。抽帧人工复核：定妆照/分镜/两场景视频帧全部为日系动漫画风——M15 画风锚定链修复达成，画风漂移已消除。visual_quality 仍报 drift_scenes=[1,2]，但性质已从『画风脱节』变为『角色外貌保真』新缺陷（派生 M16）：① KB 国漫 keywords 含 fantasy elements/vibrant colors/particle effects 整串注入，稀释外貌描述权重 → 定妆照银发（剧本明确黑色齐肩短发）；② animagineXL40 多角色长 prompt 崩塌 → 分镜 scene 2 人脸拼贴（视频链未跟随该关键帧，H3 以文本为主驱动）；③ scene 1 为 POV 手持信封镜头主角未出镜，VLM 对背景路人判漂移属规则边缘 case"
+        }
+      ]
+    },
+    "M16": {
+      "name": "角色外貌保真（风格/外貌权重分离 + 分镜外貌校验重试 + 漂移豁免）",
+      "status": "delivered",
+      "summary": "M15 画风链根治后解决残留的角色外貌保真缺陷：M16.1 将 LLM 画风子句必填项收窄为风格名、KB 整串降可选并声明外貌权重优先；M16.2 确定性剥离 KB 氛围填充词 + VLM 校验分镜外貌一致性 + 失真时 LLM 短 prompt 重构重试；M16.3 漂移判定新增 character_present 字段豁免主角未出镜场景。core E2E 终验：画风链全绿、双场景拼贴检出走重试均改善",
+      "subtasks": [
+        {
+          "id": "M16.1",
+          "name": "风格词与外貌词权重分离（prompt 结构改造）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/style_anchor.py",
+            "platform/backend/app/agents/script_agent.py",
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/tests/unit/test_style_anchor.py",
+            "platform/backend/tests/unit/test_character_agent.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py",
+            "platform/backend/tests/unit/test_script_agent.py"
+          ],
+          "notes": "style_anchor 新增 style_prompt_clause(anchor, target)：必填收窄为 style_name_en；KB 整串 keywords 降为「风格氛围参考（可选）」；显式声明外貌描述（发色/发型/五官/服装款式与颜色）权重高于风格氛围词，冲突氛围词必须舍弃。三链路（script 源头 / character 定妆照 / storyboard 分镜）统一接线。TDD 10 例：TestStylePromptClause 6 + 三链路 system prompt 结构断言各 1-2 例。后端全量 570 passed（85.58%）、前端 47/47、build 841ms"
+        },
+        {
+          "id": "M16.2",
+          "name": "分镜外貌保真（氛围词剥离 + VLM 拼贴检测 + 短 prompt 重试）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/style_anchor.py",
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_style_anchor.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py"
+          ],
+          "notes": "背景：core E2E（pipeline-87d6d5791120）分镜 prompt 外貌描述完全正确，但多角色长 prompt 下 KB 氛围词稀释 CLIP 注意力，animagineXL40 产出模型先验校服/拼贴。三件套：① strip_kb_atmosphere — 非写实画风确定性剥离 keywords_en 中除 style_name_en 外全部氛围分段（写实不剥离）；② _check_appearance_mismatch — VLM 比对关键帧与角色描述，判定焦点收窄为发色/发型、服装款式与颜色（画风/姿势/视角不算失真），开关 settings.storyboard_appearance_check；③ _rebuild_short_prompt + _verify_and_retry_appearance — 失真时 LLM 重构 ≤80 词短 prompt（外貌前置、禁 7 类氛围词），再经 sanitize+strip+锚定尾重生成一次，异常保留原图不阻断。TDD 26 例（strip 8 + 校验/重构/重试/接线 18）"
+        },
+        {
+          "id": "M16.3",
+          "name": "漂移判定边缘 case 豁免（主角未出镜不误报）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/quality_agent.py",
+            "platform/backend/tests/unit/test_visual_quality_agent.py"
+          ],
+          "notes": "背景：pipeline-7470e3e104d9 scene 1 为 POV 手持信封镜头主角未出镜，VLM 拿背景路人与参考图比对误判漂移。DRIFT_CHECK_PROMPT 新增 character_present 结构化字段与未出镜判定规则（POV/空镜/仅道具特写/仅背景路人 → false）；_drift_check_single_frame 程序兜底：character_present=false 时无论 drift_detected 为何均豁免并记 info 日志。TDD TestCharacterPresentExemption 4 例（豁免/正常报/缺字段兼容/prompt 含规则）"
+        },
+        {
+          "id": "M16.4",
+          "name": "全量回归 + core 重部署 + 国漫 E2E 终验",
+          "status": "completed",
+          "notes": "本地回归：后端 600 passed（570→600，+30），85.74% coverage，52.59s；前端 vitest 47/47。rsync backend → core，uvicorn :8100 重启 health 200（期间修复 hunyuanimage 配置键名笔误导致的启动失败）。task pipeline-6ca41498acf7（1集×2镜、国漫、林浅定妆照、run_visual_check=true，成片 final_pipeline-1786007372.mp4）9 步全绿。终验：① 画风链复核全为国漫日系（M15 根治确认）；② M16.2 实战命中：hunyuanimage 主后端连接失败走 SDXL 回退，VLM 双场景检出拼贴/串色并重试，重试版（黑长发白衬衫三联幅 / 蓝白百褶裙单帧）均为最终采用，拼贴→可用关键帧改善显著；③ M16.3 未触发：drift_scenes=[1,2] 仍报 — scene1 仅手部出镜帧判 character_present=true（豁免规则未覆盖肢体局部出镜）假阳性残留，scene2 连帽卫衣为真阳性（反派外貌词串色主角被 H3 继承放大）。残留派生 M17：豁免规则扩充肢体局部出镜 / 多角色外貌分区隔离 / 视频道具文字模糊化"
+        }
+      ]
+    },
+    "M17": {
+      "name": "H3 全模态能力释放（原生 CUT 语法 + 原生音频方向 + FL2VA 双锚定 + ref2va 音视频参考）",
+      "status": "delivered",
+      "summary": "对照 MiniMax H3 官方指南与 :8195 节点签名实测，释放四大未用能力：① 多镜 prompt 从自造 SHOT X: 升级为官方 Context-IR（integrated_multimodal_description + [Shot N] At MM:SS.mmm cuts to，时间戳累计驱动跨镜连续，含保险丝回退）；② 按叙事节拍确定性注入官方音频方向字段 overall_soundscape/non_diegetic_music，节拍意图传导到 BGM/声景；③ fl2va 从首帧单锚定升级为首帧+末帧双锚定（官方对齐指令 Picture 1→0.00s / Picture 2→S.SSs），orchestrator 同集相邻场景链式注入下一镜关键帧，多镜组末帧取组后一镜关键帧实现组间链式连续；④ ref2va 触发条件扩展为图/视频/音频任一非空，LoadVideo→GetVideoComponents 挂 ref_videos+ref_video_audios、LoadAudio 挂 ref_audios（各≤3），prompt 注入 <Video N>/<Audio N> 官方标签引导。实机契约核验：last_frame 输入存在、ref2va 三组 AUTOGROW max=3、:8195 无 /upload/audio（405）全类型统一走 /upload/image。core 全模态 E2E（final_pipeline-1786025948.mp4，1集×2镜多镜组+定妆照+参考视频/音频，成片 6.62s 1080x1920）9 步全绿，工作流取证确认原生 CUT/音频方向/音视频参考全部实际落线；E2E 揪出 P0 存量 bug——多参考图上传全部写死 input.png 互相覆盖塌缩（M10 起存在），修复为 Agent 名+uuid 唯一文件名。全量回归：后端 633/633（85.90%，+33）、前端 vitest 47/47、build 1.00s。",
+      "subtasks": [
+        {
+          "id": "M17.1",
+          "name": "原生 CUT 语法（Context-IR 多镜 prompt）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_video_m17.py",
+            "platform/backend/tests/unit/test_video_multishot.py"
+          ],
+          "notes": "build_multishot_prompt 新增 native_cut 参数（默认 True）：首行 integrated_multimodal_description:，Shot 1 直述，[Shot N] At MM:SS.mmm, the camera cuts to ...（时间戳=前序时长累计）；native_cut=False 或 settings.h3_native_cut_prompt_enabled=False 回退 M11 旧版 SHOT X: 保险丝；M12 节拍视觉指令在原生格式下仍注入对应镜段；TestNativeCutSyntax 6 例 + 多镜旧例断言全量迁移"
+        },
+        {
+          "id": "M17.2",
+          "name": "原生音频方向注入（overall_soundscape / non_diegetic_music）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_video_m17.py"
+          ],
+          "notes": "build_audio_direction(beats) 六节拍确定性映射官方两字段，多节拍组按优先级取最强者（reversal>transition 等）；_append_audio_direction 追加 prompt 尾部（多镜位于 description 之后）；settings.h3_audio_direction_enabled 总开关；TestAudioDirection 8 例（含单镜 fl2va 接线断言 prompt 以 cinematic\\n 开头并含双字段）"
+        },
+        {
+          "id": "M17.3",
+          "name": "FL2VA 首帧+末帧双锚定（含组间链式）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_video_m17.py"
+          ],
+          "notes": "VideoRequest.last_frame_url；build_fl2va_alignment_instruction(duration, last_shot) 生成官方对齐指令前置 prompt 首部；last_frame_url 非空时挂节点 11 LoadImage→last_frame（空串退化 I2VA 向后兼容）；orchestrator 在 h3_last_frame_chain_enabled 下同集相邻场景填入下一分镜关键帧形成链式锚定；多镜组末帧=末场景链式末帧（组后一镜关键帧）实现组间链式连续，无链式末帧回退末场景自身关键帧；TestFL2VAAlignment 6 例"
+        },
+        {
+          "id": "M17.4",
+          "name": "ref2va 全模态参考（音视频参考 + 通用媒体上传）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/agents/base.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_video_m17.py"
+          ],
+          "notes": "VideoRequest/PipelineRunRequest 新增 reference_videos/reference_audios（各≤3，h3_ref_max_videos/audios 截断）；ref2va 触发条件扩展为图/视频/音频任一非空；_inject_r2v_media_refs：LoadVideo(7X)→GetVideoComponents(8X) 挂 ref_videos.ref_video_N + 原声音轨挂 ref_video_audios.ref_video_audio_N，LoadAudio(9X) 挂 ref_audios.ref_audio_N；build_r2v_media_guide 生成 <Video N>/<Audio N> 标签引导（运镜/节奏/剪辑结构 + BGM 风格/声景质感）；base.upload_media_to_comfyui 通用上传保留源扩展名、统一走 /upload/image（实测 :8195 /upload/audio 405）；TestR2VMediaGuide 4 例 + TestR2VMediaInjection 7 例"
+        },
+        {
+          "id": "M17.5",
+          "name": "TDD + 全量回归 + 文档更新",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_video_m17.py",
+            "STATE.json",
+            "TEST_LOG.md"
+          ],
+          "notes": "新增 31 例（原生 CUT 6 + 音频方向 8 + FL2VA 6 + 标签引导 4 + 媒体注入 7），多镜旧例同步原生 CUT 断言；全量回归：后端 631 passed（600→631，86.10% coverage，51.26s）、前端 vitest 47/47、build 1.11s；STATE.json v0.22.0、TEST_LOG.md M17 条目（含实机契约核验表与 M18 派生 3 项）"
+        },
+        {
+          "id": "M17.6",
+          "name": "core 全模态 E2E 终验 + P0 参考图覆盖修复",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/base.py",
+            "platform/backend/tests/unit/test_base.py"
+          ],
+          "notes": "core 重部署后真实全链路（都市悬疑/国漫/1集×2镜/定妆照/参考视频+参考音频/run_quality_check=true），成片 final_pipeline-1786025948.mp4（6.62s，h264 1080x1920+aac，2.26MB）。:8195 history 取证（prompt 68adfb02，status success）：① M17.1 原生 CUT 实线——integrated_multimodal_description + [Shot 2] At 00:03.000, the camera cuts to（时间戳=首镜 3s 累计）；② M17.2 音频方向实线——overall_soundscape/non_diegetic_music 按 hook 节拍注入；③ M17.4 全模态实线——ref_videos.ref_video_0←GetVideoComponents[80].0、ref_video_audios←[80].1（原声轨）、ref_audios.ref_audio_0←LoadAudio[90]，prompt 含 <Video 1>/<Audio 1> 标签引导；多镜组输出 video_multishot_1_2_00008_.mp4 经 ffmpeg 切分为 video_scene_1/2.mp4。P0 发现：4 个 LoadImage（关键帧+三视图）全部 input.png——upload_image_to_comfyui 写死文件名+overwrite=true，顺序上传互相覆盖，M10 起所有多参考图工作流实际只用最后一张图；修复为 {agent}_{uuid8}.png 唯一命名，test_base.py +2 例（唯一性/缺 name 回退）。回归 633/633（85.90%），修复已 rsync core 并重启 :8100（health 200）。FL2VA 双锚定本次未走（组带定妆照优先 ref2va，符合设计），单测覆盖"
+        }
+      ]
+    },
+    "M18": {
+      "name": "参考图修复红利验证 + 参考图集质量根治",
+      "status": "completed",
+      "summary": "M17.5 P0 修复（input.png 塌缩）后的红利量化验证：同参数修复版 E2E（pipeline-7b0cd7cbfc3c，1集×3场景，final_pipeline-1786033502.mp4 9.46s，901s 全绿）vs bug 基线帧级对照。修复实线确认（:8195 history prompt 31fe464b：7 个 LoadImage 文件名互异、ref_images 7 组独立挂接、音视频参考正常）；跨镜角色一致性显著提升（3 场景统一为同一马尾便利店员形象，bug 版 2 场景形象不一）。但 drift 未消除（3/3 判漂移，VLM 真阳性），根因升级为参考图集内部矛盾：① char_001 side 实为无关白发少女、char_002 side 实为 16 格眼睛画法参考表（角色 side 视图生成失败且无质检拦截，废品混入 ref 组）；② 分镜关键帧（黑长直发）与定妆照 front（短碎发）外貌冲突；③ H3 输出半写实厚涂 vs 参考图卡通平涂系统性画风漂移。派生 M18.2 三视图生成 VLM 质检 / M18.3 关键帧以定妆照为图像参考锚定 / M18.4 H3 画风漂移治理。",
+      "subtasks": [
+        {
+          "id": "M18.1",
+          "name": "参考图修复红利验证（bug 基线 vs 修复版帧级对照）",
+          "status": "completed",
+          "files": [
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "bug 基线备份 output/m17_bug_baseline/（4 个 LoadImage 全 input.png）；修复版 E2E 9 步全绿（成片 9.46s/3 段）。工作流取证：7 个 LoadImage 全部 video_agent_<uuid8>.png 互异，ref_videos/ref_audios 挂接正常——P0 修复实线。帧级对照：跨镜一致性显著提升（3 场景角色统一），但与定妆照仍未对齐、drift 3/3 真阳性。7 张参考图原件逐张核验发现三重矛盾：side 视图废品（白发少女/眼睛参考表）、关键帧与定妆照发型冲突、H3 厚涂 vs 平涂画风漂移。TEST_LOG.md 新增 2026-08-07 M18.1 条目（含 7 图核验表与 M18.2/3/4 派生）"
+        },
+        {
+          "id": "M18.2",
+          "name": "角色三视图生成质检（VLM 校验 side/closeup 与 front 同角色同画风）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_character_agent.py",
+            "platform/backend/tests/conftest.py",
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "拦截 side 视图生成失败产物（无关角色/素材参考表）混入 ref 组；失败自动重生成。实现：front 自检（单人/非素材表/外貌符合/画风符合）+ side/closeup 与 front 双图比对（发色/发型/服装），不合格换 seed 重生成（最多 2 次），重试耗尽抛错阻断入库；VLM 未配置/异常/坏 JSON 一律 fail-open；开关 character_view_qc_enabled（回滚置 False）。TDD 9 例先红后绿；全量回归 642 passed（633→642）/ coverage 86.19% / vitest 47 / build 881ms"
+        },
+        {
+          "id": "M18.3",
+          "name": "分镜关键帧外貌锚定（以定妆照 front 为图像参考生成关键帧）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py",
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "消除关键帧（长发）与定妆照（短发）外貌冲突；M16 外貌锚定贯通到关键帧生成环节。实现：SDXL 路径注入 IPAdapter 节点组（IPAdapterModelLoader ip-adapter_sdxl_vit-h + CLIPVisionLoader ViT-H + LoadImage 定妆照 front + IPAdapterAdvanced weight=0.6），KSampler model 重定向；锚定图取角色资产库首个有 front 的角色；无定妆照/开关关闭/上传异常一律回退原工作流（增强非阻断）；外貌重试携带锚定。开关 storyboard_keyframe_anchor_enabled（回滚置 False）。TDD 10 例先红后绿。运维待办：IPAdapter+CLIP-Vision 模型分发 workstation/pc01/pc02 + extra_model_paths.yaml 映射 + 重启 ComfyUI（合入实机联合验证前完成）"
+        },
+        {
+          "id": "M18.4",
+          "name": "H3 画风漂移治理（参考图平涂 vs 输出厚涂）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/config.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/tests/unit/test_video_agent.py",
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "约束+检测+纠偏三层。约束：apply_h3_style_anchor 统一接线 fl2va/r2v/多镜三路径（冲突词清洗+幂等风格尾，r2v 风格尾位于参考图引导语前，多镜组级基准逐镜兜底）；检测：产出视频中点帧（ffprobe 中点+ffmpeg 抽帧）送 VLM 判定渲染风格，异常/坏 JSON fail-open；纠偏：漂移前置 strengthen_h3_style_clause 强化子句+换 seed 重提交（max_retries=1），重试耗尽放行最后结果不阻断生产；仅单镜 QC，多镜组级由约束层治理。VideoRequest 新增 style 字段（orchestrator 透传，空串跳过）。开关 h3_style_anchor_enabled/h3_style_qc_enabled（回滚置 False）。TDD 18 例先红后绿；全量回归 645 passed（642→645 口径为 tests/unit 全量）/ coverage 83.02% / vitest 47 / build 811ms。实机 E2E（drift 判定率 vs M18.1 基线 3/3）待 M18.3 运维完成后联合验证"
+        },
+        {
+          "id": "M18.5",
+          "name": "M18.3 运维分发 + 三里程碑联合实机 E2E（对照 M18.1 基线 drift 3/3）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/image_service.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_storyboard_agent.py",
+            "platform/backend/.env",
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "运维三件事完成：① IPAdapter plus-face_sdxl + CLIP-ViT-H 分发 workstation/pc01/pc02 三 LB 后端核验齐全；② COMFYUI_LB_BACKEND_URLS 三后端直连清单配置，定妆照同名复制规避 LB 轮询单点 400；③ pc02 ComfyUI 静默崩溃经计划任务 MountNAS+StartComfyUI 救援恢复 200。联合 E2E（pipeline-dd4c074a73ac，core 实机 1591s，同 M18.1 参数）：M18.2 严格拦截 char_001/002 全部三视图（front/side/closeup 连续 3 次不合格未入库，废品拦截设计目标达成）；M18.3 锚定以资产库 char_001 front 注入并复制三后端（pc02 崩溃窗口 2/3 成功仍注入，部分失败不阻断与设计一致）；M18.4 QC 零运行 — 根因 orchestrator _step_video 漏传 VideoRequest.style，fail-open 静默跳过，已 TDD 修复（先红 assert '' == '国漫' 后绿，新增 test_style_propagated_to_video_request）并同步 core 待重启。drift 对照：M18.1 基线 3/3 → 本轮 2/2（pc02 崩溃致 scene_1 缺失样本缩为 2），M18.4 未实际运行故漂移治理效果不可归因，待 core 重启后重跑同参数 E2E 再下结论。附带修复：HunyuanImage /v1/v1 404（image_service.py 三处去重）；storyboard 旧用例与本地 .env LB 清单隔离。全量回归 649 passed / coverage 83.07%。"
+        },
+        {
+          "id": "M18.6",
+          "name": "core 重启生效 + M18.4 QC 实机验证（两轮 E2E）",
+          "status": "completed",
+          "files": [
+            "platform/backend/.env (core 侧临时切换，已还原)",
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "core 重启加载 style 透传 + HunyuanImage 404 两项修复。第一轮（pipeline-badd72391e7e，同 M18.1 参数）：9 步全绿 storyboard/video 3/3；pc02 再次静默崩溃经计划任务救援恢复；M18.2 持续拦截（林远 side / 苏清 closeup 各连续 3 次不合格未入库）；M18.4 QC 未实跑（多镜组一次成功，组级 QC 按设计跳过）；drift 3/3 但指标被资产库陈旧参考污染。关键发现：① HunyuanImage 服务侧新故障 No module named 'hyimage.pipelines'（404 修复后请求已到达服务，服务 import 层损坏，workstation 待修），全链路回退 SDXL；② 新缺口 — M18.2 拦截后 _collect_character_reference_images 按 character_id 静默命中 M18.1 旧资产（林默/林小满 vs 本轮林远/苏清），ref2va 参考与视觉对照基准双双错配，drift 失去意义，派生候选：资产库按剧本指纹隔离/拦截后置空引用/资产版本化（待决策）。第二轮（pipeline-a91a8cfc2fa6，临时 H3_MULTISHOT_ENABLED=false 强制逐场景，验证后已还原并重启 health 200）：M18.4 检测+纠偏层首次实机全链路运行 — scene_1 检出画风漂移（写实渲染缺国漫线条/平涂/赛璐璐特征）→ strengthen_h3_style_clause 强化锚定换 seed 重生成 1/1 → 重试仍判漂移（3D 写实 CG 质感）→ 重试耗尽 fail-open 放行（不阻断生产）；scene_2/3 首检通过静默放行。结果 storyboard/video 3/3、成片 9.17s、quality 75、drift=[2,3]（scene_1 即唯一经 QC 纠偏场景恰为唯一过视觉对照者，提示性证据不作强归因）；pc02 全程健康复制零失败。M18 收官：约束/检测/纠偏三层全部实跑验证；drift 干净量化受资产库缺口阻塞列入后续候选。本轮无代码变更，全量回归维持 649 passed / 83.07%。"
+        }
+      ]
+    },
+    "M19": {
+      "name": "MiniMax H3 Turbo LoRA 可选加速",
+      "status": "delivered",
+      "summary": "为 MiniMax H3 视频后端增加可选 Turbo LoRA 加速路径，默认关闭不影响高质量短剧流程；实现工作流动态改造、配置开关、单元测试与实机 A/B 验证（原生 20 步 218.3s vs Turbo 6 步 74.4s，加速比 2.93×）。",
+      "subtasks": [
+        {
+          "id": "M19.1",
+          "name": "可选加速配置项",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/config.py"
+          ],
+          "notes": "新增 h3_turbo_enabled（默认 False）/h3_turbo_lora_name/h3_turbo_steps/h3_turbo_strength/h3_turbo_low_vram；默认关闭保持原生 20 步高质量路径"
+        },
+        {
+          "id": "M19.2",
+          "name": "工作流动态改造",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/agents/video_agent.py"
+          ],
+          "notes": "_apply_h3_turbo_to_workflow 在 UNETLoader 后插入 MiniMaxH3TurboLoRA 节点、重定向 model 链路、替换 KSamplerSelect 为 MiniMaxH3TurboSampler、steps 切换为 h3_turbo_steps；兼容 FL2VA/R2V/多镜三路径"
+        },
+        {
+          "id": "M19.3",
+          "name": "单元测试",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_video_agent.py"
+          ],
+          "notes": "TestH3TurboWorkflowTransformation 6 用例：默认关闭不变、FL2VA/R2V 注入、steps 配置、LoRA 自身 model 输入不被误改"
+        },
+        {
+          "id": "M19.4",
+          "name": "实机 A/B 测试与文档归档",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/integration/test_h3_turbo_ab.py",
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "合成 9:16 关键帧，原生 20 步 210.2s / 1.49MB vs Turbo 6 步 74.1s / 2.32MB，加速比 2.84×，两模式均成功；测试默认 -m slow 跳过，不进入日常回归"
+        }
+      ]
+    },
+    "M20": {
+      "name": "长视频分块续写 PoC（H3 I2V 帧链）",
+      "status": "delivered",
+      "summary": "长视频路线 A 首次实机打通：chunk i+1 首帧 = chunk i 末帧（ffmpeg 抽取上传 ComfyUI input），逐块透传角色参考图与画风锚定，concat 拼接成长视频；默认关闭不影响高质量短剧流程。实机 2×5s 帧链 490.3s，拼接时长 10.38s，接缝帧差 9.00/255 目视无跳变。",
+      "subtasks": [
+        {
+          "id": "M20.1",
+          "name": "视频帧工具层",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/long_video_service.py"
+          ],
+          "notes": "extract_last_frame（-sseof -0.1 尾部定位）/ concat_videos（demuxer 重编码消缝）/ probe_video_duration（ffprobe）"
+        },
+        {
+          "id": "M20.2",
+          "name": "帧链编排服务 + 配置开关",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/long_video_service.py",
+            "platform/backend/app/config.py",
+            "platform/backend/.env.example"
+          ],
+          "notes": "LongVideoService.generate 帧链编排；long_video_enabled/max_chunks=4/chunk_seconds=5/frame_prefix，默认关闭"
+        },
+        {
+          "id": "M20.3",
+          "name": "单元测试",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/unit/test_long_video_service.py"
+          ],
+          "notes": "11 用例：ffmpeg/ffprobe 命令、帧链传递、透传、截断、fail-fast、开关、空 prompt"
+        },
+        {
+          "id": "M20.4",
+          "name": "实机 GPU PoC 与文档归档",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/integration/test_long_video_poc.py",
+            "platform/backend/test_artifacts/longvideo_poc/",
+            "TEST_LOG.md",
+            "STATE.json"
+          ],
+          "notes": "2 块 × 5s 原生 H3：elapsed 490.3s，final 10.38s/3.78MB，接缝帧差 9.00/255；seam_pre/seam_post 目视一致；测试 -m slow 默认跳过"
+        }
+      ]
+    },
+    "M21": {
+      "name": "长视频拉长验证 + 漂移量化 + LongVideoPlanner 主流水线集成",
+      "status": "delivered",
+      "summary": "4×14s 拉长验证（总时长 57.56s，目标 56-58s 达成）；DriftMetricsService 三指标量化（角色特征保持度/情感一致性/动作连贯性，VLM 评分+趋势斜率+异常标注）；LongVideoPlanner 场景识别/镜头切换/语义连贯性拆块，经 video_mode=long 接入 pipeline_orchestrator，13 项 E2E 全过。",
+      "subtasks": [
+        {
+          "id": "M21.1",
+          "name": "DriftMetricsService 漂移量化",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/drift_metrics_service.py",
+            "platform/backend/tests/unit/test_drift_metrics_service.py"
+          ],
+          "notes": "VLM 逐块抽帧评分；fidelity/emotion 斜率（最小二乘）+ 端点增量 + 接缝像素差/动作连贯性；阈值异常标注与改进建议自动生成"
+        },
+        {
+          "id": "M21.2",
+          "name": "拉长验证 56s 漂移观测",
+          "status": "completed",
+          "files": [
+            "platform/backend/tests/integration/test_long_video_drift_56s.py",
+            "platform/reports/M21.2/"
+          ],
+          "notes": "4×14.38s=57.56s 达成；生成 4526s；保持度斜率 -0.87/块（较上轮 -5.23 显著改善），3 处接缝跳变异常；产物持久化 artifacts_20260811_010211"
+        },
+        {
+          "id": "M21.3",
+          "name": "LongVideoPlanner + orchestrator 集成",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/long_video_planner.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/tests/integration/test_pipeline_long_video_e2e.py"
+          ],
+          "notes": "场景指纹分组/镜头切换检测/语义连贯性评分（跨集封顶 0.45）/贪心装箱+超长续写子块；video_mode=long 接口对接，13 E2E 通过"
+        }
+      ]
+    },
+    "M22": {
+      "name": "路线 B：LongCat-Video 原生长视频部署与 A/B 对比",
+      "status": "delivered",
+      "summary": "LongCat-Video 部署 workstation（GPU2 独占维护窗口）；_TextEncoderStub 修复预编码模式下 _cache_clean_latents 崩溃；全量基准 10 段 59.5s：stage1(480p) 8808.6s@0.101fps + refine(720p BSA) 2151.9s@0.83fps，GPU 峰值 86.2GiB/利用率均值 98.7%。A/B 对比：MOS A=4.42/B=4.83（B 时序一致性 5.0 vs 3.83 消除接缝跳变），效率 A 快 2.4 倍；结论：默认路线 A，B 用于质量敏感场景。",
+      "subtasks": [
+        {
+          "id": "M22.1",
+          "name": "LongCat 部署 + 冒烟 + refine 探测",
+          "status": "completed",
+          "files": [
+            "platform/backend/scripts/benchmark_longcat.py"
+          ],
+          "notes": "torch2.8+cu128/flash-attn 2.8.3 环境修复；prompt 独立进程预编码落盘（UMT5 卸载泄漏规避）；720p BSA refine 探测 199.8s/段，峰值 85.7GiB"
+        },
+        {
+          "id": "M22.2",
+          "name": "全量基准 + A/B 对比报告",
+          "status": "completed",
+          "files": [
+            "platform/backend/scripts/benchmark_longcat.py",
+            "platform/backend/scripts/run_route_ab_comparison.py",
+            "platform/reports/M22.2/"
+          ],
+          "notes": "systemd-run 托管（免疫 ssh 会话 scope 清理）；59.5s 双阶段产物 + 5334 条资源采样；MOS/效率/资源三维对比报告含结论建议"
+        }
+      ]
+    },
+    "M23": {
+      "name": "项目审查：AGENTS 统一版 + 激进清理 + 下载器打通 + LTX-2.5 双引擎",
+      "status": "delivered",
+      "summary": "六大任务：① 融合 ToIV AGENTS.md 为统一版（设备 18 台/LTX-2.5:8198/LongCat:8197/超分 fleet/VLM 与 ASR 迁移/易错点 13-19）；② 激进清理失效服务死代码（删 7 服务/Agent+7 测试+5 脚本，image_backend→sdxl、video_backend 收敛 h3/comfyui，摘 langgraph/react-query）；③ 打通下载器↔工作台（model_registry_service + GET /models/registry 融合 lora_manifest 与下载器 models.json）；④ liblib.tv 对标方案文档；⑤ LTX-2.5 接入 + H3/LTX 提示词扩写 + 质量参数；⑥ 技术文档更新。版本 0.4.0。",
+      "subtasks": [
+        {
+          "id": "M23.1",
+          "name": "AGENTS.md 统一版（融合 ToIV）",
+          "status": "completed",
+          "files": [
+            "AGENTS.md"
+          ],
+          "notes": "新增第一/二硬性规则；设备清单 17→18 台；GPU 表融合 LTX-2.5/LongCat/超分 fleet/SenseVoice/JoyCaption/VLM 迁 studio04/ASR 迁 studio02；易错点 13-19；第八节项目架构速览；Core 状态修正为已运行"
+        },
+        {
+          "id": "M23.2",
+          "name": "激进清理失效服务死代码",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/config.py",
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/agents/storyboard_agent.py",
+            "platform/backend/app/routers/drama.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/.env.example"
+          ],
+          "notes": "实测 :8288/:8289/:8290/:8301 CLOSED、:8600 损坏、:8601 未部署、pc01 LTX-2B 被 :8198 替换；删 xdit/latentsync/postprocess/ltx_video/image 5 服务 + lip_sync/postprocess 2 agent + 7 测试 + 5 脚本；回归 608 passed/82.60%"
+        },
+        {
+          "id": "M23.3",
+          "name": "下载器↔工作台打通（模型注册表）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/model_registry_service.py",
+            "platform/backend/app/routers/drama.py",
+            "platform/frontend/src/api/client.ts",
+            "platform/backend/tests/unit/test_model_registry_service.py"
+          ],
+          "notes": "融合 lora_manifest(trigger_words/weight) + 下载器 models.json(已下载事实)，标注 downloaded；GET /api/drama/models/registry + 前端 getModelRegistry；前端同步删除唇形/后处理残留（vitest 47→42）"
+        },
+        {
+          "id": "M23.4",
+          "name": "liblib.tv 对标优化方案（不实现）",
+          "status": "completed",
+          "files": [
+            "docs/LIBLIB_BENCHMARK_PROPOSAL.md"
+          ],
+          "notes": "10 条借鉴点按价值排序：主体库@引用/锚点重拍/模型卡片注册/画布模板库/宫格分镜/智能拉片/提示词助手/素材库/成本预估/LoRA 数据集导出；差异化边界明确"
+        },
+        {
+          "id": "M23.5",
+          "name": "LTX-2.5 接入 + H3/LTX 提示词扩写 + 质量参数",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/ltx25_video_service.py",
+            "platform/backend/app/services/prompt_expander.py",
+            "platform/backend/app/agents/video_agent.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/tests/unit/test_ltx25_video_service.py",
+            "platform/backend/tests/unit/test_prompt_expander.py",
+            "platform/backend/tests/unit/test_video_engine_route.py"
+          ],
+          "notes": "LTX25VideoService（T2V/I2V/FLF2V 两阶段管线）；prompt_expander（ShotSpec IR + H3ContextIR/LTXProse 双编译器 + validate_h3_prompt + recommended_quality_params）；route_video_engine 路由（台词/参考→H3，长镜/运动→LTX，回退链 ltx→h3→comfyui）；676 passed/83.52%；节点名/权重文件名实机核验清单已列"
+        },
+        {
+          "id": "M23.6",
+          "name": "技术文档更新至当前架构",
+          "status": "completed",
+          "files": [
+            "platform/README.md",
+            "docs/TECHNICAL_DESIGN.md",
+            "docs/DEPLOYMENT.md",
+            "README.md",
+            "docs/USER_GUIDE.md"
+          ],
+          "notes": "全部更新为 2026-08 真实架构（双引擎视频/SDXL 图像/spark02 LLM/pnpm/0.4.0）；历史归档文档（TEST_LOG/STATE.json 等）未动"
+        }
+      ]
+    },
+    "M24": {
+      "name": "LibTV 对标一期：任务卡片实现 + 深色重设计 + 全面测试",
+      "status": "delivered",
+      "summary": "① M24.1 主体库@引用（mention_service 三级匹配 + POST /assets/resolve-mentions + 18 测试）；② M24.2 锚点重拍基座（VideoRequest.seed/lock_params u64 语义 + shot_params.json 两阶段落盘 + 14 测试）；③ M24.3 下载器 trigger_words 落盘（ModelRecord serde(default) + resolved_to_record 取词 + 4 Rust 测试）；④ 全面系统测试（869 项用例，868 通过，覆盖率 86.54%，P1×1+P2×1+P3×2 问题清单）；⑤ LibTV×MiniMax 前端重设计（:root 60+ 令牌深色化 + LeftRail/AssetLibraryPanel/AgentBar 三组件 + DramaNode 节点色深色适配）；⑥ AssetLibraryPanel 详细 console 日志 + LeftRail/AssetLibraryPanel 15 个单元测试。前端 vitest 42→57。",
+      "subtasks": [
+        {
+          "id": "M24.1",
+          "name": "主体库@引用（mention_service + API）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/services/mention_service.py",
+            "platform/backend/app/routers/drama.py",
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/tests/unit/test_mention_service.py"
+          ],
+          "notes": "extract_mentions 正则提取 + exact/ci/fuzzy 三级匹配（长度差最小优先）+ 定妆照映射 + 锁定卡展开文本；POST /api/drama/assets/resolve-mentions；MAX_MENTIONS=20 防滥用；18 测试全绿"
+        },
+        {
+          "id": "M24.2",
+          "name": "锚点重拍基座（seed/lock_params + shot_params.json）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_video_shot_params.py",
+            "platform/backend/tests/conftest.py"
+          ],
+          "notes": "VideoRequest.seed（u64 语义 ge=0 le=2^64-1）+ lock_params（JSON 对象）；orchestrator._save_shot_params 两阶段落盘 output/pipeline/{id}/shot_params.json；conftest 快照目录重定向防污染；14 测试全绿"
+        },
+        {
+          "id": "M24.3",
+          "name": "下载器 trigger_words 落盘",
+          "status": "completed",
+          "files": [
+            "src/main.rs"
+          ],
+          "notes": "ModelRecord 加 #[serde(default)] trigger_words；resolved_to_record 从选中版本 trainedWords 取词；record_task_to_index 经 existing_trigger_words 保留；4 新 Rust 测试，cargo test 46 passed"
+        },
+        {
+          "id": "M24.4",
+          "name": "全面系统测试报告",
+          "status": "completed",
+          "files": [
+            "docs/TEST_REPORT_M24.md"
+          ],
+          "notes": "869 项用例 868 通过；实机 API 47 项（功能/验证/安全/边界/CRUD/性能/异步）；P1 DNS 不可恢复重试 10s、P2 React Flow console TypeError、P3 资产库无 POST 端点（设计决策）"
+        },
+        {
+          "id": "M24.5",
+          "name": "LibTV×MiniMax 前端重设计",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/index.css",
+            "platform/frontend/src/components/nav/LeftRail.tsx",
+            "platform/frontend/src/components/panels/AssetLibraryPanel.tsx",
+            "platform/frontend/src/components/agent/AgentBar.tsx",
+            "platform/frontend/src/App.tsx",
+            "platform/frontend/src/components/canvas/DramaNode.tsx",
+            "platform/frontend/src/components/modals/shared.tsx",
+            "platform/frontend/src/components/modals/ScriptModal.tsx",
+            "platform/frontend/src/store/useDramaStore.ts",
+            "platform/frontend/src/api/client.ts"
+          ],
+          "notes": "MiniMax 实测令牌深色化（#141414 层级 + #09CAF5 青主色 + 黑字 CTA）；LibTV IA 三组件（52px LeftRail/320px 资产抽屉/底部 AgentBar→draftPremise 预填剧本模态）；DramaNode 9 类节点色深色适配；浏览器两轮 12 项验证全过"
+        },
+        {
+          "id": "M24.6",
+          "name": "组件测试与调试日志",
+          "status": "completed",
+          "files": [
+            "platform/frontend/src/components/panels/AssetLibraryPanel.tsx",
+            "platform/frontend/src/components/nav/LeftRail.test.tsx",
+            "platform/frontend/src/components/panels/AssetLibraryPanel.test.tsx"
+          ],
+          "notes": "AssetLibraryPanel 全链路 console 日志（[AssetLibrary] 前缀：panel 切换/fetch 生命周期/渲染分支/缩略图失败）；LeftRail 7 测试 + AssetLibraryPanel 8 测试；vitest 42→57"
+        }
+      ]
+    },
+    "M25": {
+      "name": "LibTV 对标二期：AutoLink/模板库/消息流（规划跟踪）",
+      "status": "planning",
+      "summary": "基于 LibTV 深度调研（docs/LIBTV_DEEP_RESEARCH.md）制定的优化方案（docs/LIBTV_OPTIMIZATION_PLAN.md）。8 个优化项按 P0-P3 排期，进度双轨跟踪（本文件 + 优化方案文档状态表）。质量门禁：测试全绿/tsc 0/GPU 服务真机验证/STATE+TEST_LOG 更新/深色令牌体系。",
+      "subtasks": [
+        {
+          "id": "M25.1",
+          "name": "单镜头锚点重拍（前端入口）",
+          "status": "completed",
+          "priority": "P0",
+          "notes": "POST /video/rerun-shot（快照重建+reseed 开关+成功回写+失败隔离）+ rerunShot API + VideoModal 锚点重拍/换 seed 双按钮；后端 9 测试全绿"
+        },
+        {
+          "id": "M25.2",
+          "name": "AutoLink 自动资产匹配",
+          "status": "completed",
+          "priority": "P1",
+          "notes": "mention_service.auto_link_characters（精确/CI 包含、无 fuzzy、同位最长优先）+ storyboard_agent._apply_auto_link 前置挂接（外观锁定卡+M18.3 锚定自动生效）+ auto_link_assets_enabled 全局开关/请求级覆盖/batch 传播；16 新测试全绿"
+        },
+        {
+          "id": "M25.3",
+          "name": "画布工作流模板库",
+          "status": "pending",
+          "priority": "P1",
+          "notes": "genre_tropes → GET /pipeline/templates + ScriptModal 模板起手"
+        },
+        {
+          "id": "M25.4",
+          "name": "提示词助手前端化",
+          "status": "completed",
+          "priority": "P1",
+          "notes": "PromptToolkit 组件（风格预设 chips/AI 补全 agentAssist expand/权重语法实时预览）接入 StoryboardModal+VideoModal；8 组件测试全绿"
+        },
+        {
+          "id": "M25.5",
+          "name": "会话式任务消息流",
+          "status": "pending",
+          "priority": "P2",
+          "notes": "session+seq 增量拉取，断线续传进度"
+        },
+        {
+          "id": "M25.6",
+          "name": "全局素材库",
+          "status": "pending",
+          "priority": "P2",
+          "notes": "产物聚合端点 + AssetLibraryPanel 素材 Tab"
+        },
+        {
+          "id": "M25.7",
+          "name": "宫格分镜快速草稿",
+          "status": "pending",
+          "priority": "P3",
+          "notes": "3×3 宫格一次生成 + 切分；参照 DramaClaw grid_splitter"
+        },
+        {
+          "id": "M25.8",
+          "name": "生成前成本预估",
+          "status": "pending",
+          "priority": "P3",
+          "notes": "耗时统计 + LB 后端健康可视"
+        },
+        {
+          "id": "M25.9",
+          "name": "线稿先行两段式分镜",
+          "status": "completed",
+          "priority": "P1",
+          "notes": "路径 C 混合式落地：C1 草图两段式——后端 sketch_mode 参数化 SDXL 工作流（8 步/CFG4/512×896）+ refine_seed 同 seed 精绘防漂移 + StoryboardResult.is_sketch/sketch_seed；前端 StoryboardModal 两段式确认流（生成线稿→预览→采用构图并精绘/重出/弃用，默认开启）；C2 失败模式注册表 failure_registry（存储+种子+negative 注入+VLM 门禁回写，collage_mismatch/black_and_white_drift/legible_text_leak 等预置）；配套 P1 model_gateway 本地服务统一路由"
+        },
+        {
+          "id": "M25.10",
+          "name": "场景参考图资产化（轻量导演世界）",
+          "status": "pending",
+          "priority": "P2",
+          "notes": "DramaClaw Director World 轻量平替：场景库+参考图跨镜复用，不做 3GS"
+        },
+        {
+          "id": "M25.11",
+          "name": "回放捕获测试基建",
+          "status": "pending",
+          "priority": "P2",
+          "notes": "DramaClaw replay_capture 思路：录制真实响应离线回放，消除外网依赖测试失败"
+        }
+      ]
+    },
+    "M26": {
+      "name": "全面测试工程：后端 100% 语句覆盖 + 四层测试体系",
+      "status": "delivered",
+      "summary": "① 单元：8 Agent 并行补 355 用例（12 个 boost 文件），后端 815→1170 passed，覆盖率 87.83%→100.00%（5877 语句 0 未覆盖）；4 行证明不可达死代码按标准 pragma: no cover 标注；② 集成：tests/integration 非 slow 全绿；③ 系统：10 服务端点全在线 + LLM/Embedding 真实调用 + SDXL 三路/animagine/LTX 真机冒烟全过；④ 验收：8 步编排/角色一致性/双引擎路由/网关/前端 110 vitest 全过；⑤ 缺陷：D1 pyproject slow 标记未配默认跳过（P1 已修 addopts）+ 今日 D2 IPAdapter 名错/D3 LTX 模块重写/D4 animagine 补库（详见报告）；⑥ 前端覆盖率 38.0%→100%（M26.4 本轮完成：6 Agent 补 405 用例，另修 2 个真实 bug——NodeDetailPanel 保存并重新生成 premise 校验死锁、layout.ts loading 高度死分支；清理 DramaNode 死代码）；⑦ 报告 platform/reports/TEST_REPORT_2026-08-16.md。",
+      "subtasks": {
+        "M26.1": "单元测试补齐 355 用例，后端 100.00% 语句覆盖",
+        "M26.2": "集成/系统/验收三层验证全绿",
+        "M26.3": "缺陷修复 D1-D5 + 测试报告留档",
+        "M26.4": "前端覆盖率 37.99%→100% 语句/行覆盖（515 vitest，+405 用例；branch 94.54%）"
+      },
+      "tests": "1170 passed / 100.00%（backend）；515 vitest / 100% stmts+lines（frontend）；46 cargo（10 ignored）",
+      "completed_at": "2026-08-16"
+    },
+    "M27": {
+      "name": "系统设置全面更新：NAS 模型库浏览 + 模型下载整合 + NSFW 门禁",
+      "status": "delivered",
+      "summary": "① NAS 模型库（M27.2）：nas_library_service.py 扫描 config 配置的模型根目录（checkpoints/loras/vae/embeddings/controlnet/upscale_models 等白名单子目录），输出名称/大小/类型/相对路径/修改时间/NSFW 标记，TTL 缓存 + refresh 强制重扫 + 类型过滤 + 名称模糊搜索；GET /api/models/library。② 下载整合（M27.3）：model_download_service.py 对接主项目 Rust 下载器同源能力——Civitai 搜索 API（GET /api/models/search）+ 后台线程下载任务（进度/速度/取消/SHA256 校验/子目录白名单防路径穿越），GET /api/models/downloads + POST /api/models/download + DELETE 取消；目标目录与 NAS 模型库同一套根目录，下载完成即入库，与其他功能无缝衔接。③ NSFW 门禁（M27.4）：settings_service.py 持久化开关 + PIN 管理（salt+sha256 哈希存储，首启强制设 PIN，支持解锁/锁定/改 PIN）；文件名 NSFW 关键词自动分级；未解锁时模型库过滤 NSFW 条目、NSFW 下载请求 403 拦截；GET/POST /api/settings/nsfw。④ 前端（M27.5）：ModelLibraryPanel 三页签（注册表/NAS 模型/下载）+ NSFW 锁按钮；NAS 页签展示名称/类型徽章/大小/修改日期 + 搜索 + 刷新；下载页签 Civitai 搜索→选版本→一键下载→任务进度条/取消；NsfwGateModal 四种模式（首设 PIN/解锁/锁定/改 PIN）；store 新增 nsfwEnabled/nsfwHasPin 启动时同步。⑤ 回归（M27.6）：后端 1170→1248 passed（+78 用例）保持 100.00% 覆盖；前端 520→569 vitest（+49 用例）；tsc 0 errors。",
+      "subtasks": {
+        "M27.1": "侦察：后端/前端结构、Rust 下载器功能清单、NAS 通道确认",
+        "M27.2": "NAS 模型库浏览 API（名称/大小/类型/修改日期 + 过滤/搜索/缓存）",
+        "M27.3": "下载整合：Civitai 搜索 + 后台下载任务 + SHA256 校验 + 进度/取消",
+        "M27.4": "NSFW：PIN 门禁 + 开关管理 + 模型自动分级 + 下载/浏览双向拦截",
+        "M27.5": "前端：ModelLibraryPanel 三页签 + NsfwGateModal + store/样式",
+        "M27.6": "全量回归 1248 passed/100% + 569 vitest + tsc 0，文档归档"
+      },
+      "tests": "1248 passed / 100.00%（backend，+78）；569 vitest passed（frontend，+49）；tsc 0 errors",
+      "completed_at": "2026-08-16"
     }
   },
   "current_session": {
-    "session_id": "2026-08-04-m9-canvas-backfill",
-    "goal": "M9 全链路结果回填画布：一键生成 → 画布微调 → 局部重跑闭环",
-    "previous_session_archived": "2026-08-04-m8-pipeline-frontend",
+    "session_id": "2026-08-27-aigcpannel-fusion-wave1",
+    "goal": "第一波融合：单一根 AIGCPannel；启动脚本 + panel status + 导航模型库/引擎；远程仓暂不改名",
+    "previous_session_archived": "2026-08-15-dramaclaw-refactor",
     "tasks": {
-      "T1": {
-        "name": "后端报告内嵌完整剧本",
-        "status": "completed",
-        "files": [
-          "platform/backend/app/services/pipeline_orchestrator.py"
-        ],
-        "notes": "steps.script.data = script.model_dump()，报告自包含"
+      "W1": {
+        "name": "代码第一波融合落盘",
+        "status": "landed_uncommitted",
+        "notes": "start-aigcpannel.sh :8100/:3501；start-engine.sh DashBox :8080/:8780；NOTICE ELv2；crate 仍 comfy-downloader；删 platform/deploy 下 deepfilternet/hunyuanimage/latentsync/video-enhance/xdit-video，保留 comfyui-lb；LeftRail 模型库/引擎；GET /api/panel/status。未 commit/push。ToIV 未动。"
       },
-      "T2": {
-        "name": "前端提取函数 + 加载到画布按钮",
-        "status": "completed",
-        "files": [
-          "platform/frontend/src/api/client.ts",
-          "platform/frontend/src/components/modals/PipelineModal.tsx",
-          "platform/frontend/src/components/ui/Icon.tsx"
-        ],
-        "notes": "extractScriptFromReport 防御性解析；任务成功后操作栏显示「加载到画布」，setScriptData 回填 store"
-      },
-      "T3": {
-        "name": "测试与全量回归",
-        "status": "completed",
-        "notes": "前端 46/46（新增 3 用例）、后端 420/420（84.48%）、tsc 0、build 成功"
-      },
-      "T4": {
-        "name": "部署 core 实测",
-        "status": "completed",
-        "notes": "rsync + 重启；health/前端 200；E2E 任务验证终态报告 script.data 完整"
-      },
-      "T5": {
-        "name": "文档更新",
-        "status": "completed",
-        "notes": "STATE.json M9 + TEST_LOG.md M9 时序条目"
+      "W1b": {
+        "name": "融合收尾",
+        "status": "landed_uncommitted",
+        "notes": "CORS 去掉 localhost:1420；frontend 无 @tauri-apps；platform/backend/.venv 重建；引擎页手动刷新探测 :8080/:8780。crate/安装器/GitHub URL 仍旧。远程仓等用户点头再两边一起改。"
       }
     }
   },
   "test_summary": {
     "backend": {
-      "total": 420,
-      "passed": 420,
-      "failed": 0,
-      "coverage": "84.48%",
-      "coverage_threshold": "80%"
+      "passed": 797,
+      "coverage": "87.07%（tests/unit + integration/test_drama+test_progress，≥80% 门槛）",
+      "note": "2026-08-15 T3 节点日志埋点（node_logger + orchestrator 8 步骤 span + gateway.route + llm.chat + comfyui.submit/poll）；真机验证：网关 12/12 能力 UP + LLM/VLM（score 85 质检报告）/ComfyUI（636KB 实图）/TTS（18.5KB MP3）/ASR（SRT 闭环）全服务真实流转"
     },
     "frontend": {
-      "total": 46,
+      "vitest": 110,
+      "tsc_errors": 0,
+      "build": "成功",
+      "note": "2026-08-15 浏览器全面验证 12 项通过（布局/色彩/字体/交互/响应式/线稿先行开关）；修复模态粘性底栏 + 模态标题口径（H3/LTX-2.5/IndexTTS-2），浏览器复核 5 项通过"
+    },
+    "rust": {
       "passed": 46,
       "failed": 0,
-      "tsc": "0 errors"
+      "note": "M24.3 新增 4 个 trigger_words 测试"
     },
-    "build": "success",
-    "rust_build": "success"
+    "live_smoke": "M24.4 实机 API 47 项全过（功能/验证/安全/边界/CRUD/性能 P50<1ms）；浏览器深色主题两轮 12 项验证全过"
   },
   "infrastructure": {
     "llm": {
-      "endpoint": "http://192.168.71.127:8000/v1",
-      "model": "qwen3.6-uncensored (Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16, served alias)",
-      "topology": "workstation 本机 vLLM 0.26.0, GPU3 89GB, 全模态(文/图/音/视), systemd nemotron-vllm.service"
+      "endpoint": "http://192.168.71.84:8000/v1",
+      "model": "qwen3.6-uncensored (qwen3.6-35b-a3b-uncensored-heretic FP8)",
+      "topology": "spark02 vLLM, TP1, max_len 32768；Nemotron vLLM（workstation GPU3）2026-08-05 退役（stop+disable），备用 spark01 llama-3.3-70b-abliterated / EXO :52415"
     },
     "visual_llm": {
-      "endpoint": "http://192.168.71.127:8000/v1",
-      "model": "qwen3.6-uncensored (Nemotron 全模态 alias)",
-      "topology": "workstation GPU3；旧 qwen3-vl-30b-thinking :8200 已下线"
+      "endpoint": "http://192.168.71.84:8000/v1",
+      "model": "qwen3.6-uncensored（实测支持 image_url 视觉输入：16x16 纯红 PNG 正确回答 Red）",
+      "topology": "spark02 vLLM；与主 LLM 同端点；旧 Nemotron 全模态已退役"
     },
     "comfyui": {
       "endpoint": "http://192.168.71.127:8188",
-      "rule": "统一 LB 入口 8188，禁止直连单卡 8189-8192",
-      "backends": "5 后端轮询：本地 gpu0/1/2 (8189-8191) + pc01(:8188 v0.28.0) + pc02(:8193)；GPU3 已让给 Nemotron"
+      "rule": "统一 LB 入口 8188，禁止直连单卡 8189",
+      "backends": "3 后端轮询：本地 gpu0 (:8189) + pc01(:8188) + pc02(:8193)；专用独立实例（不入池）：H3 :8195 / LTX-2.5 :8198 / LongCat :8197 / 超分 fleet :8261-8263"
     },
-    "xdit": {
-      "endpoint": "http://[240e:b8f:1d22:e700:57fc:3cf9:d856:e46c]:8288",
-      "model": "hunyuanvideo-1.5",
-      "topology": "workstation 4×RTX PRO 6000, cfg=2 + ulysses=2 多卡并行",
-      "role": "视频生成主后端，ComfyUI/Wan 2.2 为回退"
+    "video_engines": {
+      "h3": {
+        "endpoint": "http://192.168.71.127:8195",
+        "role": "视频主后端（对白/角色一致性），2K/15s/原生立体声，FL2VA/Ref2VA/多镜/Turbo"
+      },
+      "ltx25": {
+        "endpoint": "http://192.168.71.127:8198",
+        "role": "LTX-2.5 音画同出（空镜/动作/长场景/分镜预览），distilled 两阶段；2026-08-14 接入"
+      },
+      "longcat": {
+        "endpoint": "http://192.168.71.127:8197",
+        "role": "路线 B 原生长视频（M22 基准完成，未工程化）"
+      },
+      "xdit": "已于 2026-08 下线（:8288 CLOSED），代码已删除"
     },
     "asr": {
-      "endpoint": "http://[240e:b8f:1d22:e700:57fc:3cf9:d856:e46c]:8300/v1",
-      "model": "FireRedTeam/FireRedASR-AED-L",
-      "topology": "workstation GPU",
-      "role": "字幕 ASR 主后端（CER <1%），faster-whisper tiny 为回退"
+      "endpoint": "http://192.168.71.127:9210",
+      "model": "faster-whisper large-v3 (AI-Omni ASR)",
+      "topology": "workstation GPU2（回退）；主用 studio02 whisper.cpp :9212",
+      "role": "字幕 ASR；firered/whisper 为回退"
     },
     "tts": {
-      "cosyvoice": {
-        "endpoint": "http://[240e:b8f:1d22:e700:57fc:3cf9:d856:e46c]:8400/v1",
-        "model": "CosyVoice2-0.5B",
-        "role": "TTS 主后端（zero-shot 克隆 + 150ms 流式）"
-      },
       "indextts": {
         "endpoint": "http://192.168.71.127:9200",
         "model": "IndexTTS-2",
         "contract": "POST /tts multipart/form-data(text/language/emo_text) → WAV，客户端转码 MP3",
-        "topology": "workstation GPU0 (cuda:0), systemd 托管（2026-07-27 变更）",
-        "role": "TTS 情感解耦后端（中文 WER 0.821 领先）"
+        "topology": "workstation GPU0 (cuda:0), systemd 托管",
+        "role": "TTS 主后端（中文 WER 0.821 领先）"
       },
       "fallback": "edge-tts（无需部署服务，本地预设声音）"
+    },
+    "image": {
+      "backend": "sdxl",
+      "endpoint": "http://192.168.71.127:8188",
+      "note": "style_anchor 按写实性选 checkpoint（majicMIX 写实 / animagineXL40 动漫）；HunyuanImage/flux_pulid 已下线删除"
     },
     "nas": {
       "endpoint": "192.168.71.7:445",

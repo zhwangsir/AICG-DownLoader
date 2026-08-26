@@ -19,7 +19,7 @@
   #define AppVersion "0.0.0"
 #endif
 
-#define AppName "ComfyUI 模型下载器"
+#define AppName "AIGCPannel"
 #define AppExeName "comfy-downloader.exe"
 #define AppPublisher "Winery (WangZhenYu)"
 #define AppURL "https://github.com/zhwangsir/AICG-DownLoader"
@@ -37,7 +37,7 @@ AppCopyright=Copyright © 2026 WangZhenYu (Winery)
 
 ; 便携工具：每用户安装到 LocalAppData，免管理员。
 DefaultDirName={localappdata}\AICG-DownLoader
-DefaultGroupName=ComfyUI 模型下载器
+DefaultGroupName=AIGCPannel
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog

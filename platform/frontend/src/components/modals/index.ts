@@ -7,6 +7,5 @@ export { SubtitleModal } from "./SubtitleModal";
 export { EditModal } from "./EditModal";
 export { QualityModal } from "./QualityModal";
 export { VisualQualityModal } from "./VisualQualityModal";
-export { LipSyncModal } from "./LipSyncModal";
-export { PostprocessModal } from "./PostprocessModal";
 export { PipelineModal } from "./PipelineModal";
+export { NsfwGateModal } from "./NsfwGateModal";

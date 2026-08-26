@@ -30,6 +30,7 @@ import httpx
 
 from app.config import settings
 from app.core.retry import with_retry
+from app.services.model_gateway import model_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,8 @@ class IndexTTSService:
         endpoint: str | None = None,
         http_client: httpx.AsyncClient | None = None,
     ):
-        self.endpoint = (endpoint or settings.indextts_endpoint).rstrip("/")
+        # DramaClaw 重构：默认端点经本地模型网关 tts 能力解析（统一路由层）
+        self.endpoint = (endpoint or model_gateway.endpoint("tts")).rstrip("/")
         self.http = http_client or httpx.AsyncClient(
             timeout=settings.indextts_timeout, trust_env=False
         )

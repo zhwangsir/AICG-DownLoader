@@ -1,0 +1,24 @@
+AIGCPannel NOTICE
+=================
+
+License split
+-------------
+First-party AIGCPannel code (platform/, src/, packaging/, and other files
+outside dashbox/) is licensed under the MIT License. See LICENSE.
+
+The directory dashbox/ is third-party software (DramaClaw / DashBox /
+SuperTale CE). It is licensed under the Elastic License 2.0 (ELv2), NOT MIT.
+See dashbox/LICENSE and dashbox/NOTICE. Do not rebrand it, strip attribution,
+or treat dashbox/ as covered by this repository's MIT license.
+
+Integration
+-----------
+AIGCPannel bundles DashBox as an engine: launch, status, and links only.
+platform/ does not import dashbox Python. Default local URLs:
+
+  Web UI : http://127.0.0.1:8080
+  API    : http://127.0.0.1:8780
+
+Start the engine with ./start-engine.sh (prints docker compose commands;
+pass --up to run them). Crate/binary and OS config dir remain
+comfy-downloader so existing models.json paths keep working.

@@ -13,8 +13,6 @@ import type {
   CharacterCardData,
   SceneData,
   SubtitleSegment,
-  LipSyncData,
-  PostprocessData,
 } from "../api/client";
 
 export interface ModalsState {
@@ -27,9 +25,9 @@ export interface ModalsState {
   edit: boolean;
   quality: boolean;
   visualQuality: boolean;
-  lipSync: boolean;
-  postprocess: boolean;
   pipeline: boolean;
+  /** M27 NSFW 门禁（PIN 输入/设置/修改） */
+  nsfwGate: boolean;
 }
 
 /** 角色生成预览/确认阶段 */
@@ -65,6 +63,19 @@ export interface CharacterPreviewData {
   error?: string;
 }
 
+/** DramaClaw 式任务中心条目：统一登记全局长任务（管线/批量/单镜视频） */
+export interface TaskEntry {
+  id: string;
+  label: string;
+  kind: "pipeline" | "video" | "batch";
+  status: "running" | "completed" | "failed";
+  /** 0-100；无法细分进度的任务由调用方按阶段跳变（0→100） */
+  percent: number;
+  message: string;
+  error?: string;
+  startedAt: number;
+}
+
 interface DramaState {
   modals: ModalsState;
   scriptData: ScriptData | null;
@@ -75,10 +86,6 @@ interface DramaState {
   editData: EditData | null;
   qualityData: QualityCheckData | null;
   visualQualityData: QualityVisualData | null;
-  /** 唇形同步结果（按场景去重，P4.4） */
-  lipSyncs: LipSyncData[];
-  /** 后处理编排结果（按场景去重，P4.4） */
-  postprocesses: PostprocessData[];
   statusInfo: string;
 
   /** 项目级全局视觉风格，影响角色、分镜、视频生成 */
@@ -93,6 +100,36 @@ interface DramaState {
 
   /** 角色生成结果（定妆照），持久化以保留生成完成状态 */
   characterCards: CharacterCardData[];
+
+  /** LibTV 式左侧导航激活的资产面板（null=收起，不持久化） */
+  activePanel: "characters" | "models" | "engine" | null;
+
+  /** M27 NSFW 状态（由后端 /api/settings/nsfw 同步，不持久化） */
+  nsfwEnabled: boolean;
+  nsfwHasPin: boolean;
+  setNsfwState: (enabled: boolean, hasPin: boolean) => void;
+
+  /** AgentBar 输入的创意草稿（打开剧本模态时预填，读后即清，不持久化） */
+  draftPremise: string;
+
+  /** 最近一次全链路任务的 project_id（shot_params.json 目录名，锚点重拍定位用，不持久化） */
+  pipelineProjectId: string;
+
+  /** 任务中心：全局长任务登记表（DramaClaw 任务中心对标，不持久化） */
+  tasks: TaskEntry[];
+  /** 运行中的 pipeline SSE 流（task_id → stream_url；TaskCenter watcher 订阅用，不持久化） */
+  pipelineStreams: Record<string, string>;
+
+  upsertTask: (task: TaskEntry) => void;
+  patchTask: (id: string, patch: Partial<TaskEntry>) => void;
+  removeTask: (id: string) => void;
+  /** 清除全部已完成/失败任务 */
+  clearFinishedTasks: () => void;
+  setPipelineStream: (taskId: string, streamUrl: string | null) => void;
+
+  setActivePanel: (panel: "characters" | "models" | "engine" | null) => void;
+  setDraftPremise: (text: string) => void;
+  setPipelineProjectId: (id: string) => void;
 
   setModal: (key: keyof ModalsState, open: boolean) => void;
   setScriptData: (data: ScriptData | null) => void;
@@ -111,8 +148,6 @@ interface DramaState {
   setEditData: (data: EditData | null) => void;
   setQualityData: (data: QualityCheckData | null) => void;
   setVisualQualityData: (data: QualityVisualData | null) => void;
-  addLipSync: (data: LipSyncData) => void;
-  addPostprocess: (data: PostprocessData) => void;
   setStatusInfo: (info: string) => void;
 
   /** 项目级全局视觉风格 */
@@ -147,9 +182,8 @@ const initialModals: ModalsState = {
   edit: false,
   quality: false,
   visualQuality: false,
-  lipSync: false,
-  postprocess: false,
   pipeline: false,
+  nsfwGate: false,
 };
 
 const initialState = {
@@ -162,20 +196,59 @@ const initialState = {
   editData: null,
   qualityData: null,
   visualQualityData: null,
-  lipSyncs: [],
-  postprocesses: [],
   statusInfo: "就绪",
   projectStyle: "写实电影感",
   globalLoading: false,
   globalLoadingText: "",
+  nsfwEnabled: false,
+  nsfwHasPin: false,
   characterPreviews: {},
   characterCards: [],
+  activePanel: null,
+  draftPremise: "",
+  pipelineProjectId: "",
+  tasks: [],
+  pipelineStreams: {},
 };
 
 export const useDramaStore = create<DramaState>()(
   persist(
     (set) => ({
       ...initialState,
+
+      setActivePanel: (panel) => set({ activePanel: panel }),
+
+      setNsfwState: (enabled, hasPin) =>
+        set({ nsfwEnabled: enabled, nsfwHasPin: hasPin }),
+
+      setDraftPremise: (text) => set({ draftPremise: text }),
+
+      setPipelineProjectId: (id) => set({ pipelineProjectId: id }),
+
+      upsertTask: (task) =>
+        set((state) => ({
+          tasks: [...state.tasks.filter((t) => t.id !== task.id), task],
+        })),
+
+      patchTask: (id, patch) =>
+        set((state) => ({
+          tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+        })),
+
+      removeTask: (id) =>
+        set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
+
+      clearFinishedTasks: () =>
+        set((state) => ({ tasks: state.tasks.filter((t) => t.status === "running") })),
+
+      setPipelineStream: (taskId, streamUrl) =>
+        set((state) => ({
+          pipelineStreams: streamUrl
+            ? { ...state.pipelineStreams, [taskId]: streamUrl }
+            : Object.fromEntries(
+                Object.entries(state.pipelineStreams).filter(([k]) => k !== taskId)
+              ),
+        })),
 
       setModal: (key, open) =>
         set((state) => ({
@@ -192,8 +265,6 @@ export const useDramaStore = create<DramaState>()(
           editData: null,
           qualityData: null,
           visualQualityData: null,
-          lipSyncs: [],
-          postprocesses: [],
           characterPreviews: {},
           characterCards: [],
         }),
@@ -268,19 +339,6 @@ export const useDramaStore = create<DramaState>()(
       setQualityData: (data) => set({ qualityData: data }),
       setVisualQualityData: (data) => set({ visualQualityData: data }),
 
-      addLipSync: (data) =>
-        set((state) => ({
-          lipSyncs: [...state.lipSyncs.filter((l) => l.scene_id !== data.scene_id), data],
-        })),
-
-      addPostprocess: (data) =>
-        set((state) => ({
-          postprocesses: [
-            ...state.postprocesses.filter((p) => p.scene_id !== data.scene_id),
-            data,
-          ],
-        })),
-
       setStatusInfo: (info) => set({ statusInfo: info }),
 
       setProjectStyle: (style) => set({ projectStyle: style }),
@@ -344,8 +402,6 @@ export const useDramaStore = create<DramaState>()(
         editData: state.editData,
         qualityData: state.qualityData,
         visualQualityData: state.visualQualityData,
-        lipSyncs: state.lipSyncs,
-        postprocesses: state.postprocesses,
         characterPreviews: state.characterPreviews,
         characterCards: state.characterCards,
       }),

@@ -65,6 +65,24 @@ def _parse_resolution(resolution: str) -> tuple[int, int]:
     return int(width), int(height)
 
 
+def compute_ambience_gain(voice_seconds: float, video_seconds: float) -> float:
+    """M12.2 按对白密度（人声/视频时长比）选择 H3 环境音增益档位（纯函数）。
+
+    - ratio ≥ 0.85（对白密集）：dense 档，压低环境音避免盖过人声
+    - 0.4 ≤ ratio < 0.85：基准档 h3_ambience_gain
+    - ratio < 0.4（大量留白）：sparse 档，提升环境音营造氛围
+    - 时长非法（探测失败为 0/负值）：回退基准增益，主链路不中断
+    """
+    if voice_seconds <= 0 or video_seconds <= 0:
+        return settings.h3_ambience_gain
+    ratio = voice_seconds / video_seconds
+    if ratio >= 0.85:
+        return settings.h3_ambience_gain_dense
+    if ratio >= 0.4:
+        return settings.h3_ambience_gain
+    return settings.h3_ambience_gain_sparse
+
+
 def _local_path_from_url(url: str, local_dir: Path) -> Path | None:
     """如果 URL 是本地静态资源，直接返回文件系统路径；否则返回 None。"""
     parsed = urlparse(url)
@@ -173,17 +191,28 @@ class EditAgent(BaseAgent):
         height: int,
         fps: int,
     ) -> Path:
-        """处理单个片段：下载素材 → 标准化 → 混音 → 烧录字幕。"""
+        """处理单个片段：下载素材 → 标准化 → 混音 → 烧录字幕。
+
+        H3 原生音轨处理（settings.h3_native_audio_enabled）：
+        - 视频自带音轨（H3 环境音）且有人声：按增益混音，人声为主、环境音垫底
+        - 视频自带音轨但无人声（纯场景镜头）：原音轨直接随视频保留
+        - 视频无音轨（回退后端 comfyui/Wan）：仅人声（原行为，自动跳过混音）
+        - 混音 ffmpeg 失败：降级为纯人声并记 warning，不阻断主链路
+        """
         seg_dir = work_dir / f"scene_{segment.scene_id}"
         seg_dir.mkdir(exist_ok=True)
 
         video_path = await self._download(segment.video_url, seg_dir / "video.mp4")
-        audio_path = await self._download(segment.audio_url, seg_dir / "audio.mp3")
         subtitle_path = await self._download(segment.subtitle_url, seg_dir / "subtitle.srt")
+
+        # 人声可选：audio_url 为空表示纯场景镜头
+        audio_path: Path | None = None
+        if segment.audio_url:
+            audio_path = await self._download(segment.audio_url, seg_dir / "audio.mp3")
 
         output_path = seg_dir / "segment_final.mp4"
 
-        # 统一分辨率/帧率，烧录字幕，替换/混合配音音频
+        # 统一分辨率/帧率，烧录字幕
         # subtitles 滤镜需要字幕文件为绝对路径并转义特殊字符
         sub_path_escaped = str(subtitle_path).replace("\\", "/").replace(":", "\\:")
         vf = (
@@ -193,7 +222,48 @@ class EditAgent(BaseAgent):
             f"fps={fps},format=yuv420p"
         )
 
-        cmd = [
+        # 用 ffprobe 探测视频是否自带音轨（不依赖 video_backend 字符串，
+        # 回退后端无声轨时自动跳过混音，更健壮）
+        has_native_audio = (
+            settings.h3_native_audio_enabled
+            and audio_path is not None
+            and await self._probe_has_audio(video_path)
+        )
+
+        if audio_path is None:
+            # 纯场景镜头：单输入直出，默认映射保留原音轨（若有）
+            await self._run_ffmpeg(self._build_keep_original_cmd(video_path, vf, output_path))
+        elif has_native_audio:
+            # M12.2 按对白密度动态调环境音增益：人声/视频时长比分档，
+            # 探测失败（返回 0.0）时 compute_ambience_gain 自动回退基准增益
+            gain: float | None = None
+            if settings.h3_dynamic_gain_enabled:
+                video_secs = await self._probe_duration(video_path)
+                voice_secs = await self._probe_duration(audio_path)
+                gain = compute_ambience_gain(voice_secs, video_secs)
+            try:
+                await self._run_ffmpeg(
+                    self._build_native_mix_cmd(video_path, audio_path, vf, output_path, gain=gain)
+                )
+            except RuntimeError as e:
+                logger.warning(
+                    "H3 原生音轨混音失败，降级为纯人声: scene_id=%s err=%s",
+                    segment.scene_id, e,
+                )
+                await self._run_ffmpeg(
+                    self._build_voice_only_cmd(video_path, audio_path, vf, output_path)
+                )
+        else:
+            await self._run_ffmpeg(
+                self._build_voice_only_cmd(video_path, audio_path, vf, output_path)
+            )
+        return output_path
+
+    def _build_voice_only_cmd(
+        self, video_path: Path, audio_path: Path, vf: str, output_path: Path
+    ) -> list[str]:
+        """构建「人声替换原声」命令（视频无音轨时的原行为）。"""
+        return [
             FFMPEG_BIN,
             "-y",
             "-i", str(video_path),
@@ -209,8 +279,67 @@ class EditAgent(BaseAgent):
             "-shortest",
             str(output_path),
         ]
-        await self._run_ffmpeg(cmd)
-        return output_path
+
+    def _build_native_mix_cmd(
+        self,
+        video_path: Path,
+        audio_path: Path,
+        vf: str,
+        output_path: Path,
+        gain: float | None = None,
+    ) -> list[str]:
+        """构建「人声 + H3 原生环境音」混音命令。
+
+        - 人声 volume=1.0 为主；原生音轨按 gain（缺省 settings.h3_ambience_gain）衰减垫底
+        - M12.2：调用方可按对白密度（compute_ambience_gain）传入动态增益
+        - amix duration=longest：环境音铺满整个镜头而非随人声结束而中断
+          （人声短于视频时 duration=first 会把混音连同画面一起截短，浪费 H3 镜头）；
+          输出端 -shortest 仍以视频长度封顶（人声超长时截断，与原行为一致）
+        """
+        ambience_gain = settings.h3_ambience_gain if gain is None else gain
+        filter_complex = (
+            f"[0:v]{vf}[vout];"
+            f"[0:a]volume={ambience_gain}[amb];"
+            f"[1:a]volume=1.0[voice];"
+            f"[voice][amb]amix=inputs=2:duration=longest[aout]"
+        )
+        return [
+            FFMPEG_BIN,
+            "-y",
+            "-i", str(video_path),
+            "-i", str(audio_path),
+            "-filter_complex", filter_complex,
+            "-map", "[vout]",
+            "-map", "[aout]",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ar", "48000",
+            "-ac", "2",
+            "-shortest",
+            str(output_path),
+        ]
+
+    def _build_keep_original_cmd(
+        self, video_path: Path, vf: str, output_path: Path
+    ) -> list[str]:
+        """构建「纯场景镜头」命令：无人声，原音轨（若有）随视频保留。"""
+        return [
+            FFMPEG_BIN,
+            "-y",
+            "-i", str(video_path),
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ar", "48000",
+            "-ac", "2",
+            str(output_path),
+        ]
 
     async def _concat_segments(
         self,
@@ -335,6 +464,30 @@ class EditAgent(BaseAgent):
                     async for chunk in resp.aiter_bytes():
                         f.write(chunk)
         return dest
+
+    async def _probe_has_audio(self, video_path: Path) -> bool:
+        """用 ffprobe 探测视频是否包含音频流。
+
+        探测失败（ffprobe 不可用/文件损坏）视为无音轨，走纯人声分支，保证主链路健壮。
+        """
+        cmd = [
+            FFPROBE_BIN,
+            "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "csv=p=0",
+            str(video_path),
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+        except OSError:
+            return False
+        return proc.returncode == 0 and b"audio" in stdout
 
     async def _probe_duration(self, video_path: Path) -> float:
         """使用 ffprobe 获取视频时长。"""

@@ -63,6 +63,7 @@ from novelvideo.api.routes import (  # noqa: E402
     scripts,
     styles,
     tasks,
+    works,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -116,6 +117,7 @@ api_router.include_router(pipeline.router, tags=["pipeline"])
 api_router.include_router(model_gateway.router, tags=["model-gateway"])
 api_router.include_router(model_credits.router, tags=["model-credits"])
 api_router.include_router(model_library.router, tags=["model-library"])
+api_router.include_router(works.router, tags=["works"])
 api_router.include_router(freezone.router)
 _verification_routes_registered = False
 

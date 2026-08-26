@@ -19,7 +19,6 @@ import {
   Sparkles,
   AlertCircle,
 } from "lucide-react";
-import { useDramaStore } from "../../store/useDramaStore";
 import type { DramaNodeData } from "./layout";
 
 const iconMap: Record<string, React.ElementType> = {
@@ -32,8 +31,6 @@ const iconMap: Record<string, React.ElementType> = {
   edit: Clapperboard,
   quality: CheckCircle2,
   visual_quality: Sparkles,
-  lip_sync: Mic,
-  postprocess: Clapperboard,
 };
 
 const placeholderIconMap: Record<string, React.ElementType> = {
@@ -52,30 +49,18 @@ const typeConfig: Record<
   string,
   { color: string; bg: string; glow: string; dark: string; label: string }
 > = {
-  script: { color: "#b8823f", bg: "#faf2e2", glow: "rgba(184,130,63,0.3)", dark: "#7e5624", label: "剧本" },
-  character: { color: "#5c9488", bg: "#e8f0ee", glow: "rgba(92,148,136,0.3)", dark: "#3d6860", label: "角色" },
-  storyboard: { color: "#5b7fb5", bg: "#e8eef6", glow: "rgba(91,127,181,0.3)", dark: "#3d5a8a", label: "分镜" },
-  video: { color: "#b05a8a", bg: "#f5e9f0", glow: "rgba(176,90,138,0.3)", dark: "#7d3d62", label: "视频" },
-  voice: { color: "#c48a3c", bg: "#f9f0e0", glow: "rgba(196,138,60,0.3)", dark: "#8a5f26", label: "配音" },
-  subtitle: { color: "#55998f", bg: "#e6f1ef", glow: "rgba(85,153,143,0.3)", dark: "#3a6b64", label: "字幕" },
-  edit: { color: "#a04848", bg: "#f4e6e6", glow: "rgba(160,72,72,0.3)", dark: "#703030", label: "成片" },
-  quality: { color: "#4d8c54", bg: "#e5f0e7", glow: "rgba(77,140,84,0.3)", dark: "#35633b", label: "质检" },
-  visual_quality: { color: "#7c5aa8", bg: "#f0eaf5", glow: "rgba(124,90,168,0.3)", dark: "#553d75", label: "视觉质检" },
-  lip_sync: { color: "#c45a78", bg: "#f7e9ee", glow: "rgba(196,90,120,0.3)", dark: "#8a3d54", label: "唇形同步" },
-  postprocess: { color: "#4f6eb0", bg: "#e8edf5", glow: "rgba(79,110,176,0.3)", dark: "#354d7d", label: "后处理" },
+  // MiniMax 深色主题：color=类型主色（提亮），bg=类型色混入 #1c1c1c 深底，
+  // dark=深色下的浅文字色（提亮版类型色），glow=主色 30% 光晕
+  script: { color: "#c9b896", bg: "#2a2721", glow: "rgba(201,184,150,0.3)", dark: "#e0d4b8", label: "剧本" },
+  character: { color: "#e08ab8", bg: "#2b2126", glow: "rgba(224,138,184,0.3)", dark: "#f0a8d0", label: "角色" },
+  storyboard: { color: "#09caf5", bg: "#1d2a2e", glow: "rgba(9,202,245,0.3)", dark: "#5eddff", label: "分镜" },
+  video: { color: "#5eb8d4", bg: "#232a2d", glow: "rgba(94,184,212,0.3)", dark: "#8fd4e8", label: "视频" },
+  voice: { color: "#7ec98f", bg: "#222924", glow: "rgba(126,201,143,0.3)", dark: "#a5dfb4", label: "配音" },
+  subtitle: { color: "#b8a88a", bg: "#282621", glow: "rgba(184,168,138,0.3)", dark: "#d4c8ac", label: "字幕" },
+  edit: { color: "#f2664d", bg: "#2c2320", glow: "rgba(242,102,77,0.3)", dark: "#ff8a70", label: "成片" },
+  quality: { color: "#f2a93a", bg: "#2c2820", glow: "rgba(242,169,58,0.3)", dark: "#ffc765", label: "质检" },
+  visual_quality: { color: "#a8c46a", bg: "#27291f", glow: "rgba(168,196,106,0.3)", dark: "#c4de92", label: "视觉质检" },
 };
-
-const GENRE_PRESETS = [
-  "都市悬疑", "古风仙侠", "科幻未来", "校园青春", "职场商战",
-  "武侠江湖", "末日废土", "温情治愈", "犯罪推理", "奇幻冒险",
-  "家庭伦理", "历史穿越", "甜宠恋爱", "恐怖惊悚", "医疗救援",
-  "体育竞技", "美食治愈", "商战复仇",
-];
-
-function truncate(str: string, max: number) {
-  if (!str) return "";
-  return str.length > max ? str.slice(0, max) + "…" : str;
-}
 
 function MediaPlaceholder({
   cfg,
@@ -96,7 +81,7 @@ function MediaPlaceholder({
         width: "100%",
         height: compact ? 78 : 110,
         borderRadius: compact ? 10 : 12,
-        background: `linear-gradient(135deg, ${cfg.bg}, rgba(255,255,255,0.6))`,
+        background: `linear-gradient(135deg, ${cfg.bg}, rgba(255,255,255,0.05))`,
         border: `${compact ? 1 : 1.5}px dashed ${cfg.color}${compact ? "30" : "40"}`,
         display: "flex",
         flexDirection: "column",
@@ -133,7 +118,7 @@ function MediaPlaceholder({
             padding: compact ? "4px 8px" : "6px 10px",
             fontSize: compact ? 9 : 10,
             color: "var(--text-tertiary)",
-            background: "rgba(250,248,245,0.85)",
+            background: "rgba(255,255,255,0.06)",
             backdropFilter: "blur(4px)",
             display: "flex",
             alignItems: "center",
@@ -174,8 +159,8 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
   const statusColor = data.loading
     ? cfg.color
     : data.hasGenerated
-    ? "#4d8c54"
-    : "#9a9184";
+    ? "#3dd68c"
+    : "#919191";
 
   const statusLabel = data.statusText
     ? data.statusText
@@ -185,7 +170,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
     ? "已完成"
     : "等待开始";
 
-  const cardBg = isDimmed ? "rgba(250,248,245,0.42)" : "var(--bg-elevated)";
+  const cardBg = isDimmed ? "rgba(255,255,255,0.03)" : "var(--bg-elevated)";
   const cardBorder = selected ? cfg.color : isDimmed ? `${cfg.color}28` : "var(--border-light)";
   const nodeWidth = isFutureNode ? 240 : 280;
   const contentPadding = isFutureNode ? "10px 14px 12px" : "12px 16px 14px";
@@ -245,7 +230,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
             style={{
               position: "absolute",
               inset: 0,
-              background: `linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent)`,
+              background: `linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)`,
               animation: "node-shimmer 2s ease-in-out infinite",
             }}
           />
@@ -278,7 +263,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
             flexShrink: 0,
           }}
         >
-          <Icon size={isFutureNode ? 15 : 18} color="#fff" strokeWidth={2} />
+          <Icon size={isFutureNode ? 15 : 18} color="rgba(6,19,26,0.85)" strokeWidth={2} />
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -332,7 +317,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
               gap: 10,
               padding: "12px 10px",
               borderRadius: 12,
-              background: `linear-gradient(135deg, ${cfg.bg}, rgba(255,255,255,0.6))`,
+              background: `linear-gradient(135deg, ${cfg.bg}, rgba(255,255,255,0.05))`,
               border: `1.5px dashed ${cfg.color}40`,
               textAlign: "center",
             }}
@@ -342,7 +327,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
                 width: 40,
                 height: 40,
                 borderRadius: 10,
-                background: "rgba(255,255,255,0.72)",
+                background: "rgba(255,255,255,0.08)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -366,7 +351,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
                   padding: "7px 16px",
                   background: `linear-gradient(135deg, ${cfg.color}, ${cfg.dark})`,
                   border: "none",
-                  color: "#fff",
+                  color: "rgba(6,19,26,0.88)",
                   borderRadius: 8,
                   fontSize: 11,
                   fontWeight: 600,
@@ -415,14 +400,14 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
                       width: 22,
                       height: 22,
                       borderRadius: "50%",
-                      background: "rgba(77,140,84,0.95)",
+                      background: "rgba(61,214,140,0.95)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      boxShadow: "0 2px 6px rgba(77,140,84,0.4)",
+                      boxShadow: "0 2px 6px rgba(61,214,140,0.4)",
                     }}
                   >
-                    <Check size={12} color="#fff" strokeWidth={3} />
+                    <Check size={12} color="rgba(6,19,26,0.88)" strokeWidth={3} />
                   </div>
                 )}
               </div>
@@ -446,7 +431,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
                     width: 22,
                     height: 22,
                     borderRadius: 7,
-                    background: "rgba(255,255,255,0.7)",
+                    background: "rgba(255,255,255,0.08)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -501,7 +486,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
               gap: isFutureNode ? "4px 8px" : "6px 10px",
               marginBottom: isFutureNode ? 8 : 10,
               padding: isFutureNode ? "6px 8px" : "8px 10px",
-              background: isDimmed ? "rgba(250,248,245,0.5)" : "var(--bg-secondary)",
+              background: isDimmed ? "rgba(255,255,255,0.04)" : "var(--bg-secondary)",
               borderRadius: isFutureNode ? 8 : 10,
               border: `1px solid ${isDimmed ? `${cfg.color}18` : "var(--border-light)"}`,
             }}
@@ -578,7 +563,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
                   borderRadius: 12,
                   marginBottom: 10,
                   border: `1.5px dashed ${cfg.color}40`,
-                  background: `linear-gradient(135deg, ${cfg.bg}, rgba(255,255,255,0.6))`,
+                  background: `linear-gradient(135deg, ${cfg.bg}, rgba(255,255,255,0.05))`,
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
@@ -593,7 +578,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
                     width: 36,
                     height: 36,
                     borderRadius: 10,
-                    background: "rgba(255,255,255,0.72)",
+                    background: "rgba(255,255,255,0.08)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -721,7 +706,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
               display: "flex",
               alignItems: "center",
               gap: 6,
-              background: "rgba(197,189,176,0.12)",
+              background: "rgba(255,255,255,0.06)",
               borderRadius: 8,
             }}
           >
@@ -739,7 +724,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
         style={{
           width: 10,
           height: 10,
-          background: "#fff",
+          background: "var(--bg-elevated)",
           border: `2.5px solid ${cfg.color}`,
           borderRadius: "50%",
           left: -5,
@@ -755,7 +740,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
         style={{
           width: 10,
           height: 10,
-          background: "#fff",
+          background: "var(--bg-elevated)",
           border: `2.5px solid ${cfg.color}`,
           borderRadius: "50%",
           right: -5,
@@ -774,7 +759,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
             style={{
               width: 10,
               height: 10,
-              background: "#fff",
+              background: "var(--bg-elevated)",
               border: `2.5px solid ${cfg.color}`,
               borderRadius: "50%",
               top: -5,
@@ -789,7 +774,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
             style={{
               width: 10,
               height: 10,
-              background: "#fff",
+              background: "var(--bg-elevated)",
               border: `2.5px solid ${cfg.color}`,
               borderRadius: "50%",
               bottom: -5,
@@ -809,7 +794,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
           style={{
             width: 10,
             height: 10,
-            background: "#fff",
+            background: "var(--bg-elevated)",
             border: `2.5px solid ${cfg.color}`,
             borderRadius: "50%",
             bottom: -5,
@@ -828,7 +813,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
           style={{
             width: 10,
             height: 10,
-            background: "#fff",
+            background: "var(--bg-elevated)",
             border: `2.5px solid ${cfg.color}`,
             borderRadius: "50%",
             bottom: -5,
@@ -847,7 +832,7 @@ function DramaNode({ data, selected }: { data: DramaNodeData; selected?: boolean
           style={{
             width: 10,
             height: 10,
-            background: "#fff",
+            background: "var(--bg-elevated)",
             border: `2.5px solid ${cfg.color}`,
             borderRadius: "50%",
             top: -5,

@@ -170,6 +170,166 @@ class TestScriptAgentRAGEnhance:
         assert scene["negative_prompt"] == "original negative"
 
 
+class TestScriptStyleSanitize:
+    """M15.4: 剧本场景提示词在源头清洗与目标画风互斥的风格词。
+
+    复现 core 国漫 E2E（pipeline-088b6ccb4b9b）真实缺陷：LLM 无视系统提示词中的
+    画风子句，场景 prompt 写 hyperrealistic、负面词反向排斥 anime/cartoon。
+    """
+
+    async def test_guoman_style_strips_realism_conflicts(self, agent, mock_call_llm):
+        """画风「国漫」→ 场景 prompt 删写实词、负面词删动漫词，质量词保留。"""
+        mock_call_llm.return_value = json.dumps(
+            {
+                "title": "国漫测试",
+                "characters": [],
+                "scenes": [
+                    {
+                        "scene_id": 1,
+                        "episode": 1,
+                        "shot_type": "特写",
+                        "description": "两只手同时抓住咖啡杯",
+                        "prompt": "extreme close-up, two hands, hyperrealistic texture, cinematic lighting",
+                        "negative_prompt": "anime, cartoon, 3d render, unrealistic, blurry",
+                        "emotion": "tension",
+                        "duration_seconds": 5,
+                        "camera_movement": "static",
+                    }
+                ],
+            }
+        )
+
+        request = ScriptRequest(premise="x", style="国漫", episodes=1, scenes_per_episode=1)
+        response = await agent.execute(request)
+
+        assert response.success is True
+        scene = response.data["scenes"][0]
+        assert "hyperrealistic" not in scene["prompt"]
+        assert "extreme close-up" in scene["prompt"]
+        assert "cinematic lighting" in scene["prompt"]
+        for term in ("anime", "cartoon", "3d render"):
+            assert term not in scene["negative_prompt"].lower()
+        assert "unrealistic" in scene["negative_prompt"]
+        assert "blurry" in scene["negative_prompt"]
+
+    async def test_realistic_style_strips_anime_conflicts(self, agent, mock_call_llm):
+        """画风「写实电影感」→ 场景 prompt 删动漫词、负面词删 photorealistic。"""
+        mock_call_llm.return_value = json.dumps(
+            {
+                "title": "写实测试",
+                "characters": [],
+                "scenes": [
+                    {
+                        "scene_id": 1,
+                        "episode": 1,
+                        "shot_type": "近景",
+                        "description": "主角抬头",
+                        "prompt": "medium shot, anime style, dramatic lighting",
+                        "negative_prompt": "photorealistic, low quality",
+                        "emotion": "tension",
+                        "duration_seconds": 5,
+                        "camera_movement": "static",
+                    }
+                ],
+            }
+        )
+
+        request = ScriptRequest(premise="x", style="写实电影感", episodes=1, scenes_per_episode=1)
+        response = await agent.execute(request)
+
+        assert response.success is True
+        scene = response.data["scenes"][0]
+        assert "anime" not in scene["prompt"].lower()
+        assert "dramatic lighting" in scene["prompt"]
+        assert "photorealistic" not in scene["negative_prompt"]
+        assert "low quality" in scene["negative_prompt"]
+
+    async def test_sanitize_runs_after_rag_enhance(self, agent, mock_call_llm, monkeypatch):
+        """RAG 重写出冲突词同样被清洗（清洗在 RAG 之后执行）。"""
+        monkeypatch.setattr(settings, "rag_optimize_enabled", True)
+        mock_call_llm.return_value = json.dumps(
+            {
+                "title": "RAG 清洗测试",
+                "characters": [],
+                "scenes": [
+                    {
+                        "scene_id": 1,
+                        "description": "主角看手机",
+                        "prompt": "original",
+                        "negative_prompt": "original",
+                    }
+                ],
+            }
+        )
+
+        with patch(
+            "app.agents.script_agent.rag_service.optimize_prompt",
+            new_callable=AsyncMock,
+            return_value={
+                "optimized_positive": "rag photorealistic photo",
+                "optimized_negative": "rag anime, blurry",
+            },
+        ):
+            response = await agent.execute(ScriptRequest(premise="x", style="国漫"))
+
+        assert response.success is True
+        scene = response.data["scenes"][0]
+        assert "photorealistic" not in scene["prompt"]
+        assert "rag" in scene["prompt"]
+        assert "anime" not in scene["negative_prompt"].lower()
+        assert "blurry" in scene["negative_prompt"]
+
+
+class TestScriptStyleWeightSeparation:
+    """M16.1: 剧本画风子句权重分离 — 上游源头与定妆照/分镜同构改造。
+
+    场景 prompt 是风格词下游传递的源头，旧子句强制整串 KB 关键词注入，
+    同样与场景内角色外貌描述争权重，一并改为必填仅风格名 + 整串可选。
+    """
+
+    async def test_system_prompt_separates_style_and_appearance(self, agent, mock_call_llm):
+        """画风「国漫」→ system prompt 必填行仅风格名，整串降可选，含权重分离规则。"""
+        mock_call_llm.return_value = json.dumps(
+            {
+                "title": "国漫测试",
+                "characters": [],
+                "scenes": [
+                    {
+                        "scene_id": 1,
+                        "episode": 1,
+                        "shot_type": "特写",
+                        "description": "主角看手机",
+                        "prompt": "cinematic close-up",
+                        "negative_prompt": "blurry",
+                        "emotion": "tension",
+                        "duration_seconds": 5,
+                        "camera_movement": "static",
+                    }
+                ],
+            }
+        )
+
+        request = ScriptRequest(premise="x", style="国漫", episodes=1, scenes_per_episode=1)
+        assert (await agent.execute(request)).success is True
+
+        # 结构校验可能触发返修（最后一次调用无 system），遍历全部调用取首发 system 消息
+        system = next(
+            m["content"]
+            for call in mock_call_llm.call_args_list
+            for m in call.kwargs["messages"]
+            if m["role"] == "system"
+        )
+        mandatory = next(line for line in system.split("\n") if "必须显式包含" in line)
+        assert '"Chinese anime guoman style"' in mandatory
+        assert "全剧画面" in mandatory
+        assert "elaborate costumes" not in mandatory
+        optional_line = next(
+            line for line in system.split("\n") if "elaborate costumes" in line
+        )
+        assert "可选" in optional_line
+        assert "权重分离规则" in system
+
+
 def _make_scene(
     scene_id: int,
     episode: int = 1,

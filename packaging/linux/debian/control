@@ -6,7 +6,7 @@ Architecture: amd64
 Maintainer: Winery (WangZhenYu) <https://github.com/zhwangsir/AICG-DownLoader>
 Homepage: https://github.com/zhwangsir/AICG-DownLoader
 Depends: libc6 (>= 2.31), libgtk-3-0
-Description: ComfyUI 模型下载器 (AICG-DownLoader)
+Description: AIGCPannel 模型库桌面助手
  Native GUI tool that downloads ComfyUI models from Civitai and HuggingFace
  into the correct model subfolders, with resume, SHA256 verification and a
  download queue. Single self-contained executable, no command line needed.

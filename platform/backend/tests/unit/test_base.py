@@ -164,6 +164,37 @@ class TestUploadImageToComfyUI:
             )
             assert result == "uploaded.png"
 
+    async def test_unique_filename_per_upload(self, base_agent, mock_httpx_get):
+        """M17.5：连续上传的文件名必须互不相同（ref2va 多参考图防覆盖）。"""
+        with patch.object(base_agent.http, "post", new_callable=AsyncMock) as mock_post:
+            mock_response = MagicMock()
+            # ComfyUI 回显 name 为空时落回本地上传名
+            mock_response.json.return_value = {}
+            mock_response.raise_for_status = MagicMock()
+            mock_post.return_value = mock_response
+
+            names = {
+                await base_agent.upload_image_to_comfyui("http://worker", f"http://x/{i}.png")
+                for i in range(4)
+            }
+            assert len(names) == 4
+            assert all(n.startswith(f"{base_agent.name}_") and n.endswith(".png") for n in names)
+
+    async def test_fallback_name_when_comfyui_omits_name(self, base_agent, mock_httpx_get):
+        """M17.5：响应缺 name 字段时返回本次上传用的唯一文件名。"""
+        with patch.object(base_agent.http, "post", new_callable=AsyncMock) as mock_post:
+            mock_response = MagicMock()
+            mock_response.json.return_value = {}
+            mock_response.raise_for_status = MagicMock()
+            mock_post.return_value = mock_response
+
+            result = await base_agent.upload_image_to_comfyui(
+                "http://worker", "http://x/image.png"
+            )
+            assert result != "input.png"
+            sent_filename = mock_post.call_args.kwargs["files"]["image"][0]
+            assert result == sent_filename
+
 
 class TestGetComfyUIResult:
     async def test_success(self, base_agent):

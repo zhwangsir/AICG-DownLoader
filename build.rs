@@ -5,8 +5,8 @@ fn main() {
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
-        res.set("ProductName", "ComfyUI 模型下载器 (AICG-DownLoader)");
-        res.set("FileDescription", "ComfyUI 模型下载器 — by Winery (WangZhenYu)");
+        res.set("ProductName", "AIGCPannel");
+        res.set("FileDescription", "AIGCPannel 模型库 — by Winery (WangZhenYu)");
         res.set("CompanyName", "Winery (WangZhenYu)");
         res.set("LegalCopyright", "Copyright (C) 2026 WangZhenYu (Winery)");
         let _ = res.compile();

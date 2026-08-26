@@ -1,5 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Canvas from "./components/Canvas";
+import LeftRail from "./components/nav/LeftRail";
+import AssetLibraryPanel from "./components/panels/AssetLibraryPanel";
+import AgentBar from "./components/agent/AgentBar";
 import {
   ScriptModal,
   CharacterModal,
@@ -10,12 +13,12 @@ import {
   EditModal,
   QualityModal,
   VisualQualityModal,
-  LipSyncModal,
-  PostprocessModal,
   PipelineModal,
+  NsfwGateModal,
 } from "./components/modals";
 import { useDramaStore } from "./store/useDramaStore";
-import { ChevronDown, Clapperboard, Plus, Workflow, Zap } from "lucide-react";
+import { getNsfwStatus } from "./api/client";
+import { ChevronDown, Clapperboard, Plus, Workflow, Zap, Users, Image as ImageIcon, Film, Mic, Captions, ShieldCheck, ScanEye, Scissors } from "lucide-react";
 
 export default function App() {
   const store = useDramaStore();
@@ -41,12 +44,38 @@ export default function App() {
     setEditData,
     setQualityData,
     setVisualQualityData,
-    addLipSync,
-    addPostprocess,
     setStatusInfo,
   } = store;
 
   const [showAdvancedMenu, setShowAdvancedMenu] = useState(false);
+  const advancedMenuRef = useRef<HTMLDivElement>(null);
+
+  // M27：启动时同步 NSFW 状态（模型库/搜索联动）
+  useEffect(() => {
+    getNsfwStatus()
+      .then((s) => store.setNsfwState(s.nsfw_enabled, s.has_pin))
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 下拉 dismiss：点击组件外部 / Escape 关闭（LibTV 标准菜单行为）
+  useEffect(() => {
+    if (!showAdvancedMenu) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!advancedMenuRef.current?.contains(e.target as globalThis.Node)) {
+        setShowAdvancedMenu(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowAdvancedMenu(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showAdvancedMenu]);
 
   const steps = useMemo(
     () => [
@@ -68,16 +97,14 @@ export default function App() {
   }, [steps]);
 
   const advancedActions = [
-    { key: "character", label: "生成角色", disabled: !scriptData || globalLoading },
-    { key: "storyboard", label: "生成分镜", disabled: !scriptData || globalLoading },
-    { key: "video", label: "生成视频", disabled: storyboards.length === 0 || globalLoading },
-    { key: "voice", label: "生成配音", disabled: !scriptData || globalLoading },
-    { key: "subtitle", label: "生成字幕", disabled: voices.length === 0 || globalLoading },
-    { key: "quality", label: "剧本质检", disabled: !scriptData || globalLoading },
-    { key: "visualQuality", label: "视觉质检", disabled: videos.length === 0 || globalLoading },
-    { key: "lipSync", label: "唇形同步", disabled: videos.length === 0 || voices.length === 0 || globalLoading },
-    { key: "postprocess", label: "后处理", disabled: videos.length === 0 || globalLoading },
-    { key: "edit", label: "合成成片", disabled: videos.length === 0 || voices.length === 0 || subtitles.length === 0 || globalLoading },
+    { key: "character", label: "生成角色", icon: Users, disabled: !scriptData || globalLoading },
+    { key: "storyboard", label: "生成分镜", icon: ImageIcon, disabled: !scriptData || globalLoading },
+    { key: "video", label: "生成视频", icon: Film, disabled: storyboards.length === 0 || globalLoading },
+    { key: "voice", label: "生成配音", icon: Mic, disabled: !scriptData || globalLoading },
+    { key: "subtitle", label: "生成字幕", icon: Captions, disabled: voices.length === 0 || globalLoading },
+    { key: "quality", label: "剧本质检", icon: ShieldCheck, disabled: !scriptData || globalLoading },
+    { key: "visualQuality", label: "视觉质检", icon: ScanEye, disabled: videos.length === 0 || globalLoading },
+    { key: "edit", label: "合成成片", icon: Scissors, disabled: videos.length === 0 || voices.length === 0 || subtitles.length === 0 || globalLoading },
   ];
 
   const handleScriptGenerated = (data: NonNullable<typeof scriptData>) => {
@@ -137,23 +164,6 @@ export default function App() {
     setModal("visualQuality", false);
   };
 
-  const handleLipSyncGenerated = (data: Parameters<typeof addLipSync>[0]) => {
-    addLipSync(data);
-    setStatusInfo(
-      data.synced
-        ? `唇形同步完成: 场景 ${data.scene_id} (${data.elapsed_seconds.toFixed(1)}s)`
-        : `唇形同步降级: 场景 ${data.scene_id} 返回原视频`
-    );
-  };
-
-  const handlePostprocessGenerated = (data: Parameters<typeof addPostprocess>[0]) => {
-    addPostprocess(data);
-    const ok = data.steps.filter((s) => s.success && !s.skipped).length;
-    setStatusInfo(
-      `后处理完成: 场景 ${data.scene_id} | ${ok}/${data.steps.length} 步成功 | ${data.elapsed_seconds.toFixed(1)}s`
-    );
-  };
-
   return (
     <div className="app-container">
       <div className="topbar">
@@ -163,7 +173,7 @@ export default function App() {
           </div>
           <div className="topbar-title-group">
             <span className="topbar-kicker">Atelier</span>
-            <span className="topbar-title">AI 短剧工作台</span>
+            <span className="topbar-title">AIGCPannel</span>
           </div>
         </div>
 
@@ -195,7 +205,7 @@ export default function App() {
             <Zap size={13} />
             一键成片
           </button>
-          <div className="dropdown-wrapper">
+          <div className="dropdown-wrapper" ref={advancedMenuRef}>
             <button
               className="topbar-btn"
               onClick={() => setShowAdvancedMenu(!showAdvancedMenu)}
@@ -207,19 +217,23 @@ export default function App() {
             </button>
             {showAdvancedMenu && (
               <div className="dropdown-menu">
-                {advancedActions.map((action) => (
-                  <button
-                    key={action.key}
-                    className="dropdown-item"
-                    disabled={action.disabled}
-                    onClick={() => {
-                      setModal(action.key as any, true);
-                      setShowAdvancedMenu(false);
-                    }}
-                  >
-                    {action.label}
-                  </button>
-                ))}
+                {advancedActions.map((action) => {
+                  const ActionIcon = action.icon;
+                  return (
+                    <button
+                      key={action.key}
+                      className="dropdown-item"
+                      disabled={action.disabled}
+                      onClick={() => {
+                        setModal(action.key as any, true);
+                        setShowAdvancedMenu(false);
+                      }}
+                    >
+                      <ActionIcon size={13} className="dropdown-item-icon" />
+                      {action.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -234,9 +248,13 @@ export default function App() {
         </div>
       </div>
 
-      <div className="canvas-container">
+      <div className="main-row">
+        <LeftRail />
         <Canvas />
+        <AssetLibraryPanel />
       </div>
+
+      <AgentBar />
 
       <div className="status-bar">
         <div className="status-item">
@@ -248,7 +266,7 @@ export default function App() {
           />
           <span>{statusInfo || "就绪"}</span>
         </div>
-        <div className="status-item status-version">v0.12.0 · Film Atelier</div>
+        <div className="status-item status-version">v0.13.0 · LibTV × MiniMax</div>
       </div>
 
       {modals.script && (
@@ -334,27 +352,12 @@ export default function App() {
         />
       )}
 
-      {modals.lipSync && (
-        <LipSyncModal
-          videos={videos}
-          voices={voices}
-          characterCards={characterCards}
-          onClose={() => setModal("lipSync", false)}
-          onSuccess={handleLipSyncGenerated}
-        />
-      )}
-
-      {modals.postprocess && (
-        <PostprocessModal
-          videos={videos}
-          voices={voices}
-          onClose={() => setModal("postprocess", false)}
-          onSuccess={handlePostprocessGenerated}
-        />
-      )}
-
       {modals.pipeline && (
         <PipelineModal onClose={() => setModal("pipeline", false)} />
+      )}
+
+      {modals.nsfwGate && (
+        <NsfwGateModal onClose={() => setModal("nsfwGate", false)} />
       )}
     </div>
   );

@@ -44,7 +44,7 @@ COMMON_REVERSE_ENV_ALLOWLIST: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"^DASHBOX_CE_ROOT$"), "Audit script discovery override, not runtime app config."),
     (
         re.compile(
-            r"^(?:PROJECT_ID|PROJECT_DIR|PROJECT_DIR_FILE|DIRS_FILE|TASK_FILE|TASK_ID|LANE|MODE|"
+            r"^(?:PROJECT_ID|PROJECT_DIR|PROJECT_DIR_FILE|DIRS_FILE|TASK_FILE|TASKS_PATH|TASK_ID|LANE|MODE|"
             r"FIXTURE_DIR|LOG_DIR|M05_.*|FOSS_ONLY_.*|NOVEL_FIXTURE|STEP_TIMEOUT|MODE_UPPER|"
             r"PROVIDER_(?:CHECK|HAS_KEY|KEY_ENV|KEY_INFO)|ST_ACCEPT_PORT|SERVER_PID|"
             r"RENDER_IMG|VIDEO_DIR|VITE_DIRECTOR_VIEWER_URL)$"

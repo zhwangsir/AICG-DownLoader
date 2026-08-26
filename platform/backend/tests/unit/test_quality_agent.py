@@ -78,3 +78,49 @@ class TestQualityAgent:
         )
         result = quality_agent._serialize_subtitles([subtitle])
         assert "你好" in result
+
+
+class TestMultishotDriftLabel:
+    """M12.3：多镜联合生成组自动标注跨镜角色漂移风险（H3 独有失败模式）。"""
+
+    @staticmethod
+    def _scene(scene_id: int, episode: int = 1, duration: int = 4) -> Scene:
+        return Scene(
+            scene_id=scene_id,
+            episode=episode,
+            duration_seconds=duration,
+            description=f"场景{scene_id}",
+        )
+
+    def test_adjacent_group_labeled(self, quality_agent, monkeypatch):
+        """同集相邻 3 场景（12s ≤ 14s 上限）将并入一个多镜组 → 逐场景标注漂移风险。"""
+        monkeypatch.setattr("app.agents.quality_agent.settings.video_backend", "h3")
+        scenes = [self._scene(1), self._scene(2), self._scene(3)]
+        issues = quality_agent._multishot_group_issues(scenes)
+        assert len(issues) == 3
+        assert all(i.category == "visual_risk" for i in issues)
+        assert all("多镜" in i.message for i in issues)
+        assert {i.scene_id for i in issues} == {1, 2, 3}
+
+    def test_cross_episode_not_labeled(self, quality_agent, monkeypatch):
+        """跨集场景不并组 → 无多镜标注。"""
+        monkeypatch.setattr("app.agents.quality_agent.settings.video_backend", "h3")
+        scenes = [self._scene(1, episode=1), self._scene(2, episode=2)]
+        assert quality_agent._multishot_group_issues(scenes) == []
+
+    def test_single_scene_not_labeled(self, quality_agent, monkeypatch):
+        """单场景不成组 → 无标注。"""
+        monkeypatch.setattr("app.agents.quality_agent.settings.video_backend", "h3")
+        assert quality_agent._multishot_group_issues([self._scene(1)]) == []
+
+    def test_non_h3_backend_not_labeled(self, quality_agent):
+        """非 H3 后端（conftest 默认 comfyui）→ 不标注（多镜是 H3 独有路径）。"""
+        scenes = [self._scene(1), self._scene(2), self._scene(3)]
+        assert quality_agent._multishot_group_issues(scenes) == []
+
+    def test_multishot_disabled_not_labeled(self, quality_agent, monkeypatch):
+        """h3_multishot_enabled=False → 不标注。"""
+        monkeypatch.setattr("app.agents.quality_agent.settings.video_backend", "h3")
+        monkeypatch.setattr("app.agents.quality_agent.settings.h3_multishot_enabled", False)
+        scenes = [self._scene(1), self._scene(2)]
+        assert quality_agent._multishot_group_issues(scenes) == []

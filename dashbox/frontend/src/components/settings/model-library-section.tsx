@@ -6,6 +6,7 @@
  */
 import {
   Download,
+  Film,
   HardDrive,
   ImagePlus,
   Loader2,
@@ -32,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { ModelNamePicker } from "@/components/settings/model-name-picker";
+import { WorksGallery } from "@/components/settings/works-gallery";
 import { cn } from "@/lib/utils";
 import { useDownloadRequestStore } from "@/stores/downloadRequestStore";
 import {
@@ -106,7 +108,7 @@ async function requestErrorMessage(error: unknown, fallback: string): Promise<st
 
 export function ModelLibrarySection() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<"nas" | "download" | "studio">("nas");
+  const [tab, setTab] = useState<"nas" | "download" | "studio" | "works">("nas");
   const [gateOpen, setGateOpen] = useState(false);
   const nsfwQuery = useNsfwStatus();
   const nsfwEnabled = nsfwQuery.data?.data?.nsfw_enabled ?? false;
@@ -172,6 +174,21 @@ export function ModelLibrarySection() {
             <ImagePlus className="size-3.5" aria-hidden />
             {t("settings.library.tabs.studio")}
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "works"}
+            onClick={() => setTab("works")}
+            className={cn(
+              "flex h-8 items-center gap-1.5 rounded px-3 text-sm font-medium transition-colors",
+              tab === "works"
+                ? "bg-white/[0.09] text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Film className="size-3.5" aria-hidden />
+            {t("settings.library.tabs.works")}
+          </button>
         </div>
         <div className="ml-auto">
           <Button
@@ -204,6 +221,8 @@ export function ModelLibrarySection() {
         <NasModelList nsfwEnabled={nsfwEnabled} />
       ) : tab === "studio" ? (
         <ImageStudioTab />
+      ) : tab === "works" ? (
+        <WorksGallery />
       ) : (
         <ModelDownloadTab prefill={prefill} />
       )}

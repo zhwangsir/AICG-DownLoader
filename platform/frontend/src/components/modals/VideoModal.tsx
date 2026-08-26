@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
+import { Dices, RotateCcw } from "lucide-react";
 import {
   generateVideoAsync,
+  rerunShot,
   SceneData,
   StoryboardData,
   VideoData,
 } from "../../api/client";
 import { useProgress } from "../../hooks/useProgress";
+import { useDramaStore } from "../../store/useDramaStore";
 import { ProgressBar } from "../ProgressBar";
+import { PromptToolkit } from "../common/PromptToolkit";
 import { modalScrollStyle, textareaStyle } from "./shared";
 
 export function VideoModal({
@@ -33,8 +37,42 @@ export function VideoModal({
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const progress = useProgress(streamUrl);
 
+  // M25.1 锚点重拍：pipeline 快照 project_id + 已有视频场景才可用
+  const pipelineProjectId = useDramaStore((s) => s.pipelineProjectId);
+  const videos = useDramaStore((s) => s.videos);
+  const [rerunning, setRerunning] = useState<"lock" | "reseed" | null>(null);
+
   const selectedStoryboard = storyboards.find((s) => s.scene_id === selectedSceneId) || null;
   const selectedScene = scenes.find((s) => s.scene_id === selectedSceneId) || null;
+  // 该场景已有视频产物且存在 pipeline 快照 → 允许锚点重拍
+  const canRerun =
+    !!pipelineProjectId &&
+    !!selectedSceneId &&
+    videos.some((v) => v.scene_id === selectedSceneId);
+
+  /** M25.1 锚点重拍：mode=lock 沿用快照 seed；mode=reseed 换 seed 重拍 */
+  const handleRerun = async (mode: "lock" | "reseed") => {
+    if (!canRerun || rerunning || loading) return;
+    setRerunning(mode);
+    setError(null);
+    try {
+      const resp = await rerunShot({
+        project_id: pipelineProjectId,
+        scene_id: selectedSceneId!,
+        // reseed 显式开关（后端忽略快照 seed 强制随机）；lock 不传（沿用快照锁定值）
+        ...(mode === "reseed" ? { reseed: true } : {}),
+      });
+      if (resp.success && resp.data) {
+        onSuccess(resp.data);
+      } else {
+        setError(resp.error || "重拍失败");
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRerunning(null);
+    }
+  };
 
   useEffect(() => {
     if (selectedScene) {
@@ -97,7 +135,7 @@ export function VideoModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={modalScrollStyle} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">生成视频片段（Wan 2.2 I2V）</div>
+        <div className="modal-title">生成视频片段（H3 / LTX-2.5 双引擎）</div>
         {storyboards.length === 0 ? (
           <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
             请先生成分镜关键帧。
@@ -136,6 +174,12 @@ export function VideoModal({
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
               />
+              <PromptToolkit
+                text={prompt}
+                onChange={setPrompt}
+                context="短剧视频分镜提示词"
+                disabled={loading || rerunning !== null}
+              />
             </div>
             <div className="modal-field">
               <label className="modal-label">反向提示词（可编辑）</label>
@@ -170,10 +214,32 @@ export function VideoModal({
           <button className="topbar-btn" onClick={onClose}>
             取消
           </button>
+          {canRerun && (
+            <>
+              <button
+                className="topbar-btn"
+                title="锚点重拍：沿用快照 seed/引擎/参数，仅重跑此镜头"
+                disabled={loading || rerunning !== null}
+                onClick={() => handleRerun("lock")}
+              >
+                <RotateCcw size={13} style={{ marginRight: 4 }} />
+                {rerunning === "lock" ? "重拍中…" : "锚点重拍"}
+              </button>
+              <button
+                className="topbar-btn"
+                title="换 seed 重拍：锁定其余参数，仅随机种子变化"
+                disabled={loading || rerunning !== null}
+                onClick={() => handleRerun("reseed")}
+              >
+                <Dices size={13} style={{ marginRight: 4 }} />
+                {rerunning === "reseed" ? "重拍中…" : "换 seed 重拍"}
+              </button>
+            </>
+          )}
           <button
             className="topbar-btn topbar-btn-primary"
             onClick={handleGenerate}
-            disabled={loading || !selectedStoryboard}
+            disabled={loading || rerunning !== null || !selectedStoryboard}
           >
             {loading ? <span className="loading"></span> : "生成视频"}
           </button>

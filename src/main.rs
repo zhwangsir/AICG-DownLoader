@@ -20,12 +20,12 @@ mod sys_info;
 // 作者 Winery（真名 WangZhenYu）。这些常量是全应用署名的唯一来源，
 // 用于窗口标题、「关于」页与（经 Cargo/winresource）二进制元数据。
 // 授权 MIT：可用可改，但必须保留版权与许可声明（详见仓库 LICENSE）。
-const APP_NAME: &str = "ComfyUI 模型下载器";
+const APP_NAME: &str = "AIGCPannel";
 const APP_AUTHOR: &str = "Winery (WangZhenYu)";
 const APP_COPYRIGHT: &str = "© 2026 WangZhenYu";
 const APP_HOMEPAGE: &str = "https://github.com/zhwangsir/AICG-DownLoader";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-const WINDOW_TITLE: &str = "ComfyUI 模型下载器 — by Winery";
+const WINDOW_TITLE: &str = "AIGCPannel — 模型库 · by Winery";
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -735,6 +735,10 @@ struct ModelRecord {
     version_id: Option<String>,
     size_kb: f64,
     downloaded_at: Option<String>, // ISO 8601 简单字符串
+    // LoRA 触发词（Civitai trainedWords），供工作台注册表融合；
+    // serde(default)：无此字段的旧 models.json 反序列化为空 vec，不报错
+    #[serde(default)]
+    trigger_words: Vec<String>,
 }
 
 fn models_path() -> PathBuf {
@@ -781,7 +785,16 @@ fn record_task_to_index(t: &Task) {
         return;
     }
     let mut list = load_models_index(&models_path());
-    let rec = ModelRecord {
+    // Task 不携带触发词：保留链接解析阶段（record_resolved_to_index）已落盘的 trigger_words
+    let words = existing_trigger_words(&list, &t.filename, &t.subdir);
+    let rec = task_to_record(t, words);
+    upsert_model_record(&mut list, rec);
+    save_models_index(&models_path(), &list);
+}
+
+// Task → ModelRecord（纯函数，便于单测）
+fn task_to_record(t: &Task, trigger_words: Vec<String>) -> ModelRecord {
+    ModelRecord {
         filename: t.filename.clone(),
         subdir: t.subdir.clone(),
         source: t.source.clone(),
@@ -792,15 +805,29 @@ fn record_task_to_index(t: &Task) {
         version_id: None,
         size_kb: (t.total as f64 / 1024.0).max(0.0),
         downloaded_at: Some(now_iso()),
-    };
-    upsert_model_record(&mut list, rec);
-    save_models_index(&models_path(), &list);
+        trigger_words,
+    }
+}
+
+// 列表中同 filename+subdir 记录的触发词（upsert 覆盖时保留，空则丢词）
+fn existing_trigger_words(list: &[ModelRecord], filename: &str, subdir: &str) -> Vec<String> {
+    list.iter()
+        .find(|r| r.filename == filename && r.subdir == subdir)
+        .map(|r| r.trigger_words.clone())
+        .unwrap_or_default()
 }
 
 // 从链接解析结果写入/更新 models.json
 fn record_resolved_to_index(r: &Resolved) {
     let mut list = load_models_index(&models_path());
-    let rec = ModelRecord {
+    let rec = resolved_to_record(r);
+    upsert_model_record(&mut list, rec);
+    save_models_index(&models_path(), &list);
+}
+
+// Resolved → ModelRecord（纯函数，便于单测）
+fn resolved_to_record(r: &Resolved) -> ModelRecord {
+    ModelRecord {
         filename: r.filename.clone(),
         subdir: r.subdir.clone(),
         source: r.source.clone(),
@@ -811,9 +838,17 @@ fn record_resolved_to_index(r: &Resolved) {
         version_id: Some(r.version_id.to_string()).filter(|_| r.version_id > 0),
         size_kb: r.size_kb,
         downloaded_at: None,
-    };
-    upsert_model_record(&mut list, rec);
-    save_models_index(&models_path(), &list);
+        trigger_words: resolved_trigger_words(r),
+    }
+}
+
+// 取 Resolved 当前选中版本的 trainedWords（无匹配版本则空，HF 来源 versions 为空亦空）
+fn resolved_trigger_words(r: &Resolved) -> Vec<String> {
+    r.versions
+        .iter()
+        .find(|v| v.id == r.version_id)
+        .map(|v| v.trained_words.clone())
+        .unwrap_or_default()
 }
 
 // ============ 网络 ============
@@ -4495,7 +4530,7 @@ impl eframe::App for App {
             .inner_margin(egui::Margin { left: 16.0, right: 16.0, top: 12.0, bottom: 10.0 });
         egui::TopBottomPanel::top("top").frame(top_frame).show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(egui::RichText::new("ComfyUI 模型下载器").strong());
+                ui.heading(egui::RichText::new(APP_NAME).strong());
                 chip(ui, &self.cfg.comfy_root, egui::Color32::from_rgb(38, 38, 50), C_GRAY);
                 if self.busy {
                     ui.spinner();
@@ -7551,7 +7586,7 @@ fn setup_tray() -> Option<tray_icon::TrayIcon> {
 
     let tray = tray_icon::TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip("ComfyUI 模型下载器")
+        .with_tooltip(APP_NAME)
         .with_icon(icon)
         .build()
         .ok()?;
@@ -8071,6 +8106,115 @@ mod tests {
         assert_eq!(back[0].sha256.as_deref(), Some("abcd"));
         // 不存在/损坏的文件回退为空列表
         assert!(load_tasks_from(Path::new("Z:/__no_such__/tasks.json")).is_empty());
+        let _ = fs::remove_file(&tmp);
+    }
+
+    // ---- M24.3：ModelRecord.trigger_words 字段与落盘 ----
+
+    fn sample_resolved() -> Resolved {
+        Resolved {
+            source: "civitai".into(),
+            model_name: "Mugi".into(),
+            kind: "LORA".into(),
+            base: "Illustrious".into(),
+            filename: "mugi.safetensors".into(),
+            size_kb: 1024.0,
+            subdir: "loras".into(),
+            image: String::new(),
+            download_url: "https://example.com/mugi".into(),
+            versions: vec![
+                VerInfo {
+                    id: 1,
+                    name: "v1".into(),
+                    base: "Illustrious".into(),
+                    filename: "mugi.safetensors".into(),
+                    size_kb: 1024.0,
+                    sha256: "aa".into(),
+                    trained_words: vec!["mugi".into(), "hitohira".into()],
+                    published_at: String::new(),
+                },
+                VerInfo {
+                    id: 2,
+                    name: "v2".into(),
+                    base: "Illustrious".into(),
+                    filename: "mugi_v2.safetensors".into(),
+                    size_kb: 2048.0,
+                    sha256: "bb".into(),
+                    trained_words: vec!["v2word".into()],
+                    published_at: String::new(),
+                },
+            ],
+            version_id: 1,
+            model_id: 99,
+            sha256: "aa".into(),
+            desc: "d".into(),
+        }
+    }
+
+    #[test]
+    fn model_record_trigger_words_serde_compat() {
+        // 旧格式 models.json（无 trigger_words 字段）→ 反序列化为空 vec，不报错
+        let old = r#"[{"filename":"a.safetensors","subdir":"loras","source":"civitai","download_url":"u","sha256":null,"desc":"","model_id":null,"version_id":null,"size_kb":1.0,"downloaded_at":null}]"#;
+        let list: Vec<ModelRecord> = serde_json::from_str(old).unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list[0].trigger_words.is_empty());
+
+        // 新格式带 trigger_words → 序列化/反序列化往返一致
+        let rec = resolved_to_record(&sample_resolved());
+        let s = serde_json::to_string(&vec![rec]).unwrap();
+        assert!(s.contains("trigger_words"));
+        let back: Vec<ModelRecord> = serde_json::from_str(&s).unwrap();
+        assert_eq!(back[0].trigger_words, vec!["mugi", "hitohira"]);
+    }
+
+    #[test]
+    fn resolved_to_record_picks_selected_version_words() {
+        // 选中 version_id=1 → 取 v1 的触发词
+        let rec = resolved_to_record(&sample_resolved());
+        assert_eq!(rec.trigger_words, vec!["mugi", "hitohira"]);
+        assert_eq!(rec.model_id.as_deref(), Some("99"));
+        assert_eq!(rec.version_id.as_deref(), Some("1"));
+
+        // version_id 无匹配 → 空，不 panic
+        let mut r2 = sample_resolved();
+        r2.version_id = 999;
+        assert!(resolved_to_record(&r2).trigger_words.is_empty());
+        // versions 为空（HF 来源）→ 空
+        let mut r3 = sample_resolved();
+        r3.versions.clear();
+        assert!(resolved_trigger_words(&r3).is_empty());
+    }
+
+    #[test]
+    fn task_to_record_preserves_existing_trigger_words() {
+        // 解析阶段已带词的记录
+        let list = vec![resolved_to_record(&sample_resolved())];
+        let mut t = new_task().lock().unwrap().clone();
+        t.filename = "mugi.safetensors".into();
+        t.subdir = "loras".into();
+        t.status = "完成".into();
+        t.total = 1024 * 1024;
+        // 下载完成回写时不丢解析阶段落盘的触发词
+        let words = existing_trigger_words(&list, &t.filename, &t.subdir);
+        let rec = task_to_record(&t, words);
+        assert_eq!(rec.trigger_words, vec!["mugi", "hitohira"]);
+        assert_eq!(rec.size_kb, 1024.0);
+        assert!(rec.downloaded_at.is_some());
+        // 无既有记录 → 空
+        assert!(existing_trigger_words(&list, "other.safetensors", "loras").is_empty());
+        assert!(existing_trigger_words(&list, "mugi.safetensors", "vae").is_empty()); // subdir 不匹配
+    }
+
+    #[test]
+    fn models_index_trigger_words_roundtrip() {
+        // 落盘 → 读取，trigger_words 完整保留
+        let tmp = std::env::temp_dir().join("comfy_models_trigger_words_test.json");
+        let rec = resolved_to_record(&sample_resolved());
+        save_models_index(&tmp, &[rec]);
+        let back = load_models_index(&tmp);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].filename, "mugi.safetensors");
+        assert_eq!(back[0].trigger_words, vec!["mugi", "hitohira"]);
         let _ = fs::remove_file(&tmp);
     }
 

@@ -9,9 +9,9 @@
 <dict>
     <!-- 在 Finder / 程序坞中显示的应用名 -->
     <key>CFBundleName</key>
-    <string>ComfyUI Downloader</string>
+    <string>AIGCPannel</string>
     <key>CFBundleDisplayName</key>
-    <string>ComfyUI Downloader</string>
+    <string>AIGCPannel</string>
 
     <!-- Contents/MacOS 下的可执行文件名，必须与拷入的二进制同名 -->
     <key>CFBundleExecutable</key>

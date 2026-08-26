@@ -77,6 +77,7 @@ class ScriptRequest(BaseModel):
 
     premise: str = Field(..., description="一句话创意")
     genre: str = Field("都市悬疑", description="题材")
+    style: str = Field("写实电影感", description="画风（M15.1：全链路画风锚定，场景 prompt 与角色/分镜统一风格）")
     episodes: int = Field(1, ge=1, le=100, description="集数")
     scenes_per_episode: int = Field(5, ge=1, le=30, description="每集分镜数")
     monetization_mode: str = Field(
@@ -116,6 +117,92 @@ class CharacterAssetUpdateRequest(BaseModel):
     consistency_level: str | None = None
 
 
+class MentionResolveRequest(BaseModel):
+    """@角色提及解析请求（M24.1 主体库 @引用可视化）。
+
+    分镜/视频提示词框输入的文本可含 `@角色名` 语法，本请求提交文本，
+    由 mention_service 提取全部提及并映射到角色资产库。
+    """
+
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=10000,
+        description="含 @角色名 的提示词文本（1-10000 字符）",
+    )
+
+
+# ====================================================================
+# M27 NAS 模型库 / 模型下载 / NSFW 设置
+# ====================================================================
+
+
+class NasModelEntry(BaseModel):
+    """NAS 模型库条目。"""
+
+    name: str
+    rel_path: str
+    root: str
+    type: str
+    size: int
+    mtime: float
+    nsfw: bool
+
+
+class ModelDownloadRequest(BaseModel):
+    """模型下载请求。"""
+
+    download_url: str = Field(..., min_length=8, description="直链（自动走 hf-mirror）")
+    filename: str = Field(..., min_length=1, max_length=255)
+    subdir: str = Field(..., description="ComfyUI 模型子目录（白名单）")
+    sha256: str | None = Field(None, description="可选 SHA256 校验（hex）")
+    nsfw: bool = Field(False, description="Civitai 搜索透传的 NSFW 标记")
+
+
+class NsfwSetRequest(BaseModel):
+    """NSFW 开关请求。首次开启需 new_pin 设置管理 PIN。"""
+
+    enabled: bool
+    pin: str = ""
+    new_pin: str | None = None
+
+
+class NsfwPinChangeRequest(BaseModel):
+    """修改 NSFW 管理 PIN。"""
+
+    pin: str = Field(..., min_length=1)
+    new_pin: str = Field(..., min_length=4, max_length=8)
+
+
+class MentionInfo(BaseModel):
+    """单个 @提及的解析结果：角色ID / 角色名 / 定妆照 URL / 外观锁定卡。"""
+
+    mention: str = Field(..., description="@后的原始提及文本（不含@）")
+    matched: bool = Field(..., description="是否在角色资产库中匹配到角色")
+    match_type: str = Field("", description="匹配方式：exact 精确 / ci 大小写不敏感 / fuzzy 模糊包含")
+    character_id: str = ""
+    name: str = ""
+    reference_front: str = Field("", description="定妆照正面图 URL（三视图 front）")
+    appearance_lock: str = Field("", description="外观锁定卡（仅锁定角色非空，截断 400 字符）")
+    locked: bool = False
+
+
+class MentionResolveData(BaseModel):
+    """@提及解析完整结果（POST /assets/resolve-mentions 的 data 载荷）。"""
+
+    text: str = Field(..., description="原始输入文本")
+    mentions: list[MentionInfo] = Field(default_factory=list, description="全部提及解析结果（按出现顺序）")
+    unmatched: list[str] = Field(default_factory=list, description="未匹配的提及名列表")
+    reference_images: list[str] = Field(
+        default_factory=list,
+        description="已匹配角色的定妆照正面图 URL（去重，保持提及顺序），可直接入 VideoRequest.reference_images",
+    )
+    expanded_text: str = Field(
+        ...,
+        description="展开文本：已匹配锁定角色的外观锁定卡拼入前缀段 + 原文",
+    )
+
+
 class CharacterCard(BaseModel):
     """角色卡结构（对应 PLATFORM_SPEC §4.8）。"""
 
@@ -128,6 +215,27 @@ class CharacterCard(BaseModel):
     voice_sample: str = ""
     consistency_level: str = "L2"
     used_prompts: dict[str, str] = Field(default_factory=dict, description="生成时使用的提示词（供前端编辑）")
+
+
+class FailureMode(BaseModel):
+    """失败模式定义（M25.9 C2 失败模式注册表，DramaClaw failure_registry 对等）。
+
+    四元组：detection（VLM 判定问句）/ prevention_rule（预防规则）/
+    correction_template（修正指令模板）/ negative_prompt_clause（反向子句）。
+    gate_enabled=True 的高置信模式进入 VLM 门禁；hit_count 为项目命中计数
+    （重复犯错者上浮，供提示词治理优先级排序）。
+    """
+
+    code: str
+    layer: str = Field(..., description="分层：generator(生成)/correction(修正)/director(导演调度)")
+    detection: str = Field(..., description="VLM 门禁判定问句")
+    prevention_rule: str = ""
+    correction_template: str = ""
+    negative_prompt_clause: str = ""
+    gate_enabled: bool = False
+    hit_count: int = 0
+    created_at: int = 0
+    updated_at: int = 0
 
 
 class CharacterRequest(BaseModel):
@@ -166,6 +274,23 @@ class StoryboardRequest(BaseModel):
     scene: Scene
     characters: list[Character] = Field(default_factory=list)
     style: str = Field("写实电影感", description="画风")
+    # M25.2 AutoLink：None=跟随全局 settings.auto_link_assets_enabled；
+    # 显式 False 关闭本请求的自动资产匹配（回退 M24 前行为）
+    auto_link_assets: bool | None = Field(
+        None,
+        description="AutoLink 自动资产匹配开关：None=跟随全局配置；False=关闭；True=强制开启",
+    )
+    # M25.9 C1 线稿先行：True=草图模式（低步数/低CFG/小尺寸快速出构图）；
+    # 结果 sketch_seed 记录确定性锚点，供精渲染复用
+    sketch_mode: bool = Field(
+        False,
+        description="草图模式：低步数快速出构图，用户确认后带 sketch_seed 精渲染",
+    )
+    # M25.9 C1 同 seed 防漂移：非空时精渲染复用该 seed（草图阶段返回的 seed）
+    refine_seed: int | None = Field(
+        None,
+        description="精渲染复用的草图 seed（同 seed 保证构图不漂移）；None=随机",
+    )
 
 
 class StoryboardResult(BaseModel):
@@ -174,9 +299,13 @@ class StoryboardResult(BaseModel):
     scene_id: int
     image_url: str
     prompt_used: str = ""
-    # P4.3: LTX-Video 分镜预览视频 URL（settings.ltx_video_enabled=True 时填充）
+    # 分镜预览视频 URL（预留：LTX-2.5 预览路径重建后填充）
     # 仅用于快速预览分镜动态效果，不替代正式视频生成
     preview_video_url: str = ""
+    # M25.9 C1 线稿先行：本次生成是否草图；sketch_seed 为草图确定性锚点，
+    # 前端确认构图后随 refine_seed 回传精渲染（同 seed 防构图漂移）
+    is_sketch: bool = False
+    sketch_seed: int | None = None
 
 
 class StoryboardBatchRequest(BaseModel):
@@ -185,6 +314,12 @@ class StoryboardBatchRequest(BaseModel):
     scenes: list[Scene] = Field(..., description="待生成分镜的场景列表")
     characters: list[Character] = Field(default_factory=list)
     style: str = Field("写实电影感", description="画风")
+    # M25.2 AutoLink：批量级开关，语义同 StoryboardRequest.auto_link_assets，
+    # 透传到每个场景的子请求
+    auto_link_assets: bool | None = Field(
+        None,
+        description="AutoLink 自动资产匹配开关：None=跟随全局配置；False=关闭；True=强制开启",
+    )
 
 
 class StoryboardBatchResult(BaseModel):
@@ -202,6 +337,56 @@ class VideoRequest(BaseModel):
     prompt: str = Field("", description="英文正面提示词")
     negative_prompt: str = Field("", description="英文反向提示词")
     duration_seconds: int = Field(3, description="视频时长（秒）")
+    # H3 ref2va 触发条件：非空时走 MiniMaxH3ReferenceToVideo 角色一致性路径，
+    # 分镜关键帧作第 1 张参考图（构图），本列表随后（角色外观锁定）
+    reference_images: list[str] = Field(
+        default_factory=list,
+        description="角色参考图 URL 列表（三视图定妆照），非空时 H3 走 ref2va 角色一致性路径",
+    )
+    # M11 多镜分组元数据：同集（episode 相同）且相邻的场景才可并入同一多镜组
+    episode: int = Field(1, description="所属集数（H3 多镜联合生成的分组依据）")
+    # M12 多镜 SHOT prompt 节拍视觉化：合法值见 script_agent.VALID_NARRATIVE_BEATS，
+    # 空串/非法值不注入节拍视觉指令（向后兼容逐场景路径）
+    narrative_beat: str = Field("", description="叙事节拍（hook/escalation/reversal/cliffhanger/emotional_beat/transition）")
+    # M17.3 FL2VA 末帧锚定：非空时 fl2va 工作流挂接 last_frame（首帧+末帧双锚定），
+    # prompt 前置官方对齐指令（Picture 1 → 0.00s / Picture 2 → S.SSs）
+    last_frame_url: str = Field("", description="末帧图片 URL（FL2VA 双锚定，空串退化为 I2VA 首帧单锚定）")
+    # M17.4 ref2va 音视频参考（H3 全模态）：参考视频提供运镜/节奏/剪辑结构，
+    # 独立参考音频提供 BGM 风格/声景质感（节点上限各 3，合计参考文件 ≤12）
+    reference_videos: list[str] = Field(
+        default_factory=list,
+        description="参考视频 URL 列表（ref2va 运镜/节奏参考，节点上限 3）",
+    )
+    reference_audios: list[str] = Field(
+        default_factory=list,
+        description="独立参考音频 URL 列表（ref2va BGM 风格/声景参考，节点上限 3）",
+    )
+    # M18.4 H3 画风漂移治理：目标画风由 orchestrator 透传（与剧本/角色/分镜同源），
+    # H3 prompt 冲突清洗 + 风格锚定 + 产出 VLM 画风质检的基准；空串跳过（向后兼容）
+    style: str = Field("", description="目标画风（M18.4 H3 画风锚定/质检基准，空串跳过）")
+    # M21 双引擎路由：显式指定视频引擎（None/'auto' 按镜头类型自动路由——
+    # 对白/角色一致性 → H3；空镜/动作/长场景 → LTX-2.5）
+    engine: str | None = Field(
+        None,
+        description="视频引擎：None/'auto' 自动路由 / 'h3' MiniMax H3 / 'ltx' LTX-2.5 / 'comfyui' Wan2.2 回退",
+    )
+    # M24.2 锚点重拍（单镜头参数锁定与复现）：
+    # seed 对应 u64 语义（0 .. 2^64-1），None 表示由后端随机分配；
+    # 单镜头重拍时填入首次生成的 seed，保证同镜头可复现、其余镜头不受影响
+    seed: int | None = Field(
+        None,
+        ge=0,
+        le=18446744073709551615,  # u64 上限
+        description="生成随机种子（u64 语义：0..2^64-1，None=随机）。锚点重拍时固定以保证可复现",
+    )
+    # lock_params 对应 Option<serde_json::Value> 语义（JSON 对象）：
+    # 锁定的生成参数快照（如 engine/sampler/steps/cfg），由 pipeline 步骤落盘
+    # shot_params.json 记录；重拍时回传则视频 Agent 优先采用这些参数
+    lock_params: dict[str, Any] | None = Field(
+        None,
+        description="锁定的生成参数快照（JSON 对象，如 engine/steps/sampler/cfg）。"
+        "非空时视频 Agent 优先采用，用于单镜头锚点重拍复现；None=按当前默认参数",
+    )
 
 
 class VideoResult(BaseModel):
@@ -210,6 +395,38 @@ class VideoResult(BaseModel):
     scene_id: int
     video_url: str
     duration_seconds: int = 3
+
+
+class RerunShotRequest(BaseModel):
+    """单镜头锚点重拍请求（M25.1）。
+
+    从 output/pipeline/{project_id}/shot_params.json 恢复该镜头的
+    生成参数快照（prompt/seed/engine/lock_params/reference_images 等），
+    仅重跑目标镜头，其余镜头参数与产物不受影响。
+    """
+
+    project_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="流水线 project_id（shot_params.json 所在目录名）",
+    )
+    scene_id: int = Field(..., description="要重拍的镜头场景号")
+    seed: int | None = Field(
+        None,
+        ge=0,
+        le=18446744073709551615,  # u64 上限
+        description="覆盖种子：None=沿用快照 seed；快照 seed 也为 None 时由后端随机",
+    )
+    reseed: bool = Field(
+        False,
+        description="换 seed 重拍：True 时忽略快照与 seed 字段，强制后端随机（与 seed 互斥，reseed 优先）",
+    )
+    override_prompt: str = Field(
+        "",
+        max_length=10000,
+        description="覆盖提示词（非空时替换快照 prompt 重拍；空串沿用快照）",
+    )
 
 
 class VideoBatchRequest(BaseModel):
@@ -319,14 +536,27 @@ class PipelineRunRequest(BaseModel):
     scenes_per_episode: int = Field(3, ge=1, le=10, description="每集分镜数")
     monetization_mode: str = Field("iaa", description="变现模式：iaa / iap")
     style: str = Field("写实电影感", description="画风")
+    # M21.3 长视频模式：standard(逐场景生成) / long(LongVideoPlanner 拆块 + 帧链续写，
+    # 需 settings.long_video_enabled=True；视觉轨整体产出，配音/字幕步骤跳过)
+    video_mode: str = Field("standard", description="视频生成模式：standard / long")
     generate_character_refs: bool = Field(True, description="是否生成角色定妆照（耗时较长）")
     max_character_refs: int = Field(2, ge=0, le=10, description="最多生成定妆照的角色数")
     video_duration_seconds: int = Field(3, ge=1, le=10, description="单镜头视频时长（秒）")
     run_quality_check: bool = Field(True, description="成片后是否执行文本质检")
+    # M13 角色一致性对照视觉检测（VLM 逐场景对照角色定妆参考图，耗时较长，默认关闭）
+    run_visual_check: bool = Field(False, description="成片后是否执行视觉质检（角色漂移对照）")
     ai_label_enabled: bool = Field(True, description="成片烧录「AI生成」标识（合规默认开启）")
     license_number: str = Field("", description="短剧备案号（非空时随标识烧录）")
     output_resolution: str = Field("1080x1920", description="输出分辨率")
     output_fps: int = Field(24, ge=1, le=60, description="输出帧率")
+    # M17.4 H3 全模态参考（仅 video_backend=h3 生效）：参考视频提供运镜/节奏/剪辑
+    # 结构，独立参考音频提供 BGM 风格/声景质感；透传到每个 VideoRequest 走 ref2va
+    reference_videos: list[str] = Field(
+        default_factory=list, description="参考视频 URL 列表（H3 ref2va 运镜/节奏参考，≤3）"
+    )
+    reference_audios: list[str] = Field(
+        default_factory=list, description="独立参考音频 URL 列表（H3 ref2va BGM 风格参考，≤3）"
+    )
 
 
 class AsyncTaskResponse(BaseModel):
@@ -396,6 +626,12 @@ class QualityVisualRequest(BaseModel):
         description="检查类型列表",
     )
     max_frames: int = Field(8, ge=1, le=32, description="最大抽帧数")
+    # M13 角色一致性对照：角色资产库定妆三视图参考图 URL 列表，
+    # 非空时 VLM 将视频帧与参考图逐一对照，判定角色外观漂移
+    reference_image_urls: list[str] = Field(
+        default_factory=list,
+        description="角色定妆参考图 URL 列表（空列表则不做对照检测）",
+    )
 
 
 class QualityVisualResult(BaseModel):
@@ -408,6 +644,8 @@ class QualityVisualResult(BaseModel):
     summary: str = ""
     issues: list[QualityVisualItem] = Field(default_factory=list)
     checked_at: float = Field(default_factory=time.time)
+    # M13 角色漂移实锤判定（仅 reference_image_urls 非空时由 VLM 输出，缺省 False）
+    drift_detected: bool = Field(False, description="是否检测到角色外观相对参考图漂移")
 
 
 class SubtitleFixRequest(BaseModel):
@@ -439,83 +677,6 @@ class SubtitleFixResult(BaseModel):
     fixed_count: int = Field(0, description="被修改的字幕段数")
     details: list[SubtitleFixItem] = Field(default_factory=list)
     persisted_files: list[str] = Field(default_factory=list, description="回写的 SRT 文件路径")
-
-
-class LipSyncRequest(BaseModel):
-    """唇形同步 Agent 输入。
-
-    P4.4: LatentSync 1.6 将视频人物口型与配音音频对齐。
-    失败时自动降级返回原视频 URL，不影响成片流程。
-    """
-
-    scene_id: int = Field(0, description="场景 ID")
-    video_url: str = Field(..., description="待同步的视频 URL")
-    audio_url: str = Field(..., description="目标配音音频 URL")
-    # 可选参考图：用于固定角色面部 ID（PuLID 风格）
-    reference_image_url: str | None = Field(
-        None, description="角色参考图 URL（可选，提升一致性）"
-    )
-
-
-class LipSyncResult(BaseModel):
-    """唇形同步 Agent 输出。"""
-
-    scene_id: int
-    video_url: str = Field(..., description="唇形同步后的视频 URL")
-    original_video_url: str = Field("", description="原始视频 URL（用于回退对比）")
-    synced: bool = Field(True, description="是否成功执行唇形同步（False 表示已降级）")
-    elapsed_seconds: float = 0.0
-
-
-class PostprocessStep(str, Enum):
-    """后处理步骤枚举。"""
-
-    SUPER_RESOLUTION = "super_resolution"  # RealBasicVSR x4 超分
-    FRAME_INTERPOLATION = "frame_interpolation"  # RIFE 插帧
-    INPAINTING = "inpainting"  # ProPainter 修复
-    AUDIO_DENOISE = "audio_denoise"  # DeepFilterNet3 降噪
-    FINAL_ENCODE = "final_encode"  # Mac FFmpeg H.265 编码
-
-
-class PostprocessStepResult(BaseModel):
-    """单步后处理结果。"""
-
-    step: PostprocessStep
-    success: bool
-    output_url: str = Field("", description="该步骤输出 URL（失败时为空）")
-    elapsed_seconds: float = 0.0
-    message: str = Field("", description="步骤说明或错误信息")
-    skipped: bool = Field(False, description="是否跳过（开关关闭）")
-
-
-class PostprocessRequest(BaseModel):
-    """后处理 Agent 输入。
-
-    P4.4: 编排超分 → 插帧 → 修复 → 降噪 → H.265 编码。
-    单步失败时记录并跳过，不阻断整体流程（best-effort）。
-    """
-
-    scene_id: int = Field(0, description="场景 ID")
-    video_url: str = Field(..., description="待后处理的视频 URL")
-    audio_url: str | None = Field(None, description="音频 URL（降噪需要）")
-    # 步骤覆盖：为空时按 settings 单步开关决定；非空时仅执行指定步骤
-    steps: list[PostprocessStep] = Field(
-        default_factory=list,
-        description="指定步骤（空则按 settings 单步开关执行全部启用步骤）",
-    )
-    # 输出分辨率覆盖（None 时用 settings.postprocess_final_resolution）
-    output_resolution: str | None = Field(None, description="最终输出分辨率，如 3840x2160")
-
-
-class PostprocessResult(BaseModel):
-    """后处理 Agent 输出。"""
-
-    scene_id: int
-    final_video_url: str = Field(..., description="最终成片 URL")
-    original_video_url: str = Field("", description="原始视频 URL")
-    steps: list[PostprocessStepResult] = Field(default_factory=list)
-    success: bool = Field(True, description="是否所有启用步骤均成功")
-    elapsed_seconds: float = 0.0
 
 
 class AgentResponse(BaseModel):

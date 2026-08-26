@@ -128,7 +128,7 @@ export function VoiceModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={modalScrollStyle} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">生成配音（edge-tts）</div>
+        <div className="modal-title">生成配音（IndexTTS-2）</div>
         {scenes.length === 0 ? (
           <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>请先生成剧本。</div>
         ) : (

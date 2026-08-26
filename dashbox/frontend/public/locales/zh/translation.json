@@ -4034,7 +4034,25 @@
       "tabs": {
         "nas": "本地模型",
         "download": "下载",
-        "studio": "生图台"
+        "studio": "生图台",
+        "works": "作品库"
+      },
+      "works": {
+        "filterAll": "全部",
+        "filterAnime": "动漫",
+        "filterReal": "真人",
+        "filter3d": "3D",
+        "featureAvmux": "音画直出",
+        "featureRefImg": "参考图",
+        "featureRefVideo": "参考视频",
+        "featureCombat": "打斗",
+        "featureMicroexp": "微表情",
+        "featureDialogue": "对白",
+        "featureFullAct": "完整动作",
+        "searchPlaceholder": "搜索作品…",
+        "refresh": "刷新作品库",
+        "loadError": "作品库加载失败",
+        "empty": "暂无作品，生成完成后点击刷新"
       },
       "studio": {
         "title": "生图测试台",

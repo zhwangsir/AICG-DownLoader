@@ -215,7 +215,10 @@ class TestCharacterAgentAutoRegister:
         asset = library.get(sample_char.character_id)
         assert asset is not None
         assert asset.locked is True
-        assert asset.appearance_lock == "fp"
+        # M15.1：appearance_lock 带默认画风（写实电影感）锚定尾
+        assert asset.appearance_lock == (
+            "fp, cinematic realistic, photorealistic, professional photography"
+        )
         assert "front" in asset.reference_images
 
     async def test_register_failure_does_not_break_generation(

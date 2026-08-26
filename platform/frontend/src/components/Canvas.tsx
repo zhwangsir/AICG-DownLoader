@@ -9,6 +9,7 @@ import {
 import ReactFlow, {
   Background,
   Controls,
+  MiniMap,
   addEdge,
   applyNodeChanges,
   applyEdgeChanges,
@@ -246,6 +247,17 @@ export default function Canvas() {
       setStatusInfo("所有分镜已生成");
       return;
     }
+    const taskId = `batch-storyboard-${Date.now()}`;
+    const store = useDramaStore.getState();
+    store.upsertTask({
+      id: taskId,
+      label: `批量分镜（${pending.length} 场景）`,
+      kind: "batch",
+      status: "running",
+      percent: 5,
+      message: "多 GPU 并行生成中…",
+      startedAt: Date.now(),
+    });
     startGlobalLoading(`正在批量生成分镜（${pending.length} 个场景）...`);
     pending.forEach((s) => setLoading(`scene-${s.scene_id}`, "批量生成分镜中..."));
     setStatusInfo(`正在批量生成分镜（${pending.length} 个场景），多 GPU 并行执行...`);
@@ -262,11 +274,18 @@ export default function Canvas() {
           `分镜批量生成完成: ${resp.data.results.length} 成功` +
             (failed.length ? `, ${failed.length} 失败` : "")
         );
+        store.patchTask(taskId, {
+          status: failed.length === pending.length ? "failed" : "completed",
+          percent: 100,
+          message: `${resp.data.results.length} 成功` + (failed.length ? `，${failed.length} 失败` : ""),
+        });
       } else {
         setStatusInfo(`分镜批量生成失败: ${resp.error || "未知错误"}`);
+        store.patchTask(taskId, { status: "failed", percent: 100, error: resp.error || "未知错误" });
       }
     } catch (e) {
       setStatusInfo(`分镜批量生成出错: ${String(e)}`);
+      store.patchTask(taskId, { status: "failed", percent: 100, error: String(e) });
     } finally {
       pending.forEach((s) => clearLoading(`scene-${s.scene_id}`));
       stopGlobalLoading();
@@ -305,6 +324,17 @@ export default function Canvas() {
       setStatusInfo("所有视频已生成");
       return;
     }
+    const taskId = `batch-video-${Date.now()}`;
+    const store = useDramaStore.getState();
+    store.upsertTask({
+      id: taskId,
+      label: `批量视频（${pending.length} 场景）`,
+      kind: "batch",
+      status: "running",
+      percent: 5,
+      message: "多 GPU 并行生成中…",
+      startedAt: Date.now(),
+    });
     startGlobalLoading(`正在批量生成视频（${pending.length} 个场景）...`);
     pending.forEach((p) => setLoading(`video-${p.scene_id}`, "批量生成视频中..."));
     setStatusInfo(`正在批量生成视频（${pending.length} 个场景），多 GPU 并行执行...`);
@@ -327,11 +357,18 @@ export default function Canvas() {
           `视频批量生成完成: ${resp.data.results.length} 成功` +
             (failed.length ? `, ${failed.length} 失败` : "")
         );
+        store.patchTask(taskId, {
+          status: failed.length === pending.length ? "failed" : "completed",
+          percent: 100,
+          message: `${resp.data.results.length} 成功` + (failed.length ? `，${failed.length} 失败` : ""),
+        });
       } else {
         setStatusInfo(`视频批量生成失败: ${resp.error || "未知错误"}`);
+        store.patchTask(taskId, { status: "failed", percent: 100, error: resp.error || "未知错误" });
       }
     } catch (e) {
       setStatusInfo(`视频批量生成出错: ${String(e)}`);
+      store.patchTask(taskId, { status: "failed", percent: 100, error: String(e) });
     } finally {
       pending.forEach((p) => clearLoading(`video-${p.scene_id}`));
       stopGlobalLoading();
@@ -492,6 +529,17 @@ export default function Canvas() {
     ) => {
       if (globalLoading) return;
       const nodeId = `video-${sceneId}`;
+      const taskId = `video-${sceneId}-${Date.now()}`;
+      const store = useDramaStore.getState();
+      store.upsertTask({
+        id: taskId,
+        label: `视频：场景 ${sceneId}`,
+        kind: "video",
+        status: "running",
+        percent: 0,
+        message: "任务创建中…",
+        startedAt: Date.now(),
+      });
       startGlobalLoading(`正在生成视频: 场景 ${sceneId}...`);
       setLoading(nodeId, "生成视频中...");
       setStatusInfo(`正在生成视频: 场景 ${sceneId}...`);
@@ -505,7 +553,12 @@ export default function Canvas() {
             "blurry, low quality, deformed, ugly, watermark, static",
           duration_seconds: 3,
         });
-        const evt = await pollVideoTask(task.poll_url);
+        const evt = await pollVideoTask(task.poll_url, undefined, (p) => {
+          store.patchTask(taskId, {
+            percent: p.percent,
+            message: p.message || "生成中…",
+          });
+        });
         if (
           evt.status === "completed" &&
           evt.result &&
@@ -517,13 +570,16 @@ export default function Canvas() {
           setStatusInfo(
             `视频已生成: 场景 ${sceneId} (${vd.duration_seconds}s)`
           );
+          store.patchTask(taskId, { status: "completed", percent: 100, message: `${vd.duration_seconds}s 成片` });
         } else {
           setStatusInfo(
             `视频生成失败: ${evt.error || "未知错误"}`
           );
+          store.patchTask(taskId, { status: "failed", percent: 100, error: evt.error || "未知错误" });
         }
       } catch (e) {
         setStatusInfo(`视频生成出错: ${String(e)}`);
+        store.patchTask(taskId, { status: "failed", percent: 100, error: String(e) });
       } finally {
         clearLoading(nodeId);
         stopGlobalLoading();
@@ -926,15 +982,15 @@ export default function Canvas() {
             type: "video",
             detail: vd
               ? `已生成 (${vd.duration_seconds}s)`
-              : `Wan 2.2 I2V · ${scene.duration_seconds}s`,
+              : `H3 / LTX-2.5 · ${scene.duration_seconds}s`,
             preview: vd
               ? `分辨率 1080x1920 · ${vd.duration_seconds || scene.duration_seconds}s`
               : sb
               ? `基于分镜图生成 ${scene.duration_seconds}s 视频：${(scene.description || "").slice(0, 60)}${(scene.description || "").length > 60 ? "…" : ""}`
               : `基于分镜图生成 ${scene.duration_seconds}s 视频：${(scene.description || "").slice(0, 60)}${(scene.description || "").length > 60 ? "…" : ""}`,
-            tags: ["Wan 2.2 I2V", `${scene.duration_seconds || 3}s`].filter(Boolean) as string[],
+            tags: ["H3 / LTX-2.5", `${scene.duration_seconds || 3}s`].filter(Boolean) as string[],
             meta: [
-              { label: "模型", value: "Wan 2.2 I2V" },
+              { label: "模型", value: "H3 / LTX-2.5 双引擎" },
               { label: "时长", value: `${vd?.duration_seconds || scene.duration_seconds || 0}s` },
               { label: "分辨率", value: "1080x1920" },
               { label: "状态", value: vd ? "已生成" : "待生成" },
@@ -970,16 +1026,16 @@ export default function Canvas() {
             label: `配音 ${scene.scene_id}`,
             type: "voice",
             detail: vc
-              ? `edge-tts · ${vc.total_lines} 条`
-              : "edge-tts 自动提取对白",
+              ? `IndexTTS-2 · ${vc.total_lines} 条`
+              : "IndexTTS-2 自动提取对白",
             preview: vc
               ? `已生成 ${vc.total_lines} 条语音。${scene.dialogue ? `对白：${scene.dialogue.length > 60 ? scene.dialogue.slice(0, 60) + "…" : scene.dialogue}` : ""}`
               : scene.dialogue
               ? `待生成配音 · 对白：${scene.dialogue.length > 80 ? scene.dialogue.slice(0, 80) + "…" : scene.dialogue}`
               : "待生成后展示对白摘要",
-            tags: ["edge-tts", vc ? `${vc.total_lines} 条` : undefined].filter(Boolean) as string[],
+            tags: ["IndexTTS-2", vc ? `${vc.total_lines} 条` : undefined].filter(Boolean) as string[],
             meta: [
-              { label: "引擎", value: "edge-tts" },
+              { label: "引擎", value: "IndexTTS-2" },
               { label: "台词数", value: vc ? `${vc.total_lines} 条` : "—" },
               { label: "状态", value: vc ? "已生成" : "待生成" },
             ],
@@ -1312,29 +1368,70 @@ export default function Canvas() {
               size={1.5}
             />
             <Controls showInteractive={false} position="bottom-left" />
+            {/* LibTV 画布标配 MiniMap：深色化 + 节点类型色映射 */}
+            <MiniMap
+              position="top-right"
+              pannable
+              zoomable
+              className="canvas-minimap"
+              nodeColor={(n) => {
+                const t = (n.data as { type?: string })?.type ?? "script";
+                return (
+                  {
+                    script: "#c9b896",
+                    character: "#e08ab8",
+                    storyboard: "#09caf5",
+                    video: "#5eb8d4",
+                    voice: "#7ec98f",
+                    subtitle: "#b8a88a",
+                    edit: "#f2664d",
+                    quality: "#f2a93a",
+                    visual_quality: "#a8c46a",
+                  } as Record<string, string>
+                )[t] ?? "#c9b896";
+              }}
+              maskColor="rgba(20, 20, 20, 0.72)"
+            />
             <NodeInternalsUpdater nodesKey={nodesKey} />
           </ReactFlow>
         </div>
 
-      </div>
+        {/* 空画布引导：无剧本时提示三步上手路径（LibTV Onboarding 式） */}
+        {!scriptData && (
+          <div className="canvas-onboarding">
+            <div className="canvas-onboarding-step">
+              <span className="canvas-onboarding-num">1</span>底部输入创意，回车生成剧本
+            </div>
+            <div className="canvas-onboarding-arrow">→</div>
+            <div className="canvas-onboarding-step">
+              <span className="canvas-onboarding-num">2</span>角色定妆照锁定外观
+            </div>
+            <div className="canvas-onboarding-arrow">→</div>
+            <div className="canvas-onboarding-step">
+              <span className="canvas-onboarding-num">3</span>逐镜分镜 → 视频 → 成片
+            </div>
+          </div>
+        )}
 
-      <div className="floating-actions">
-        <button
-          className="floating-btn"
-          disabled={globalLoading || !scriptData}
-          onClick={handleGenerateAllStoryboards}
-        >
-          <ImageIcon size={13} strokeWidth={2.2} />
-          批量生成分镜
-        </button>
-        <button
-          className="floating-btn"
-          disabled={globalLoading || storyboards.length === 0}
-          onClick={handleGenerateAllVideos}
-        >
-          <Film size={13} strokeWidth={2.2} />
-          批量生成视频
-        </button>
+        {/* 批量操作：锚定在画布容器右下，随面板开关闭合自动避让 */}
+        <div className="floating-actions">
+          <button
+            className="floating-btn"
+            disabled={globalLoading || !scriptData}
+            onClick={handleGenerateAllStoryboards}
+          >
+            <ImageIcon size={13} strokeWidth={2.2} />
+            批量生成分镜
+          </button>
+          <button
+            className="floating-btn"
+            disabled={globalLoading || storyboards.length === 0}
+            onClick={handleGenerateAllVideos}
+          >
+            <Film size={13} strokeWidth={2.2} />
+            批量生成视频
+          </button>
+        </div>
       </div>
     </>
   );

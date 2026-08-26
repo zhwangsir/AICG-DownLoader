@@ -155,7 +155,7 @@ class RAGService:
         entries: list[KnowledgeEntry] = []
         for path in sorted(self.kb_dir.glob("*.json")):
             if path.name == "__init__.py":
-                continue
+                continue  # pragma: no cover — glob("*.json") 永不匹配 .py，防御性死分支
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 for raw in data.get("entries", []):

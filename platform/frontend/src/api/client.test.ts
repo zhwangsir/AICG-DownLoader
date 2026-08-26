@@ -13,8 +13,7 @@ import {
   composeVideo,
   checkQuality,
   checkVisualQuality,
-  generateLipSync,
-  generatePostprocess,
+  getModelRegistry,
   pollVideoTask,
   runPipeline,
   cancelPipeline,
@@ -187,16 +186,6 @@ describe("API 端点超时保护（F2 同类缺陷防回归）", () => {
         }),
       API_TIMEOUTS.visualQuality,
     ],
-    [
-      "generateLipSync",
-      () => generateLipSync({ scene_id: 1, video_url: "v", audio_url: "a" }),
-      API_TIMEOUTS.lipSync,
-    ],
-    [
-      "generatePostprocess",
-      () => generatePostprocess({ scene_id: 1, video_url: "v" }),
-      API_TIMEOUTS.postprocess,
-    ],
   ];
 
   it.each(cases)(
@@ -317,6 +306,25 @@ describe("M8 全链路 pipeline API", () => {
     const resp = await runPipeline(PIPELINE_PARAMS);
     expect(resp.task_id).toBe("task-1");
     expect(resp.agent).toBe("pipeline");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runPipeline 传递 run_visual_check 开关（M14 视觉漂移对照）", async () => {
+    const fetchMock = vi.fn(async (_url: string, opts?: RequestInit) => {
+      const body = JSON.parse(String(opts?.body));
+      expect(body.run_visual_check).toBe(true);
+      expect(body.run_quality_check).toBe(true);
+      return mockJsonResponse({
+        task_id: "task-vc",
+        agent: "pipeline",
+        status: "pending",
+        poll_url: "http://localhost:8100/api/progress/task-vc",
+        stream_url: "http://localhost:8100/api/progress/task-vc/stream",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const resp = await runPipeline({ ...PIPELINE_PARAMS, run_visual_check: true });
+    expect(resp.task_id).toBe("task-vc");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -447,5 +455,45 @@ describe("M9 extractScriptFromReport 报告剧本提取", () => {
         steps: { script: { data: { title: "t" } } }, // 缺 project_id/characters/scenes
       })
     ).toBeNull();
+  });
+});
+
+describe("模型注册表 API（下载器 ↔ 工作台打通）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("getModelRegistry GET /models/registry 并解析返回结构", async () => {
+    const registry = {
+      loras: [
+        {
+          filename: "guofeng.safetensors",
+          name: "国风 LoRA",
+          style_key: "guofeng",
+          trigger_words: ["guofeng"],
+          weight: 0.8,
+          sha256: "abc123",
+          size_kb: 1024,
+          downloaded: true,
+          subdir: "loras",
+          downloaded_at: 1700000000,
+        },
+      ],
+      downloader_models: [{ id: "m1" }],
+      stats: { total: 1 },
+      sources: { civitai: true },
+    };
+    const fetchMock = vi.fn(async (url: string, opts?: RequestInit) => {
+      expect(url).toBe("/api/drama/models/registry");
+      expect(opts?.method ?? "GET").toBe("GET");
+      return mockJsonResponse(registry);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const resp = await getModelRegistry();
+    expect(resp.loras).toHaveLength(1);
+    expect(resp.loras[0].filename).toBe("guofeng.safetensors");
+    expect(resp.loras[0].trigger_words).toEqual(["guofeng"]);
+    expect(resp.stats).toEqual({ total: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

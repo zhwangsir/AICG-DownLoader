@@ -1,16 +1,15 @@
 """字幕 Agent — 音频 → ASR 转写 → AI 修正 → SRT 字幕。
 
-P4.2 升级：FireRedASR-AED-L 1.1B 为主（CER <1%），faster-whisper 为回退（CER 8-9%）。
-
 后端选择由 settings.asr_backend 控制：
-- 'firered' (默认): FireRedASR-AED-L 1.1B，CER <1%，workstation GPU
+- 'ai_omni' (默认): workstation :9210 faster-whisper large-v3
+- 'firered': FireRedASR-AED-L 1.1B，CER <1%，workstation GPU
 - 'whisper': faster-whisper tiny，CPU 可跑，作为回退
 
-FireRedASR 主路径失败时自动回退到 faster-whisper。
+主后端（ai_omni / firered）失败时自动回退到 faster-whisper。
 
 流程：
 1. 从 audio_url 下载音频文件（支持本地静态资源或远程 URL）
-2. ASR 语音识别（FireRedASR 为主，faster-whisper 回退）
+2. ASR 语音识别（ai_omni 为主，firered 备选，faster-whisper 回退）
 3. AI 优化：用 LLM 修正字幕错别字和语法问题（保持时间轴不变）
 4. 生成 SRT 格式字幕并返回
 """
@@ -30,12 +29,14 @@ from app.agents.ai_optimizer import optimize_content
 from app.agents.base import BaseAgent
 from app.config import settings
 from app.models.schemas import (
+
     AgentResponse,
     SubtitleRequest,
     SubtitleResult,
     SubtitleSegment,
 )
 from app.services.asr_service import ASRService
+from app.services.model_gateway import model_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +83,11 @@ class SubtitleAgent(BaseAgent):
     """字幕 Agent：音频 → ASR → SRT 字幕。
 
     后端选择由 settings.asr_backend 控制：
-    - 'firered' (默认): FireRedASR-AED-L 1.1B，CER <1%
+    - 'ai_omni' (默认): workstation :9210 faster-whisper large-v3
+    - 'firered': FireRedASR-AED-L 1.1B，CER <1%
     - 'whisper': faster-whisper tiny（回退）
 
-    FireRedASR 失败时自动回退到 faster-whisper。
+    主后端失败时自动回退到 faster-whisper。
     """
 
     def __init__(self):
@@ -111,9 +113,17 @@ class SubtitleAgent(BaseAgent):
 
             # ASR 转写：按后端派发
             if backend == "ai_omni":
-                segments_data, language = await self._transcribe_via_ai_omni(
-                    audio_path, request.language
-                )
+                try:
+                    segments_data, language = await self._transcribe_via_ai_omni(
+                        audio_path, request.language
+                    )
+                except Exception as ai_omni_err:
+                    logger.warning(
+                        "AI-Omni ASR 失败，回退 faster-whisper: %s", ai_omni_err,
+                    )
+                    segments_data, language = await self._transcribe_via_whisper(
+                        audio_path, request.language
+                    )
             elif backend == "firered":
                 try:
                     segments_data, language = await self._transcribe_via_firered(
@@ -207,7 +217,12 @@ class SubtitleAgent(BaseAgent):
     async def _transcribe_via_ai_omni(
         self, audio_path: str, language: str
     ) -> tuple[list[dict], str]:
-        """AI-Omni ASR 路径：Workstation :9210（faster-whisper large-v3）。
+        """AI-Omni ASR 路径：经本地模型网关 asr 能力健康路由。
+
+        DramaClaw 重构：端点不再硬编码 settings.ai_omni_asr_endpoint，改由网关
+        在「studio02 whisper.cpp :9212（主）→ workstation faster-whisper :9210
+        （回退）」链上按健康探测选择（require_healthy=False 时 fail-open 主端点，
+        由上层回退 faster-whisper 兜底）。
 
         OpenAI 兼容端点 /v1/audio/transcriptions，verbose_json 返回含
         segments 时间轴（2026-08-04 服务端已补回 segments 字段）。
@@ -216,8 +231,9 @@ class SubtitleAgent(BaseAgent):
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
 
+        asr_endpoint = await model_gateway.route("asr", require_healthy=False)
         resp = await self.http.post(
-            f"{settings.ai_omni_asr_endpoint}/v1/audio/transcriptions",
+            f"{asr_endpoint}/v1/audio/transcriptions",
             files={"file": (Path(audio_path).name, audio_bytes, "audio/mpeg")},
             data={
                 "response_format": "verbose_json",

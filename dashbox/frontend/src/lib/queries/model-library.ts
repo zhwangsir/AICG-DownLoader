@@ -117,6 +117,31 @@ export interface PreflightResult {
 }
 
 // ---------------------------------------------------------------------------
+// 作品库（works：样本视频矩阵画廊）
+// ---------------------------------------------------------------------------
+
+export interface WorkItem {
+  id: string;
+  title: string;
+  titleEn?: string;
+  category: "anime" | "real" | "3d" | string;
+  duration: string;
+  engine: string;
+  features: string[];
+  nsfw: boolean;
+  desc: string;
+  seconds?: number;
+  createdAt?: string;
+  has_cover?: boolean;
+  sizeBytes?: number;
+}
+
+export interface WorksListResult {
+  items: WorkItem[];
+  total: number;
+}
+
+// ---------------------------------------------------------------------------
 // 查询
 // ---------------------------------------------------------------------------
 
@@ -170,6 +195,50 @@ export function useRefreshModelLibrary() {
       });
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// 作品库查询
+// ---------------------------------------------------------------------------
+
+export function useWorksLibrary(
+  params: { category?: string; feature?: string; q?: string } = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: queryKeys.worksLibraryList(params),
+    queryFn: ({ signal }) =>
+      api
+        .get("api/v1/works", {
+          signal,
+          searchParams: {
+            ...(params.category ? { category: params.category } : {}),
+            ...(params.feature ? { feature: params.feature } : {}),
+            ...(params.q ? { q: params.q } : {}),
+          },
+        })
+        .json<OkResponse<WorksListResult>>(),
+    enabled,
+  });
+}
+
+export function useRefreshWorksLibrary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post("api/v1/works/refresh").json<OkResponse<{ total: number }>>(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["works", "list"] });
+    },
+  });
+}
+
+export function workMediaUrl(id: string): string {
+  return `api/v1/works/${id}/media`;
+}
+
+export function workCoverUrl(id: string): string {
+  return `api/v1/works/${id}/cover`;
 }
 
 export function useCivitaiSearch(

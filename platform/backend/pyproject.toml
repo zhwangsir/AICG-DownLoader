@@ -1,6 +1,6 @@
 [project]
 name = "drama-platform-backend"
-version = "0.3.0"
+version = "0.4.0"
 description = "AI 短剧一条龙工作台后端 — 剧本/角色/分镜/视频/配音/字幕 Agent"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,7 +12,6 @@ dependencies = [
     "pydantic-settings>=2.5.0",
     "python-dotenv>=1.0.0",
     "websockets>=13.0",
-    "langgraph>=0.2.0",
     "json-repair>=0.30.0",
     "edge-tts>=7.0.0",
     "faster-whisper>=1.0.0",
@@ -41,7 +40,10 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v --cov=app --cov-report=term-missing --cov-fail-under=80"
+addopts = "-v --cov=app --cov-report=term-missing --cov-fail-under=80 -m 'not slow'"
+markers = [
+    "slow: 需要真实外部服务或 GPU 的长时间测试（默认跳过）",
+]
 
 [tool.coverage.run]
 source = ["app"]

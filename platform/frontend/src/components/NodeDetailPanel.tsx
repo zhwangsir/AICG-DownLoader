@@ -128,8 +128,12 @@ export default function NodeDetailPanel({
     onClose();
   };
 
-  const validateScriptForm = (form: ScriptGenerateOptions): string | null => {
-    if (!form.premise.trim()) return "请输入一句话创意";
+  const validateScriptForm = (
+    form: ScriptGenerateOptions,
+    opts?: { skipPremise?: boolean }
+  ): string | null => {
+    // 已有剧本态无 premise 输入框（用现有剧本重新生成），跳过创意校验
+    if (!opts?.skipPremise && !form.premise.trim()) return "请输入一句话创意";
     if (!form.genre.trim()) return "请输入题材";
     if (form.episodes === "") return "请设置集数";
     if (form.scenes_per_episode === "") return "请设置每集分镜数";
@@ -340,11 +344,11 @@ export default function NodeDetailPanel({
               type="number"
               value={charForm.age ?? ""}
               onChange={(e) =>
-                setCharForm((prev) =>
-                  prev
-                    ? { ...prev, age: e.target.value ? Number(e.target.value) : null }
-                    : prev
-                )
+                // 表单项仅在 charForm 非空时渲染，prev 恒非 null
+                setCharForm((prev) => ({
+                  ...prev!,
+                  age: e.target.value ? Number(e.target.value) : null,
+                }))
               }
             />
             <label className="panel-label">外貌描述</label>
@@ -543,11 +547,11 @@ export default function NodeDetailPanel({
               type="number"
               value={sceneForm.duration_seconds}
               onChange={(e) =>
-                setSceneForm((prev) =>
-                  prev
-                    ? { ...prev, duration_seconds: Number(e.target.value) || 0 }
-                    : prev
-                )
+                // 表单项仅在 sceneForm 非空时渲染，prev 恒非 null
+                setSceneForm((prev) => ({
+                  ...prev!,
+                  duration_seconds: Number(e.target.value) || 0,
+                }))
               }
             />
 
@@ -685,7 +689,7 @@ export default function NodeDetailPanel({
               <button
                 className="panel-btn"
                 onClick={() => {
-                  const err = validateScriptForm(ideaForm);
+                  const err = validateScriptForm(ideaForm, { skipPremise: true });
                   if (err) {
                     setFormError(err);
                     return;
@@ -897,7 +901,7 @@ function AgentAssistToolbar({
               if (text.trim() && !loadingAction && !disabled) {
                 (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--primary)";
                 (e.currentTarget as HTMLButtonElement).style.color = "var(--primary)";
-                (e.currentTarget as HTMLButtonElement).style.background = "rgba(184,130,63,0.08)";
+                (e.currentTarget as HTMLButtonElement).style.background = "rgba(9,202,245,0.08)";
               }
             }}
             onMouseLeave={(e) => {

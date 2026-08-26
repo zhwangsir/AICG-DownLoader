@@ -122,4 +122,6 @@ export const queryKeys = {
   modelLibrarySearch: (params: { q: string; type?: string }) =>
     ["model-library", "search", params] as const,
   modelLibraryDownloads: () => ["model-library", "downloads"] as const,
+  worksLibraryList: (params: { category?: string; feature?: string; q?: string }) =>
+    ["works", "list", params] as const,
 };

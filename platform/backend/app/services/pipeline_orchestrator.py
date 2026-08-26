@@ -12,26 +12,32 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from app.agents.character_agent import character_agent
 from app.agents.edit_agent import edit_agent
-from app.agents.quality_agent import quality_agent
+from app.agents.quality_agent import quality_agent, visual_quality_agent
 from app.agents.script_agent import script_agent
 from app.agents.storyboard_agent import storyboard_agent
 from app.agents.subtitle_agent import subtitle_agent
-from app.agents.video_agent import video_agent
+from app.agents.video_agent import group_scenes_for_multishot, video_agent
 from app.agents.voice_agent import voice_agent
+from app.config import settings
+from app.core.node_logger import node_span
 from app.core.progress import progress_tracker
 from app.models.schemas import (
+    AgentResponse,
     CharacterRequest,
     DialogueLine,
     EditRequest,
     EditSegment,
     PipelineRunRequest,
     QualityCheckRequest,
+    QualityVisualRequest,
     Scene,
     Script,
     ScriptRequest,
@@ -41,8 +47,20 @@ from app.models.schemas import (
     VideoRequest,
     VoiceRequest,
 )
+from app.services.character_library import character_library
+from app.services.long_video_planner import long_video_planner
+from app.services.long_video_service import LongVideoError, LongVideoService
+from app.services.style_anchor import (
+    resolve_style_anchor,
+    style_negative_tail,
+    style_positive_tail,
+)
 
 logger = logging.getLogger(__name__)
+
+# M24.2 锚点重拍：逐镜头生成参数快照根目录
+# （output/pipeline/{project_id}/shot_params.json）
+PIPELINE_OUTPUT_ROOT = Path(__file__).resolve().parent.parent.parent / "output" / "pipeline"
 
 # 各步骤进度区间（percent）
 _PROGRESS = {
@@ -111,32 +129,79 @@ class PipelineOrchestrator:
             "steps": {},
         }
         try:
-            script = await self._step_script(task_id, request, report)
+            # T3 节点日志埋点：每个步骤记 start/ok/error（含耗时与关键参数）
+            async with node_span(
+                "pipeline.script", task_id=task_id,
+                premise=request.premise[:80], genre=request.genre,
+                episodes=request.episodes, scenes_per_episode=request.scenes_per_episode,
+            ):
+                script = await self._step_script(task_id, request, report)
             self._check_cancel(cancel_event)
 
             if request.generate_character_refs:
-                await self._step_characters(task_id, script, request, report)
+                async with node_span(
+                    "pipeline.character", task_id=task_id,
+                    characters=len(script.characters), style=request.style,
+                ):
+                    await self._step_characters(task_id, script, request, report)
                 self._check_cancel(cancel_event)
             else:
                 report["steps"]["character"] = {"skipped": True}
 
-            storyboards = await self._step_storyboard(task_id, script, request, report)
+            async with node_span(
+                "pipeline.storyboard", task_id=task_id,
+                scenes=len(script.scenes), style=request.style,
+                sketch_mode=settings.sketch_mode_enabled,
+            ):
+                storyboards = await self._step_storyboard(task_id, script, request, report)
             self._check_cancel(cancel_event)
 
-            videos = await self._step_video(task_id, script, storyboards, request, report)
+            async with node_span(
+                "pipeline.video", task_id=task_id,
+                scenes=len(script.scenes), video_mode=request.video_mode,
+                backend=settings.video_backend,
+            ):
+                videos = await self._step_video(task_id, script, storyboards, request, report)
             self._check_cancel(cancel_event)
 
-            voices = await self._step_voice(task_id, script, report)
-            self._check_cancel(cancel_event)
+            subtitles: list[dict[str, Any]] = []
+            if request.video_mode == "long":
+                # M21.3 长视频模式：视觉轨整体产出（单条长视频），逐场景配音/字幕的
+                # 时间轴对齐属后续能力，本里程碑跳过；剪辑步骤以长视频直接作成片
+                report["steps"]["voice"] = {"skipped": True, "reason": "长视频模式：视觉轨整体生成"}
+                report["steps"]["subtitle"] = {"skipped": True, "reason": "长视频模式：视觉轨整体生成"}
+                edit = {
+                    "final_video_url": videos[0]["video_url"],
+                    "duration_seconds": videos[0]["duration_seconds"],
+                    "segments_count": 1,
+                    "mode": "long",
+                }
+                report["steps"]["edit"] = edit
+            else:
+                async with node_span(
+                    "pipeline.voice", task_id=task_id, scenes=len(script.scenes),
+                ):
+                    voices = await self._step_voice(task_id, script, report)
+                self._check_cancel(cancel_event)
 
-            subtitles = await self._step_subtitle(task_id, voices, report)
-            self._check_cancel(cancel_event)
+                async with node_span(
+                    "pipeline.subtitle", task_id=task_id, backend=settings.asr_backend,
+                ):
+                    subtitles = await self._step_subtitle(task_id, voices, report)
+                self._check_cancel(cancel_event)
 
-            edit = await self._step_edit(task_id, project_id, script, videos, voices, subtitles, request, report)
+                async with node_span(
+                    "pipeline.edit", task_id=task_id, segments=len(videos),
+                ):
+                    edit = await self._step_edit(task_id, project_id, script, videos, voices, subtitles, request, report)
             self._check_cancel(cancel_event)
 
             if request.run_quality_check:
-                await self._step_quality(task_id, project_id, script, subtitles, report)
+                async with node_span("pipeline.quality", task_id=task_id):
+                    await self._step_quality(task_id, project_id, script, subtitles, report)
+            if request.run_visual_check:
+                async with node_span("pipeline.visual_quality", task_id=task_id):
+                    await self._step_visual_quality(task_id, project_id, script, videos, report)
 
             report["passed"] = True
             report["total_elapsed_seconds"] = time.time() - report["started_at"]
@@ -188,6 +253,9 @@ class PipelineOrchestrator:
             ScriptRequest(
                 premise=request.premise,
                 genre=request.genre,
+                # M15.8: 画风必须传入剧本 Agent（此前漏传 → 场景 prompt 按默认写实
+                # 清洗，国漫任务残留 cinematic realism / 负面词排斥 anime）
+                style=request.style,
                 episodes=request.episodes,
                 scenes_per_episode=request.scenes_per_episode,
                 monetization_mode=request.monetization_mode,
@@ -259,29 +327,291 @@ class PipelineOrchestrator:
         request: PipelineRunRequest,
         report: dict,
     ) -> list[dict[str, Any]]:
+        if request.video_mode == "long":
+            return await self._step_video_long(task_id, script, storyboards, request, report)
         scene_prompt_map = {s.scene_id: s.prompt for s in script.scenes}
+        scene_episode_map = {s.scene_id: s.episode for s in script.scenes}
+        # M12.1 多镜 SHOT prompt 节拍视觉化：逐场景 narrative_beat 透传到 VideoRequest
+        scene_beat_map = {s.scene_id: s.narrative_beat for s in script.scenes}
+        # H3 ref2va 角色一致性：资产库三视图参考图注入每个 VideoRequest
+        reference_images = self._collect_character_reference_images(script)
+        # M15.1 画风锚定：H3 视频 prompt 强制追加与剧本/角色/分镜一致的画风尾，
+        # 负面词注入冲突画风（如写实风排斥 anime/cartoon），防止 footage 画风漂移
+        anchor = resolve_style_anchor(request.style)
+        video_style_tail = style_positive_tail(anchor)
+        style_neg = style_negative_tail(anchor).lstrip(", ")
+        video_negative = f"{style_neg}, blurry, low quality, distorted" if style_neg else ""
         items = [
             VideoRequest(
                 scene_id=sb["scene_id"],
                 image_url=sb["image_url"],
-                prompt=scene_prompt_map.get(sb["scene_id"], ""),
-                negative_prompt="",
+                prompt=(
+                    (scene_prompt_map.get(sb["scene_id"], "") or "") + video_style_tail
+                    if (scene_prompt_map.get(sb["scene_id"], "") or "").strip()
+                    else ""
+                ),
+                negative_prompt=video_negative,
                 duration_seconds=request.video_duration_seconds,
+                reference_images=reference_images,
+                episode=scene_episode_map.get(sb["scene_id"], 1),
+                narrative_beat=scene_beat_map.get(sb["scene_id"], ""),
+                # M18.4 画风基准透传：H3 约束层冲突词清洗与 QC 检测层均以
+                # VideoRequest.style 为判定基准，漏传则两层 fail-open 静默跳过
+                # （M18.5 联合 E2E 实测发现：本轮 QC 零日志即此缺口所致）
+                style=request.style,
+                # M17.4 流水线级全模态参考透传（仅 h3 后端 ref2va 消费）
+                reference_videos=list(request.reference_videos),
+                reference_audios=list(request.reference_audios),
             )
             for sb in storyboards
         ]
+        # M17.3 FL2VA 链式末帧：同集相邻场景把「下一分镜关键帧」填入 last_frame_url，
+        # fl2va 升级首帧+末帧双锚定；多镜组末场景的链式末帧即「组后一镜关键帧」，
+        # 由 _execute_multishot_group 取作组末帧实现组间链式连续
+        if settings.video_backend.lower() == "h3" and settings.h3_last_frame_chain_enabled:
+            for cur, nxt in zip(items, items[1:]):
+                if nxt.episode == cur.episode:
+                    cur.last_frame_url = nxt.image_url
+        # M24.2 锚点重拍：生成前落盘镜头参数快照（status=pending），
+        # 供单镜头重拍恢复 seed/engine/prompt/lock_params 等参数
+        project_id = str(report.get("project_id", task_id))
+        self._save_shot_params(project_id, items)
         self._progress(task_id, "video", 0, f"Step 4/8: 批量生成 {len(items)} 个视频片段...")
-        response = await video_agent.batch_execute(VideoBatchRequest(items=items))
-        if not response.success:
-            raise RuntimeError(f"视频生成失败: {response.error}")
-        data = response.data or {}
-        videos = data.get("results", [])
-        failed = data.get("failed_scenes", [])
+        if settings.video_backend.lower() == "h3" and settings.h3_multishot_enabled:
+            # M11 多镜叙事联合生成：同集相邻场景分组，≥2 场景组一次 H3 多镜推理
+            videos, failed = await self._run_video_multishot(items)
+        else:
+            response = await video_agent.batch_execute(VideoBatchRequest(items=items))
+            if not response.success:
+                raise RuntimeError(f"视频生成失败: {response.error}")
+            data = response.data or {}
+            videos = data.get("results", [])
+            failed = data.get("failed_scenes", [])
+        # M24.2：合并生成结果（产物 URL + success/failed 状态）再次落盘快照；
+        # 全部失败也保留快照，重拍仍可按 scene_id 恢复参数
+        self._save_shot_params(project_id, items, videos=videos, failed=failed)
         if not videos:
             raise RuntimeError("视频生成失败: 全部场景失败")
         report["steps"]["video"] = {"count": len(videos), "failed_scenes": failed}
         self._progress(task_id, "video", 1, f"视频完成: {len(videos)} 成功 / {len(failed)} 失败")
         return videos
+
+    async def _step_video_long(
+        self,
+        task_id: str,
+        script: Script,
+        storyboards: list[dict[str, Any]],
+        request: PipelineRunRequest,
+        report: dict,
+    ) -> list[dict[str, Any]]:
+        """M21.3 长视频模式：LongVideoPlanner 拆块 → LongVideoService 帧链续写。
+
+        数据流：Script → LongVideoPlan(chunks) → chunk.prompt 序列 →
+        LongVideoService.generate → 单条长视频。首帧取首个分镜关键帧，
+        角色参考图/画风锚定与标准模式同源（约束层 prompt + 检测层 VLM 不变）。
+        """
+        if not settings.long_video_enabled:
+            raise RuntimeError("长视频模式未启用（long_video_enabled=False），拒绝执行")
+        if not storyboards:
+            raise RuntimeError("长视频模式需要至少 1 个分镜关键帧作首帧")
+
+        self._progress(task_id, "video", 0, "Step 4/8: 规划长视频分块...")
+        try:
+            plan = long_video_planner.plan(script)
+        except ValueError as e:
+            raise RuntimeError(f"长视频规划失败: {e}") from e
+        if not plan.chunks:
+            raise RuntimeError("长视频规划失败: 未产出任何块")
+        report["steps"]["long_video_plan"] = plan.to_dict()
+        for warning in plan.warnings:
+            logger.warning("长视频规划警告: %s", warning)
+
+        # 画风锚定/角色参考图：与标准模式同一来源，保证两种模式一致性约束一致
+        anchor = resolve_style_anchor(request.style)
+        style_neg = style_negative_tail(anchor).lstrip(", ")
+        video_negative = f"{style_neg}, blurry, low quality, distorted" if style_neg else ""
+        reference_images = self._collect_character_reference_images(script)
+
+        service = LongVideoService()
+        try:
+            result = await service.generate(
+                first_frame_url=storyboards[0]["image_url"],
+                chunk_prompts=[c.prompt for c in plan.chunks],
+                negative_prompt=video_negative,
+                reference_images=reference_images,
+                style=request.style,
+                progress_callback=lambda p, m: self._progress(task_id, "video", p / 100, m),
+            )
+        except LongVideoError as e:
+            raise RuntimeError(f"长视频生成失败: {e}") from e
+
+        report["steps"]["video"] = {
+            "count": 1,
+            "failed_scenes": [],
+            "mode": "long",
+            "chunks": result.chunks_completed,
+            "duration_seconds": result.duration_seconds,
+        }
+        self._progress(
+            task_id, "video", 1,
+            f"长视频完成: {result.chunks_completed} 块 / {result.duration_seconds:.1f}s",
+        )
+        return [{
+            "scene_id": script.scenes[0].scene_id,
+            "video_url": str(result.video_path),
+            "duration_seconds": result.duration_seconds,
+            "long_video": True,
+            "chunk_count": result.chunks_completed,
+        }]
+
+    @staticmethod
+    async def _run_video_multishot(
+        items: list[VideoRequest],
+    ) -> tuple[list[dict[str, Any]], list[int]]:
+        """H3 多镜路径：分组后 ≥2 场景组调 execute_multi_shot，单场景走原 execute。
+
+        返回 (videos, failed_scenes)，结果顺序与输入 items 一致。
+        """
+        groups = group_scenes_for_multishot(
+            items, settings.h3_multishot_max_scenes, settings.h3_multishot_max_seconds
+        )
+
+        async def run_group(group: list[VideoRequest]) -> list[AgentResponse]:
+            if len(group) >= 2:
+                return await video_agent.execute_multi_shot(group)
+            return [await video_agent.execute(group[0])]
+
+        group_results = await asyncio.gather(*[run_group(g) for g in groups])
+        videos: list[dict[str, Any]] = []
+        failed: list[int] = []
+        for group, responses in zip(groups, group_results):
+            for req, resp in zip(group, responses):
+                if resp.success and resp.data:
+                    videos.append(resp.data)
+                else:
+                    failed.append(req.scene_id)
+                    logger.warning("视频生成失败（跳过场景 %d）: %s", req.scene_id, resp.error)
+        return videos, failed
+
+    # ------------------------------------------------------------------
+    # M24.2 锚点重拍：镜头级参数快照
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _shot_params_path(project_id: str) -> Path:
+        """shot_params.json 路径（project_id 消毒防路径穿越）。"""
+        safe = "".join(c for c in project_id if c.isalnum() or c in "-_")
+        return PIPELINE_OUTPUT_ROOT / safe / "shot_params.json"
+
+    def _save_shot_params(
+        self,
+        project_id: str,
+        items: list[VideoRequest],
+        videos: list[dict[str, Any]] | None = None,
+        failed: list[int] | None = None,
+    ) -> Path:
+        """逐镜头生成参数快照落盘（M24.2 锚点重拍）。
+
+        生成前调用一次（status=pending）锁定输入参数；生成结束再调用一次
+        合并产物 URL 与 success/failed 状态。单镜头重拍时从本文件恢复
+        seed/engine/prompt/reference_images/lock_params 等参数，
+        其余镜头参数与产物不受影响。
+
+        快照逐镜头包含 VideoRequest 全字段（含 M24.2 新增 seed/lock_params），
+        经 model_dump(mode="json") 序列化，保证 JSON 落盘/读取往返完整。
+        """
+        video_by_scene = {v.get("scene_id"): v for v in (videos or [])}
+        failed_set = set(failed or [])
+        shots: list[dict[str, Any]] = []
+        for req in items:
+            entry = req.model_dump(mode="json")
+            v = video_by_scene.get(req.scene_id)
+            if v is not None:
+                entry["status"] = "success"
+                entry["video_url"] = v.get("video_url", "")
+            elif req.scene_id in failed_set:
+                entry["status"] = "failed"
+                entry["video_url"] = ""
+            else:
+                entry["status"] = "pending"
+                entry["video_url"] = ""
+            shots.append(entry)
+        payload = {
+            "project_id": project_id,
+            "saved_at": time.time(),
+            "shots": shots,
+        }
+        path = self._shot_params_path(project_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("镜头参数快照已落盘: %s（%d 镜头）", path, len(shots))
+        return path
+
+    @staticmethod
+    def load_shot_params(project_id: str) -> dict[str, Any] | None:
+        """读取镜头参数快照（M25.1 锚点重拍）；不存在/损坏返回 None。"""
+        path = PipelineOrchestrator._shot_params_path(project_id)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) and "shots" in data else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def update_shot_result(
+        project_id: str,
+        scene_id: int,
+        *,
+        video_url: str,
+        status: str,
+        seed_used: int | None = None,
+    ) -> bool:
+        """回写单个镜头的重拍结果（M25.1）。
+
+        仅更新目标 scene 的 video_url/status/rerun_at/seed_used，
+        其余镜头字段保持不变（失败隔离）。快照不存在或无该镜头返回 False。
+        """
+        path = PipelineOrchestrator._shot_params_path(project_id)
+        snapshot = PipelineOrchestrator.load_shot_params(project_id)
+        if snapshot is None:
+            return False
+        shot = next(
+            (s for s in snapshot.get("shots", []) if s.get("scene_id") == scene_id),
+            None,
+        )
+        if shot is None:
+            return False
+        shot["video_url"] = video_url
+        shot["status"] = status
+        shot["rerun_at"] = time.time()
+        if seed_used is not None:
+            shot["seed"] = seed_used
+        path.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info("镜头重拍结果已回写: %s scene=%d status=%s", path, scene_id, status)
+        return True
+
+    @staticmethod
+    def _collect_character_reference_images(script: Script) -> list[str]:
+        """汇总剧本全部角色在资产库中的三视图参考图（H3 ref2va 角色一致性）。
+
+        Scene 无角色关联字段，故取剧本全部角色；按角色顺序合并
+        reference_images，去重、保序、过滤空 URL，总量截断到
+        h3_ref_max_images（视频 Agent 侧关键帧再占 1 席后最终截断）。
+        """
+        refs: list[str] = []
+        seen: set[str] = set()
+        for character in script.characters:
+            asset = character_library.get(character.character_id)
+            if asset is None:
+                continue
+            for url in asset.reference_images.values():
+                url = (url or "").strip()
+                if url and url not in seen:
+                    seen.add(url)
+                    refs.append(url)
+        return refs[: settings.h3_ref_max_images]
 
     async def _step_voice(
         self, task_id: str, script: Script, report: dict
@@ -420,6 +750,65 @@ class PipelineOrchestrator:
         except Exception as e:
             report["steps"]["quality"] = {"skipped": True, "reason": str(e)}
             logger.warning("质检异常（非致命）: %s", e)
+
+    async def _step_visual_quality(
+        self,
+        task_id: str,
+        project_id: str,
+        script: Script,
+        videos: list[dict[str, Any]],
+        report: dict,
+    ) -> None:
+        """M13 角色一致性对照视觉检测（可选步骤，非致命）。
+
+        对每个已生成视频的场景，附带角色资产库定妆参考图调 visual_quality_agent
+        做漂移对照检测；单场景失败仅记录，不阻断流水线。
+        """
+        if not videos:
+            report["steps"]["visual_quality"] = {"skipped": True, "reason": "no videos"}
+            return
+        ref_urls = self._collect_character_reference_images(script)
+        if not ref_urls:
+            report["steps"]["visual_quality"] = {"skipped": True, "reason": "no character reference images"}
+            return
+        self._progress(task_id, "quality", 0, f"视觉质检: {len(videos)} 个场景对照检测...")
+        try:
+            async def check_one(video: dict[str, Any]) -> dict[str, Any]:
+                scene_id = int(video.get("scene_id", 0))
+                response = await visual_quality_agent.execute(
+                    QualityVisualRequest(
+                        project_id=project_id,
+                        title=script.title,
+                        scene_id=scene_id,
+                        video_url=video.get("video_url", ""),
+                        reference_image_urls=ref_urls,
+                    )
+                )
+                if not response.success or not response.data:
+                    return {"scene_id": scene_id, "success": False, "error": response.error}
+                return {
+                    "scene_id": scene_id,
+                    "success": True,
+                    "score": response.data.get("score"),
+                    "drift_detected": bool(response.data.get("drift_detected", False)),
+                }
+
+            results = await asyncio.gather(*[check_one(v) for v in videos])
+            drift_scenes = [r["scene_id"] for r in results if r.get("drift_detected")]
+            failed = [r["scene_id"] for r in results if not r.get("success")]
+            report["steps"]["visual_quality"] = {
+                "checked": len(results) - len(failed),
+                "failed_scenes": failed,
+                "drift_scenes": drift_scenes,
+                "results": results,
+            }
+            self._progress(
+                task_id, "quality", 1,
+                f"视觉质检完成: {len(results) - len(failed)}/{len(videos)} 场景，漂移 {len(drift_scenes)} 处",
+            )
+        except Exception as e:
+            report["steps"]["visual_quality"] = {"skipped": True, "reason": str(e)}
+            logger.warning("视觉质检异常（非致命）: %s", e)
 
     # ------------------------------------------------------------------
     # 工具方法

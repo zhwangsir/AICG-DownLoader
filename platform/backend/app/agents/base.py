@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from typing import Any, Callable, TypeVar
 
 import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.core.node_logger import node_log
 from app.core.retry import with_retry
+from app.services.model_gateway import model_gateway
 
 
 T = TypeVar("T")
@@ -48,13 +51,17 @@ _shared_llm: AsyncOpenAI | None = None
 
 
 def get_shared_llm_client() -> AsyncOpenAI:
-    """返回进程级共享 AsyncOpenAI 客户端（懒加载，连接池复用）。"""
+    """返回进程级共享 AsyncOpenAI 客户端（懒加载，连接池复用）。
+
+    base_url 经本地模型网关解析（DramaClaw 重构：统一路由层），
+    网关注册表动态读取 settings，配置热生效。
+    """
     global _shared_http, _shared_llm
     if _shared_llm is None:
         # trust_env=False 与 BaseAgent 一致，避免系统代理拦截内网地址
         _shared_http = httpx.AsyncClient(timeout=600.0, trust_env=False)
         _shared_llm = AsyncOpenAI(
-            base_url=settings.exo_base_url,
+            base_url=model_gateway.openai_base_url("llm"),
             api_key=settings.exo_api_key or "not-needed",
             http_client=_shared_http,
         )
@@ -83,7 +90,8 @@ class BaseAgent:
         # 拦截内网 IPv6 / Tailscale 地址请求导致 502
         self.http = httpx.AsyncClient(timeout=600.0, trust_env=False)
         self.llm_client = AsyncOpenAI(
-            base_url=settings.exo_base_url,
+            # DramaClaw 重构：LLM 端点经本地模型网关统一路由
+            base_url=model_gateway.openai_base_url("llm"),
             api_key=settings.exo_api_key,
             http_client=self.http,
         )
@@ -123,6 +131,35 @@ class BaseAgent:
         if disable_thinking:
             kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
+        # DramaClaw 重构：LLM 调用经网关记录指标（/gateway/metrics 可视）
+        # T3 节点日志：模型/耗时/状态/异常全量埋点
+        _t0 = time.time()
+        _model = kwargs["model"]
+        node_log("llm.chat", "start", model=_model, stream=stream, max_tokens=max_tokens)
+        try:
+            content = await self._chat_completion_content(kwargs, stream)
+        except Exception as e:
+            _elapsed = (time.time() - _t0) * 1000
+            model_gateway.record_call("llm", _elapsed, error=str(e))
+            node_log("llm.chat", "error", model=_model, elapsed_ms=_elapsed, error=str(e))
+            raise
+        _elapsed = (time.time() - _t0) * 1000
+        model_gateway.record_call("llm", _elapsed)
+        node_log(
+            "llm.chat", "ok", model=_model, elapsed_ms=_elapsed,
+            content_chars=len(content),
+        )
+
+        # Nemotron 等推理模型会把思考过程内联进 content（<think>...</think>），
+        # 下游 JSON 解析前必须剥离；GLM 走 reasoning_content 字段不受影响
+        content = strip_think_tags(content)
+
+        if response_format_json:
+            content = _strip_markdown(content)
+        return content
+
+    async def _chat_completion_content(self, kwargs: dict[str, Any], stream: bool) -> str:
+        """执行 chat.completions 调用并拼接 content（流式回退 reasoning_content）。"""
         if stream:
             content_parts: list[str] = []
             reasoning_parts: list[str] = []
@@ -146,13 +183,6 @@ class BaseAgent:
             content = msg.content or ""
             if not content:
                 content = getattr(msg, "reasoning_content", "") or ""
-
-        # Nemotron 等推理模型会把思考过程内联进 content（<think>...</think>），
-        # 下游 JSON 解析前必须剥离；GLM 走 reasoning_content 字段不受影响
-        content = strip_think_tags(content)
-
-        if response_format_json:
-            content = _strip_markdown(content)
         return content
 
     @with_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
@@ -162,31 +192,87 @@ class BaseAgent:
         workflow_json: dict,
     ) -> dict[str, Any]:
         """提交工作流到 ComfyUI Worker，返回 prompt_id。"""
-        resp = await self.http.post(
-            f"{worker_url}/prompt",
-            json={"prompt": workflow_json},
+        _t0 = time.time()
+        try:
+            resp = await self.http.post(
+                f"{worker_url}/prompt",
+                json={"prompt": workflow_json},
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            node_log(
+                "comfyui.submit", "error", worker_url=worker_url,
+                elapsed_ms=(time.time() - _t0) * 1000, error=str(e),
+            )
+            raise
+        data = resp.json()
+        node_log(
+            "comfyui.submit", "ok", worker_url=worker_url,
+            elapsed_ms=(time.time() - _t0) * 1000,
+            prompt_id=data.get("prompt_id", ""), workflow_nodes=len(workflow_json),
         )
-        resp.raise_for_status()
-        return resp.json()
+        return data
 
     async def upload_image_to_comfyui(
         self,
         worker_url: str,
         image_url: str,
+        filename: str | None = None,
     ) -> str:
-        """下载图片并上传到 ComfyUI 的 input 目录，返回文件名。"""
+        """下载图片并上传到 ComfyUI 的 input 目录，返回文件名。
+
+        M17.5 修复：文件名带 Agent 名 + uuid 前缀。此前写死 input.png + overwrite=true，
+        ref2va/fl2va 工作流的多张参考图（分镜关键帧 + 角色三视图 + 末帧）顺序上传时
+        互相覆盖，工作流执行时所有 LoadImage 全部塌缩为最后上传的一张（M17 core E2E
+        实测发现：4 个 LoadImage 节点同为 input.png）。
+
+        M18.3.1：可选 filename 指定确定性文件名 — LB 集群下定妆照需复制到全部
+        后端且保持同名（overwrite=true 保证不重命名），供 LoadImage 跨后端引用。
+        """
         img_resp = await self.http.get(image_url)
         img_resp.raise_for_status()
         img_bytes = img_resp.content
 
+        if not filename:
+            filename = f"{self.name}_{uuid.uuid4().hex[:8]}.png"
         upload_resp = await self.http.post(
             f"{worker_url}/upload/image",
-            files={"image": ("input.png", img_bytes, "image/png")},
+            files={"image": (filename, img_bytes, "image/png")},
             data={"type": "input", "overwrite": "true"},
         )
         upload_resp.raise_for_status()
         result = upload_resp.json()
-        return result.get("name", "input.png")
+        return result.get("name", filename)
+
+    async def upload_media_to_comfyui(
+        self,
+        worker_url: str,
+        media_url: str,
+        fallback_name: str = "input.bin",
+    ) -> str:
+        """M17.4 通用媒体上传：下载任意二进制（视频/音频）并上传到 ComfyUI input 目录。
+
+        与 upload_image_to_comfyui 的差异：保留源 URL 的文件扩展名（LoadVideo/LoadAudio
+        按扩展名识别解码器），且文件名带 Agent 前缀避免并发覆盖。
+        实测 H3 ComfyUI（:8195）无独立 /upload/audio 路由（405），全类型统一走 /upload/image。
+        """
+        resp = await self.http.get(media_url)
+        resp.raise_for_status()
+        media_bytes = resp.content
+
+        # 从 URL 路径提取文件名（去掉 query 串），无扩展名时用 fallback
+        url_path = media_url.split("?", 1)[0].rstrip("/")
+        filename = url_path.rsplit("/", 1)[-1] if "/" in url_path else ""
+        if "." not in filename:
+            filename = fallback_name
+        upload_resp = await self.http.post(
+            f"{worker_url}/upload/image",
+            files={"image": (filename, media_bytes, "application/octet-stream")},
+            data={"type": "input", "overwrite": "true"},
+        )
+        upload_resp.raise_for_status()
+        result = upload_resp.json()
+        return result.get("name", filename)
 
     @with_retry(max_attempts=3, base_delay=1.0, max_delay=10.0)
     async def get_comfyui_result(
@@ -196,6 +282,7 @@ class BaseAgent:
         timeout: float = 300.0,
     ) -> dict[str, Any]:
         """轮询 ComfyUI 执行结果，检测到执行错误立即抛出。"""
+        _t0 = time.time()
         deadline = time.time() + timeout
         while time.time() < deadline:
             resp = await self.http.get(f"{worker_url}/history/{prompt_id}")
@@ -209,11 +296,23 @@ class BaseAgent:
                     if isinstance(msg, list) and len(msg) >= 2 and msg[0] == "execution_error":
                         exception_msg = msg[1].get("exception_message", exception_msg)
                         break
+                node_log(
+                    "comfyui.poll", "error", worker_url=worker_url, prompt_id=prompt_id,
+                    elapsed_ms=(time.time() - _t0) * 1000, error=exception_msg,
+                )
                 raise RuntimeError(f"ComfyUI {prompt_id} 执行失败: {exception_msg}")
             outputs = entry.get("outputs", {})
             if outputs:
+                node_log(
+                    "comfyui.poll", "ok", worker_url=worker_url, prompt_id=prompt_id,
+                    elapsed_ms=(time.time() - _t0) * 1000, output_nodes=len(outputs),
+                )
                 return outputs
             await asyncio.sleep(2.0)
+        node_log(
+            "comfyui.poll", "error", worker_url=worker_url, prompt_id=prompt_id,
+            elapsed_ms=(time.time() - _t0) * 1000, error=f"轮询超时 {timeout}s",
+        )
         raise TimeoutError(f"ComfyUI {prompt_id} 超时 {timeout}s")
 
     async def _get_worker_loads(self, candidates: list[str]) -> dict[str, float]:
@@ -262,51 +361,44 @@ class BaseAgent:
         视频 Worker 通常启用 sageattention 等针对视频模型的优化，对 SD 1.5
         等 head_dim=40 的图像模型会触发 `headdim should be in [64, 96, 128]`
         断言失败，因此不再 fallback 到视频 Worker。
+
+        DramaClaw 重构：候选端点由本地模型网关 image 能力链提供（LB 主 + 回退）。
         """
-        candidates = [
-            settings.comfyui_image_hq,
-            settings.comfyui_image_fast,
-        ]
+        candidates = model_gateway.endpoints("image")
         loads = await self._get_worker_loads(candidates)
         if not loads:
-            # 若图像 Worker 都不可用，返回默认 hq，让调用方快速失败
-            return settings.comfyui_image_hq
+            # 若图像 Worker 都不可用，返回主端点，让调用方快速失败
+            return model_gateway.endpoint("image")
         workers = self._select_workers_by_load(loads, 1)
         return workers[0]
 
     async def get_available_image_workers(self, n: int) -> list[str]:
         """返回 n 个图像 Worker URL，按 GPU 空闲显存优先分配。"""
-        candidates = [
-            settings.comfyui_image_hq,
-            settings.comfyui_image_fast,
-        ]
+        candidates = model_gateway.endpoints("image")
         loads = await self._get_worker_loads(candidates)
         if not loads:
-            return [settings.comfyui_image_hq] * n
+            return [model_gateway.endpoint("image")] * n
         return self._select_workers_by_load(loads, n)
 
     async def get_available_video_worker(self) -> str:
-        """返回当前可用的视频生成 Worker URL，并按 GPU 负载均衡。"""
-        candidates = [
-            settings.comfyui_video_a,
-            settings.comfyui_video_b,
-        ]
+        """返回当前可用的视频生成 Worker URL，并按 GPU 负载均衡。
+
+        DramaClaw 重构：候选端点由本地模型网关 video_comfy 能力链提供。
+        """
+        candidates = model_gateway.endpoints("video_comfy")
         loads = await self._get_worker_loads(candidates)
         if not loads:
-            # 若都不可用，返回默认 video_a，让调用方自行报错
-            return settings.comfyui_video_a
+            # 若都不可用，返回主端点，让调用方自行报错
+            return model_gateway.endpoint("video_comfy")
         workers = self._select_workers_by_load(loads, 1)
         return workers[0]
 
     async def get_available_video_workers(self, n: int) -> list[str]:
         """返回 n 个视频 Worker URL，按 GPU 空闲显存优先分配。"""
-        candidates = [
-            settings.comfyui_video_a,
-            settings.comfyui_video_b,
-        ]
+        candidates = model_gateway.endpoints("video_comfy")
         loads = await self._get_worker_loads(candidates)
         if not loads:
-            return [settings.comfyui_video_a] * n
+            return [model_gateway.endpoint("video_comfy")] * n
         return self._select_workers_by_load(loads, n)
 
     async def execute(self, *args: Any, **kwargs: Any) -> Any:

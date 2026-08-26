@@ -15,8 +15,6 @@ export const API_TIMEOUTS = {
   compose: 900_000, // 剪辑合成
   quality: 300_000, // 整体质检
   visualQuality: 600_000, // 视觉质检（抽帧+VLM）
-  lipSync: 600_000, // 唇形同步
-  postprocess: 1_800_000, // 后处理 5 步管线
   pollInterval: 3_000, // 轮询间隔
 } as const;
 
@@ -103,6 +101,10 @@ export interface StoryboardData {
   scene_id: number;
   image_url: string;
   prompt_used: string;
+  preview_video_url?: string;
+  /** M25.9 C1 线稿先行：是否为线稿；线稿时 sketch_seed 为精绘确定性锚点 */
+  is_sketch?: boolean;
+  sketch_seed?: number | null;
 }
 
 export interface StoryboardBatchData {
@@ -307,6 +309,10 @@ export async function generateStoryboard(params: {
   scene: SceneData;
   characters: CharacterData[];
   style: string;
+  /** M25.9 C1 线稿先行：true=线稿模式（低步数快速看构图） */
+  sketch_mode?: boolean;
+  /** M25.9 C1 同 seed 防漂移：精绘时回传线稿 seed */
+  refine_seed?: number | null;
 }): Promise<AgentResponse<StoryboardData>> {
   const resp = await fetchWithTimeout(
     `${API_BASE}/storyboard/generate`,
@@ -396,6 +402,34 @@ export async function generateVideoAsync(params: {
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`创建异步任务失败: ${resp.status} ${text}`);
+  }
+  return resp.json();
+}
+
+/**
+ * M25.1 单镜头锚点重拍：从 shot_params.json 恢复快照参数仅重跑该镜头。
+ * 同步接口（重拍单个视频耗时分钟级），用 videoBatch 长超时；
+ * seed 不传则沿用快照锁定值，overridePrompt 非空则替换快照提示词。
+ */
+export async function rerunShot(params: {
+  project_id: string;
+  scene_id: number;
+  seed?: number | null;
+  reseed?: boolean;
+  override_prompt?: string;
+}): Promise<AgentResponse<VideoData>> {
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/video/rerun-shot`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    API_TIMEOUTS.videoBatch
+  );
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`锚点重拍失败: ${resp.status} ${text}`);
   }
   return resp.json();
 }
@@ -540,102 +574,14 @@ export async function checkHealth(): Promise<Record<string, unknown>> {
   return resp.json();
 }
 
-// ============================================================================
-// P4.4 唇形同步 + 后处理编排（LatentSync 1.6 + RealBasicVSR/RIFE/ProPainter/
-//                          DeepFilterNet3 + Mac FFmpeg H.265）
-// ============================================================================
-
-/** 唇形同步结果（LatentSync 1.6） */
-export interface LipSyncData {
-  scene_id: number;
-  video_url: string;
-  original_video_url: string;
-  /** false 表示已降级返回原视频 */
-  synced: boolean;
-  elapsed_seconds: number;
-}
-
-/** 后处理步骤枚举（与后端 PostprocessStep 对齐） */
-export type PostprocessStep =
-  | "super_resolution"
-  | "frame_interpolation"
-  | "inpainting"
-  | "audio_denoise"
-  | "final_encode";
-
-/** 单步后处理结果 */
-export interface PostprocessStepResult {
-  step: PostprocessStep;
-  success: boolean;
-  output_url: string;
-  elapsed_seconds: number;
-  message: string;
-  skipped: boolean;
-}
-
-/** 后处理编排结果（5 步管线） */
-export interface PostprocessData {
-  scene_id: number;
-  final_video_url: string;
-  original_video_url: string;
-  steps: PostprocessStepResult[];
-  success: boolean;
-  elapsed_seconds: number;
-}
-
-/**
- * 唇形同步（LatentSync 1.6）：将视频人物口型与配音音频对齐。
- * 后端受 settings.lip_sync_enabled 总开关控制，失败自动降级返回原视频。
- */
-export async function generateLipSync(params: {
-  scene_id: number;
-  video_url: string;
-  audio_url: string;
-  reference_image_url?: string | null;
-}): Promise<AgentResponse<LipSyncData>> {
-  const resp = await fetchWithTimeout(
-    `${API_BASE}/lipsync/generate`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-    },
-    API_TIMEOUTS.lipSync
-  );
-  return resp.json();
-}
-
-/**
- * 后处理编排（P4.4）：编排 超分 → 插帧 → 修复 → 降噪 → H.265 编码。
- * 单步失败不阻断整体流程（best-effort），仅 final_encode 失败会回退 H.264。
- * 后端受 settings.postprocess_enabled 总开关 + 各步骤独立开关控制。
- */
-export async function generatePostprocess(params: {
-  scene_id: number;
-  video_url: string;
-  audio_url?: string | null;
-  steps?: PostprocessStep[];
-  output_resolution?: string | null;
-}): Promise<AgentResponse<PostprocessData>> {
-  const resp = await fetchWithTimeout(
-    `${API_BASE}/postprocess/generate`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-    },
-    API_TIMEOUTS.postprocess
-  );
-  return resp.json();
-}
-
 /**
  * 视频异步任务轮询：每 3 秒查询一次，直到完成/失败或超过最大等待时间。
  * 单次请求带 taskCreate 超时，整体带截止期限，避免任务卡死时前端永久轮询。
  */
 export async function pollVideoTask(
   pollUrl: string,
-  maxWaitMs: number = API_TIMEOUTS.video
+  maxWaitMs: number = API_TIMEOUTS.video,
+  onProgress?: (evt: ProgressEvent) => void
 ): Promise<ProgressEvent> {
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
@@ -647,6 +593,7 @@ export async function pollVideoTask(
       throw new Error(`轮询失败: ${resp.status}`);
     }
     const evt: ProgressEvent = await resp.json();
+    onProgress?.(evt);
     if (evt.status === "completed" || evt.status === "failed") {
       return evt;
     }
@@ -671,6 +618,7 @@ export interface PipelineRunParams {
   max_character_refs?: number;
   video_duration_seconds?: number;
   run_quality_check: boolean;
+  run_visual_check?: boolean;
   ai_label_enabled: boolean;
   license_number?: string;
   output_resolution?: string;
@@ -774,4 +722,335 @@ export function extractScriptFromReport(
     return null;
   }
   return data as ScriptData;
+}
+
+/* ------------------------------------------------------------------ */
+/* 模型注册表（下载器 ↔ 工作台打通）                                    */
+/* ------------------------------------------------------------------ */
+
+/** 注册表中的单个 LoRA 条目 */
+export interface ModelLoraEntry {
+  filename: string;
+  name: string;
+  style_key: string;
+  trigger_words: string[];
+  weight: number;
+  sha256: string;
+  size_kb: number;
+  downloaded: boolean;
+  subdir: string;
+  downloaded_at: number | null;
+}
+
+/** 模型注册表返回结构（GET /models/registry） */
+export interface ModelRegistry {
+  loras: ModelLoraEntry[];
+  downloader_models: Record<string, unknown>[];
+  stats: Record<string, unknown>;
+  sources: Record<string, unknown>;
+}
+
+/** 获取模型注册表：汇总下载器与工作台两侧的 LoRA 模型清单及统计 */
+export async function getModelRegistry(): Promise<ModelRegistry> {
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/models/registry`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  return resp.json();
+}
+
+/* ------------------------------------------------------------------ */
+/* 角色资产库（主体库 @引用可视化的资产侧数据源）                          */
+/* ------------------------------------------------------------------ */
+
+/** 角色资产库条目（GET /character-library/list 的 data 元素） */
+export interface CharacterAssetEntry {
+  character_id: string;
+  name: string;
+  role: string;
+  age: number | null;
+  description: string;
+  personality: string;
+  /** 三视图定妆照 URL（front/side/closeup） */
+  reference_images: Record<string, string>;
+  appearance_lock: string;
+  locked: boolean;
+  consistency_level: string;
+  created_at: number;
+  updated_at: number;
+}
+
+/** 获取角色资产库全量列表（按更新时间倒序） */
+export async function getCharacterLibrary(): Promise<CharacterAssetEntry[]> {
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/character-library/list`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  const body = await resp.json();
+  return (body?.data ?? []) as CharacterAssetEntry[];
+}
+
+// ====================================================================
+// M27 NAS 模型库 / 模型下载 / NSFW 设置（后端 routers/models.py）
+// API_BASE 为 /api/drama，模型/设置端点同前缀替换派生
+// ====================================================================
+const MODELS_BASE = API_BASE.replace(/\/api\/drama\/?$/, "/api/models");
+const SETTINGS_BASE = API_BASE.replace(/\/api\/drama\/?$/, "/api/settings");
+const PANEL_BASE = API_BASE.replace(/\/api\/drama\/?$/, "/api/panel");
+
+/** 从 FastAPI 错误响应提取 detail 消息（兼容字符串/对象 detail） */
+async function extractError(resp: Response, prefix: string): Promise<Error> {
+  let msg = `${prefix}: ${resp.status}`;
+  try {
+    const body = await resp.json();
+    const detail = body?.detail;
+    if (typeof detail === "string") msg = detail;
+    else if (detail) msg = `${msg} ${JSON.stringify(detail)}`;
+  } catch {
+    msg = `${msg} ${await resp.text().catch(() => "")}`;
+  }
+  return new Error(msg);
+}
+
+export interface NasModelEntry {
+  name: string;
+  rel_path: string;
+  root: string;
+  type: string;
+  size: number;
+  mtime: number;
+  nsfw: boolean;
+}
+
+export interface NasLibraryResponse {
+  items: NasModelEntry[];
+  total: number;
+  types: string[];
+  scanned_at: number;
+  cache_hit: boolean;
+}
+
+/** 浏览 NAS 模型库（名称/大小/类型/修改日期） */
+export async function getNasLibrary(params: {
+  type?: string;
+  q?: string;
+  include_nsfw?: boolean;
+  refresh?: boolean;
+}): Promise<NasLibraryResponse> {
+  const sp = new URLSearchParams();
+  if (params.type) sp.set("type", params.type);
+  if (params.q) sp.set("q", params.q);
+  if (params.include_nsfw) sp.set("include_nsfw", "true");
+  if (params.refresh) sp.set("refresh", "true");
+  const qs = sp.toString();
+  const resp = await fetchWithTimeout(
+    `${MODELS_BASE}/library${qs ? `?${qs}` : ""}`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "加载模型库失败");
+  return resp.json();
+}
+
+export interface CivitaiFile {
+  name: string;
+  size_kb: number;
+  download_url: string;
+  sha256: string | null;
+  primary: boolean;
+}
+
+export interface CivitaiVersion {
+  id: number;
+  name: string;
+  files: CivitaiFile[];
+}
+
+export interface CivitaiModel {
+  id: number;
+  name: string;
+  type: string;
+  nsfw: boolean;
+  versions: CivitaiVersion[];
+}
+
+export interface CivitaiSearchResponse {
+  items: CivitaiModel[];
+  total: number;
+}
+
+/** 搜索 Civitai 模型（civitai.red 镜像，NSFW 由后端按设置过滤） */
+export async function searchCivitaiModels(params: {
+  q?: string;
+  type?: string;
+  limit?: number;
+  include_nsfw?: boolean;
+}): Promise<CivitaiSearchResponse> {
+  const sp = new URLSearchParams();
+  if (params.q) sp.set("q", params.q);
+  if (params.type) sp.set("type", params.type);
+  if (params.limit) sp.set("limit", String(params.limit));
+  if (params.include_nsfw) sp.set("include_nsfw", "true");
+  const qs = sp.toString();
+  const resp = await fetchWithTimeout(
+    `${MODELS_BASE}/search${qs ? `?${qs}` : ""}`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "Civitai 搜索失败");
+  return resp.json();
+}
+
+export interface ModelDownloadRequest {
+  download_url: string;
+  filename: string;
+  subdir: string;
+  sha256?: string | null;
+  nsfw?: boolean;
+}
+
+export type DownloadTaskStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "error"
+  | "canceled";
+
+export interface DownloadTask {
+  task_id: string;
+  filename: string;
+  subdir: string;
+  dest: string;
+  source_url: string;
+  sha256: string | null;
+  nsfw: boolean;
+  status: DownloadTaskStatus;
+  downloaded: number;
+  total: number;
+  speed_bps: number;
+  error: string | null;
+  created_at: number;
+  finished_at?: number;
+}
+
+/** 启动后台模型下载（写入 NAS 子目录，可选 SHA256 校验） */
+export async function startModelDownload(
+  req: ModelDownloadRequest
+): Promise<DownloadTask> {
+  const resp = await fetchWithTimeout(
+    `${MODELS_BASE}/download`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    },
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "启动下载失败");
+  return resp.json();
+}
+
+/** 全部下载任务（按创建时间倒序） */
+export async function getDownloadTasks(): Promise<DownloadTask[]> {
+  const resp = await fetchWithTimeout(
+    `${MODELS_BASE}/downloads`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "加载下载任务失败");
+  const body = await resp.json();
+  return (body?.items ?? []) as DownloadTask[];
+}
+
+/** 取消下载任务 */
+export async function cancelDownloadTask(taskId: string): Promise<void> {
+  const resp = await fetchWithTimeout(
+    `${MODELS_BASE}/downloads/${taskId}`,
+    { method: "DELETE" },
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "取消下载失败");
+}
+
+export interface NsfwStatus {
+  nsfw_enabled: boolean;
+  has_pin: boolean;
+}
+
+/** NSFW 状态（开关 + 是否已设 PIN） */
+export async function getNsfwStatus(): Promise<NsfwStatus> {
+  const resp = await fetchWithTimeout(
+    `${SETTINGS_BASE}/nsfw`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "读取 NSFW 状态失败");
+  return resp.json();
+}
+
+/** 开启/关闭 NSFW（首次开启需 newPin 设置管理 PIN） */
+export async function setNsfwEnabled(
+  enabled: boolean,
+  pin: string,
+  newPin?: string
+): Promise<NsfwStatus> {
+  const resp = await fetchWithTimeout(
+    `${SETTINGS_BASE}/nsfw`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled, pin, new_pin: newPin ?? null }),
+    },
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "NSFW 设置失败");
+  return resp.json();
+}
+
+/** 修改 NSFW 管理 PIN（需旧 PIN 验证） */
+export async function changeNsfwPin(
+  pin: string,
+  newPin: string
+): Promise<NsfwStatus> {
+  const resp = await fetchWithTimeout(
+    `${SETTINGS_BASE}/nsfw/pin`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, new_pin: newPin }),
+    },
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "修改 PIN 失败");
+  return resp.json();
+}
+
+/** 融合面板状态（GET /api/panel/status） */
+export interface PanelStatus {
+  backend: string;
+  product: string;
+  downloader_config_path: string;
+  downloader_config_readable: boolean;
+  models_json_path: string;
+  models_json_readable: boolean;
+  dashbox: {
+    web: string;
+    api: string;
+    note: string;
+    web_listening?: boolean;
+    api_listening?: boolean;
+  };
+}
+
+/** 读取后端/下载器配置/DashBox 默认 URL 状态；不启动 Rust 二进制 */
+export async function getPanelStatus(): Promise<PanelStatus> {
+  const resp = await fetchWithTimeout(
+    `${PANEL_BASE}/status`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "读取面板状态失败");
+  return resp.json();
 }

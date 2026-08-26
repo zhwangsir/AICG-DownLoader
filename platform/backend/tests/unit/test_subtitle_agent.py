@@ -347,3 +347,70 @@ class TestSubtitleAgentDualBackend:
 
         assert resp.success is True
         assert resp.data["segments"] == []
+
+    async def test_ai_omni_backend_success(self, agent, monkeypatch, tmp_path):
+        """asr_backend='ai_omni' → 调用 AI-Omni ASR 端点并生成 SRT。"""
+        monkeypatch.setattr(settings, "asr_backend", "ai_omni")
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "text": "AI Omni 测试字幕",
+            "language": "zh",
+            "duration": 2.5,
+            "segments": [
+                {"start": 0.0, "end": 1.2, "text": "AI Omni 测试"},
+                {"start": 1.2, "end": 2.5, "text": "字幕"},
+            ],
+        }
+
+        with self._mock_local_audio(agent, tmp_path, filename="test.mp3"):
+            with patch.object(
+                agent, "http", new=MagicMock(post=AsyncMock(return_value=mock_resp))
+            ):
+                with patch(
+                    "app.agents.subtitle_agent.optimize_content",
+                    new_callable=AsyncMock,
+                    side_effect=Exception("LLM skip"),
+                ):
+                    request = SubtitleRequest(
+                        scene_id=7,
+                        audio_url="http://localhost:8100/static/audio/test.mp3",
+                        language="zh",
+                    )
+                    resp = await agent.execute(request)
+
+        assert resp.success is True
+        assert "AI Omni 测试" in resp.data["srt_content"]
+        assert "字幕" in resp.data["srt_content"]
+        assert len(resp.data["segments"]) == 2
+
+    async def test_ai_omni_failure_fallback_to_whisper(
+        self, agent, monkeypatch, tmp_path, mock_whisper
+    ):
+        """AI-Omni ASR 抛异常 → 自动回退到 faster-whisper 并成功。"""
+        monkeypatch.setattr(settings, "asr_backend", "ai_omni")
+
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock(
+            side_effect=RuntimeError("AI-Omni 422")
+        )
+
+        with self._mock_local_audio(agent, tmp_path, filename="test.mp3"):
+            with patch.object(
+                agent, "http", new=MagicMock(post=AsyncMock(return_value=mock_resp))
+            ):
+                with patch(
+                    "app.agents.subtitle_agent.optimize_content",
+                    new_callable=AsyncMock,
+                    side_effect=Exception("LLM skip"),
+                ):
+                    request = SubtitleRequest(
+                        scene_id=8,
+                        audio_url="http://localhost:8100/static/audio/test.mp3",
+                        language="zh",
+                    )
+                    resp = await agent.execute(request)
+
+        assert resp.success is True
+        assert "测试字幕" in resp.data["srt_content"]

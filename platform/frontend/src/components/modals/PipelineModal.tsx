@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   runPipeline,
   cancelPipeline,
@@ -36,6 +36,7 @@ const STEP_LABELS: Record<string, string> = {
   subtitle: "字幕",
   edit: "剪辑",
   quality: "质检",
+  visual_quality: "视觉对照",
 };
 
 export function PipelineModal({ onClose }: { onClose: () => void }) {
@@ -51,6 +52,7 @@ export function PipelineModal({ onClose }: { onClose: () => void }) {
   const [mode, setMode] = useState<"iaa" | "iap">("iaa");
   const [genCharRefs, setGenCharRefs] = useState(false);
   const [runQc, setRunQc] = useState(true);
+  const [runVc, setRunVc] = useState(false);
   const [aiLabel, setAiLabel] = useState(true);
   const [licenseNumber, setLicenseNumber] = useState("");
 
@@ -83,6 +85,14 @@ export function PipelineModal({ onClose }: { onClose: () => void }) {
     return extractScriptFromReport(report);
   }, [report]);
 
+  // M25.1 锚点重拍：pipeline 完成（含失败）即保存 project_id，
+  // 供视频模态定位 shot_params.json 快照做参数锁定重拍
+  const setPipelineProjectId = useDramaStore((s) => s.setPipelineProjectId);
+  useEffect(() => {
+    const pid = report?.project_id;
+    if (typeof pid === "string" && pid) setPipelineProjectId(pid);
+  }, [report, setPipelineProjectId]);
+
   const handleStart = async () => {
     if (!premise.trim()) {
       setError("请输入一句话创意");
@@ -100,12 +110,25 @@ export function PipelineModal({ onClose }: { onClose: () => void }) {
         monetization_mode: mode,
         generate_character_refs: genCharRefs,
         run_quality_check: runQc,
+        run_visual_check: runVc,
         ai_label_enabled: aiLabel,
         license_number: licenseNumber.trim(),
       });
       setTaskId(resp.task_id);
       setStreamUrl(resolveTaskUrl(resp.stream_url));
       setStatusInfo(`全链路任务已启动: ${resp.task_id}`);
+      // DramaClaw 任务中心：登记全局任务 + SSE 流（模态关闭后进度仍可见）
+      const streamFull = resolveTaskUrl(resp.stream_url);
+      useDramaStore.getState().upsertTask({
+        id: resp.task_id,
+        label: `一键成片：${premise.trim().slice(0, 18)}${premise.trim().length > 18 ? "…" : ""}`,
+        kind: "pipeline",
+        status: "running",
+        percent: 0,
+        message: "任务已启动",
+        startedAt: Date.now(),
+      });
+      useDramaStore.getState().setPipelineStream(resp.task_id, streamFull);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -277,6 +300,14 @@ export function PipelineModal({ onClose }: { onClose: () => void }) {
                     onChange={(e) => setRunQc(e.target.checked)}
                   />
                   成片后执行文本质检
+                </label>
+                <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={runVc}
+                    onChange={(e) => setRunVc(e.target.checked)}
+                  />
+                  成片后执行视觉漂移对照（需角色定妆照，检测跨镜角色漂移）
                 </label>
                 <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
                   <input

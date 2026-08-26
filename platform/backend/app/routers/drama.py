@@ -12,8 +12,6 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from app.agents.base import strip_think_tags
 from app.agents.character_agent import character_agent
 from app.agents.edit_agent import edit_agent
-from app.agents.lip_sync_agent import lip_sync_agent
-from app.agents.postprocess_agent import postprocess_agent
 from app.agents.quality_agent import apply_subtitle_fixes, quality_agent, visual_quality_agent
 from app.agents.script_agent import script_agent
 from app.agents.storyboard_agent import storyboard_agent
@@ -31,13 +29,13 @@ from app.models.schemas import (
     CharacterPreviewRequest,
     CharacterRequest,
     EditRequest,
-    LipSyncRequest,
+    MentionResolveRequest,
     PipelineRunRequest,
-    PostprocessRequest,
     QualityCheckRequest,
     QualityVisualRequest,
     RAGOptimizeRequest,
     RAGOptimizeResponse,
+    RerunShotRequest,
     ScriptRequest,
     StoryboardBatchRequest,
     StoryboardRequest,
@@ -48,7 +46,9 @@ from app.models.schemas import (
     VoiceRequest,
 )
 from app.services.character_library import character_library
-from app.services.pipeline_orchestrator import pipeline_orchestrator
+from app.services.failure_registry import failure_registry
+from app.services.model_gateway import model_gateway
+from app.services.pipeline_orchestrator import PipelineOrchestrator, pipeline_orchestrator
 from app.services.rag_service import rag_service
 
 router = APIRouter(prefix="/api/drama", tags=["drama"])
@@ -62,9 +62,6 @@ _AGENT_REGISTRY: dict[str, tuple[Any, type]] = {
     "voice": (voice_agent, VoiceRequest),
     "subtitle": (subtitle_agent, SubtitleRequest),
     "edit": (edit_agent, EditRequest),
-    # P4.4: 唇形同步 + 后处理 Agent
-    "lipsync": (lip_sync_agent, LipSyncRequest),
-    "postprocess": (postprocess_agent, PostprocessRequest),
 }
 
 
@@ -75,23 +72,23 @@ async def health() -> dict:
 
     return {
         "status": "ok",
-        "version": "0.11.0",
-        "exo_base_url": settings.exo_base_url,
-        "exo_model": settings.exo_model_glm52,
+        "version": "0.4.0",
+        "llm_base_url": settings.exo_base_url,
+        "llm_model": settings.exo_model_glm52,
         "comfyui_workers": {
             "image_hq": settings.comfyui_image_hq,
             "image_fast": settings.comfyui_image_fast,
             "video_a": settings.comfyui_video_a,
             "video_b": settings.comfyui_video_b,
         },
-        "p4_services": {
-            "xdit_video": {"endpoint": settings.xdit_endpoint, "enabled": settings.video_backend == "xdit"},
-            "hunyuanimage": {"endpoint": settings.hunyuanimage_endpoint, "enabled": settings.image_backend == "hunyuanimage"},
-            "latentsync": {"endpoint": settings.latentsync_endpoint, "enabled": settings.lip_sync_enabled},
-            "video_enhance": {"endpoint": settings.postprocess_endpoint, "enabled": settings.postprocess_enabled},
-            "deepfilternet": {"endpoint": settings.deepfilternet_endpoint, "enabled": settings.postprocess_audio_denoise_enabled},
+        "services": {
+            "h3": {"endpoint": settings.h3_comfyui_url, "enabled": settings.video_backend == "h3"},
+            "comfyui_lb": {"endpoint": settings.comfyui_image_hq, "enabled": True},
+            "sdxl_image": {"endpoint": settings.comfyui_image_hq, "enabled": settings.image_backend == "sdxl"},
+            "ltx25": {"endpoint": settings.ltx_comfyui_url, "enabled": settings.ltx_enabled},
+            "cosyvoice": {"endpoint": settings.cosyvoice_endpoint, "enabled": settings.tts_backend == "cosyvoice"},
             "indextts": {"endpoint": settings.indextts_endpoint, "enabled": settings.tts_backend == "indextts"},
-            "qwen3_asr": {"endpoint": settings.qwen3_asr_endpoint, "enabled": settings.asr_backend == "qwen3_asr"},
+            "ai_omni_asr": {"endpoint": settings.ai_omni_asr_endpoint, "enabled": settings.asr_backend == "ai_omni"},
         },
         "rag": {
             "enabled": settings.rag_optimize_enabled,
@@ -108,11 +105,71 @@ async def health() -> dict:
             "edit_agent",
             "quality_agent",
             "visual_quality_agent",
-            "lip_sync_agent",
-            "postprocess_agent",
         ],
         "downloader_config_loaded": settings.downloader_config is not None,
     }
+
+
+# ---------------------------------------------------------------------------
+# 本地模型网关（DramaClaw litellm/NewAPI 的本地化对等层）
+# ---------------------------------------------------------------------------
+
+@router.get("/gateway/capabilities")
+async def gateway_capabilities() -> dict:
+    """能力注册表：全部本地部署服务，零外部依赖。"""
+    return {"capabilities": model_gateway.capabilities_report()}
+
+
+@router.get("/gateway/health")
+async def gateway_health() -> dict:
+    """全能力健康报告（TTL 缓存 30s，服务重启后调用 /gateway/health/refresh 强制复测）。"""
+    return await model_gateway.health_report()
+
+
+@router.post("/gateway/health/refresh")
+async def gateway_health_refresh() -> dict:
+    """失效健康缓存并全量复测（服务重启/运维操作后调用）。"""
+    model_gateway.invalidate_health_cache()
+    return await model_gateway.health_report()
+
+
+@router.get("/gateway/metrics")
+async def gateway_metrics() -> dict:
+    """各能力调用指标（次数/最近延迟/错误数）。"""
+    return model_gateway.metrics_report()
+
+
+# ---------------------------------------------------------------------------
+# 失败模式注册表（M25.9 C2，DramaClaw failure_registry 本地化对等）
+# ---------------------------------------------------------------------------
+
+@router.get("/verification/failure-modes")
+async def list_failure_modes(layer: str | None = None, gate_only: bool = False) -> dict:
+    """失败模式清单（可按层/门禁过滤）+ 命中计数。"""
+    modes = failure_registry.list_active(layer=layer, gate_only=gate_only)
+    return {
+        "modes": [m.model_dump() for m in modes],
+        "hits": failure_registry.hits(),
+    }
+
+
+@router.post("/verification/failure-modes/{code}/hit")
+async def bump_failure_mode_hit(code: str) -> dict:
+    """命中计数 +1（质检链路回写 / 人工标注用）。"""
+    if failure_registry.get(code) is None:
+        raise HTTPException(status_code=404, detail=f"未注册的失败模式: {code}")
+    return {"code": code, "hit_count": failure_registry.bump_hit(code)}
+
+
+@router.put("/verification/failure-modes/{code}")
+async def upsert_failure_mode(code: str, fields: dict[str, Any]) -> dict:
+    """新增/更新失败模式（白名单字段：layer/detection/prevention_rule/
+    correction_template/negative_prompt_clause/gate_enabled）。"""
+    try:
+        mode = failure_registry.upsert(code, **fields)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return mode.model_dump()
 
 
 @router.post("/agent/assist", response_model=AgentResponse)
@@ -220,6 +277,24 @@ async def rag_styles() -> list[dict[str, Any]]:
         raise HTTPException(status_code=500, detail=f"RAG 风格列表失败: {e}") from e
 
 
+@router.get("/models/registry")
+async def models_registry() -> dict[str, Any]:
+    """模型注册表（任务3：打通下载器↔工作台）。
+
+    融合 lora_manifest.json（trigger_words/weight）与下载器 models.json
+    （已下载事实），标注每个 LoRA 的 downloaded 状态，供前端模型卡片与
+    工作流/视频 Agent 消费。下载器 models.json 缺失时按全未下载处理（不报错）。
+    """
+    try:
+        from app.services.model_registry_service import model_registry_service
+
+        return model_registry_service.get_registry()
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("模型注册表失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"模型注册表失败: {e}") from e
+
+
 @router.post("/script/generate", response_model=AgentResponse)
 async def generate_script(request: ScriptRequest) -> AgentResponse:
     """剧本 Agent：一句话创意 → JSON 剧本。"""
@@ -281,6 +356,30 @@ async def delete_character_asset(character_id: str) -> dict:
     return {"success": True, "data": {"deleted": character_id}}
 
 
+@router.post("/assets/resolve-mentions")
+async def resolve_asset_mentions(request: MentionResolveRequest) -> dict:
+    """@角色提及解析（M24.1 主体库 @引用可视化）。
+
+    提取文本中全部 `@角色名` 提及，按 精确 → 大小写不敏感 → 模糊包含
+    三级匹配角色资产库，返回每个提及的 角色ID/角色名/定妆照 URL/外观锁定卡，
+    以及展开文本（锁定角色的外观锁定卡拼入前缀段）与定妆照 URL 列表
+    （可直接作为 VideoRequest.reference_images）。
+
+    错误：400 提及数量超限 / 422 入参校验失败（空文本、超万字符）/ 500 解析异常。
+    """
+    from app.services.mention_service import resolve_mentions
+
+    try:
+        data = resolve_mentions(request.text)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("@提及解析失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"@提及解析失败: {e}") from e
+    return {"success": True, "data": data}
+
+
 @router.post("/storyboard/generate", response_model=AgentResponse)
 async def generate_storyboard(request: StoryboardRequest) -> AgentResponse:
     """分镜 Agent：剧本场景 → 分镜关键帧图片。"""
@@ -305,6 +404,57 @@ async def generate_video_batch(request: VideoBatchRequest) -> AgentResponse:
     return await video_agent.batch_execute(request)
 
 
+@router.post("/video/rerun-shot", response_model=AgentResponse)
+async def rerun_video_shot(request: RerunShotRequest) -> AgentResponse:
+    """单镜头锚点重拍（M25.1）。
+
+    从 output/pipeline/{project_id}/shot_params.json 恢复该镜头的参数快照
+    （prompt/seed/engine/lock_params/reference_images 等），仅重跑目标镜头：
+    - `seed` 非空时覆盖快照种子（换 seed 重拍），否则沿用快照锁定值
+    - `override_prompt` 非空时替换快照提示词
+    - 成功后回写快照该镜头的 video_url/status；失败仅返回错误，其余镜头不受影响
+
+    错误：404 快照或镜头不存在 / 422 入参校验失败。
+    """
+    snapshot = PipelineOrchestrator.load_shot_params(request.project_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"镜头参数快照不存在: {request.project_id}（需先跑过视频生成步骤）",
+        )
+    shot = next(
+        (s for s in snapshot.get("shots", []) if s.get("scene_id") == request.scene_id),
+        None,
+    )
+    if shot is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"快照中无镜头 scene_id={request.scene_id}",
+        )
+
+    # 快照重建请求（剔除落盘附加字段，Pydantic 忽略未知键）
+    req_data = {k: v for k, v in shot.items() if k not in ("status", "video_url", "rerun_at")}
+    req = VideoRequest(**req_data)
+    if request.reseed:
+        req.seed = None  # 换 seed 重拍：置 None 由 Agent 随机
+    elif request.seed is not None:
+        req.seed = request.seed
+    if request.override_prompt.strip():
+        req.prompt = request.override_prompt.strip()
+
+    response = await video_agent.execute(req)
+    # 成功才回写快照；失败不动快照（保持上次成功产物，失败隔离）
+    if response.success and response.data:
+        PipelineOrchestrator.update_shot_result(
+            request.project_id,
+            request.scene_id,
+            video_url=str(response.data.get("video_url", "")),
+            status="success",
+            seed_used=req.seed,
+        )
+    return response
+
+
 @router.post("/voice/generate", response_model=AgentResponse)
 async def generate_voice(request: VoiceRequest) -> AgentResponse:
     """配音 Agent：台词 → edge-tts → 多角色语音音频。"""
@@ -321,26 +471,6 @@ async def generate_subtitle(request: SubtitleRequest) -> AgentResponse:
 async def compose_video(request: EditRequest) -> AgentResponse:
     """剪辑 Agent：视频片段 + 配音 + 字幕 → 完整短剧成片。"""
     return await edit_agent.execute(request)
-
-
-@router.post("/lipsync/generate", response_model=AgentResponse)
-async def generate_lip_sync(request: LipSyncRequest) -> AgentResponse:
-    """唇形同步 Agent：视频 + 配音音频 → 口型对齐视频（LatentSync 1.6）。
-
-    P4.4: 受 settings.lip_sync_enabled 总开关控制，默认关闭。
-    失败时自动降级返回原视频，不影响成片流程。
-    """
-    return await lip_sync_agent.execute(request)
-
-
-@router.post("/postprocess/generate", response_model=AgentResponse)
-async def generate_postprocess(request: PostprocessRequest) -> AgentResponse:
-    """后处理 Agent：超分 + 插帧 + 修复 + 降噪 + H.265 编码。
-
-    P4.4: 受 settings.postprocess_enabled 总开关控制，默认关闭。
-    单步开关在 settings 中独立控制，单步失败不阻断整体流程（best-effort）。
-    """
-    return await postprocess_agent.execute(request)
 
 
 @router.post("/quality/check", response_model=AgentResponse)
@@ -444,9 +574,9 @@ async def _run_agent_task(agent_name: str, agent: Any, request: Any, task_id: st
         )
 
     try:
-        # 支持 progress_callback 的 Agent：video / lipsync / postprocess
+        # 支持 progress_callback 的 Agent：video
         # 其他 Agent 忽略未知参数
-        if agent_name in ("video", "lipsync", "postprocess"):
+        if agent_name == "video":
             response = await agent.execute(request, progress_callback=progress_callback)
         else:
             response = await agent.execute(request)

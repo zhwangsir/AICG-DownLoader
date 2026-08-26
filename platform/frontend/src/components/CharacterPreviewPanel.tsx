@@ -60,12 +60,7 @@ export default function CharacterPreviewPanel({
   };
 
   const startSearch = async (char: CharacterData) => {
-    const existing = useDramaStore.getState().characterPreviews[char.character_id];
-    const canRestart = !existing || existing.stage === "idle" || (existing.stage === "editing" && existing.error);
-    if (!canRestart) {
-      return;
-    }
-
+    // 注：唯一调用方是上方 effect（已按相同条件守卫），此处不再重复校验
     setCharacterPreview(char.character_id, {
       character_id: char.character_id,
       character: char,
