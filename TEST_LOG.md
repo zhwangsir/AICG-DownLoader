@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-27 drama smoke (code uncommitted): idea rain-night convenience store -> script-ef4765a34f37 completed. project 杯底的血 id bed1ceac-10cb-46a6-9cea-93669d264432, 2 chars 2 shots. storyboard-1c3cb3b243de sketch scene1 completed, PNG ~630KB from ComfyUI :8188. LLM spark02 live. H3 not submitted. script sync 240s too short, used generate_async, wall ~20min. character preview HTTP 200 but LLM 45s timeout fell back to template. ToIV / DashBox brand untouched.
+
 - 2026-08-27 later: MateBook ~/NAS now SMB-mounted (not on boot); model root readable; registry loras 101, checkpoints 24. DashBox web :8080 and api :8780 listening; panel status web/api_listening true. LICENSE/NOTICE/brand untouched. Colima disk 20G tight. ToIV untouched. Code still uncommitted.
 
 - 2026-08-27 evening model library/gateway (code uncommitted): registry errors when NAS unreadable (no empty list); scan root includes /Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models. MateBook ~/NAS not SMB-mounted: disk checkpoint/lora=0, manifest LoRA=20. gateway/health no longer probes studio04/01/02; required: llm spark02, vlm spark01, LB :8188, H3 :8195, TTS :9200, ASR :9210; LTX required=false. DashBox colima build in progress, :8080/:8780 not listening. LICENSE/NOTICE/brand untouched. ToIV untouched.
