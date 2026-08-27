@@ -6,7 +6,7 @@
 
 ## 本项目
 
-**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径仍 `ALLProject/AIGCPannel`，远程仍名 AIGCPannel。不是三仓。LibTV 是已否掉的拆仓候选。
+**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `543264e`。不是三仓。LibTV 是已否掉的拆仓候选。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
@@ -33,7 +33,7 @@
 
 1. 状态、端口、GPU、挂载、模型占用必须 SSH 真机验证，以 ToIV/AGENTS.md + 真机为准。
 2. 禁止跨项目改代码。ToIV 不动。
-3. 远程：origin https://gitee.com/Winery_z/AIGCPannel 与 github https://github.com/zhwangsir/AIGCPannel 均已推 e3e30c0。双远程同步。ToIV 不动。
+3. 远程：origin https://gitee.com/Winery_z/DashBox 与 github https://github.com/zhwangsir/DashBox 均已推 `543264e`。双远程同步。ToIV 不动。
 4. DashBox 是产品壳（主界面 `:8080`），开发和测试归 AICG 开发。只禁止覆盖上游 LICENSE / NOTICE / DramaClaw 品牌文件，不要改成 MIT。
 5. 旧文档已归档到 `ALLProject/.archive/docs-legacy-20260827/`。
 

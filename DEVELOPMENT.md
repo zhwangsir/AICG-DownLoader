@@ -2,7 +2,7 @@
 
 > 合并自旧 PROJECT_INIT / docs / 根目录散文档。原文在 `ALLProject/.archive/docs-legacy-20260827/`。
 > 最后更新：2026-08-27
-> 身份：DashBox 为壳；短剧流水线与下载器是模块。目录/远程仍名 AIGCPannel。上游 LICENSE/NOTICE/品牌不要覆盖、不要改成 MIT。
+> 身份：DashBox 为壳；短剧流水线与下载器是模块。目录 `ALLProject/DashBox`，远程 Gitee/GitHub 均名 DashBox，尖端 `543264e`。上游 LICENSE/NOTICE/品牌不要覆盖、不要改成 MIT。
 >
 > **2026-08-27 融合第一刀**：`./start-dashbox.sh`（短剧 :8100 + DashBox :8080/:8780，主界面 :8080）；`start-aigcpannel.sh` 薄封装转调。根 NOTICE 声明 dashbox/ 为 ELv2。crate 仍 `comfy-downloader`。已删 platform/deploy 下 deepfilternet / hunyuanimage / latentsync / video-enhance / xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。`GET /api/panel/status`。未 commit/push。
 > **2026-08-27 model library/gateway (uncommitted):** registry errors if NAS unreadable; health required spark02/spark01/LB:8188/H3:8195/TTS:9200/ASR:9210; no studio04/01/02; LTX required=false. DashBox web :8080 and api :8780 listening; Colima disk 20G tight. NAS mounted at ~/NAS (not on boot); loras 101 checkpoints 24.
@@ -32,12 +32,12 @@
 
 | 字段 | 值 |
 |------|----|
-| 项目名称 | AIGCPannel（下载器 + 短剧台 + DashBox） |
+| 项目名称 | DashBox（壳；短剧流水线 + 下载器是模块） |
 | 当前版本 | 0.1.0 |
 | 创建日期 | 2026 年 |
 | 负责人 | zhwangsir（Winery / WangZhenYu） |
-| 项目路径 | /Users/wangzhenyu/Desktop/ALLProject/AIGCPannel |
-| 远程仓库 | https://github.com/zhwangsir/AICG-DownLoader |
+| 项目路径 | /Users/wangzhenyu/Desktop/ALLProject/DashBox |
+| 远程仓库 | https://gitee.com/Winery_z/DashBox （origin） / https://github.com/zhwangsir/DashBox |
 | 仓库可见性 | 公开；一等代码 MIT，dashbox/ 为 ELv2（见根 NOTICE） |
 | 线上地址 | https://github.com/zhwangsir/AICG-DownLoader/releases |
 

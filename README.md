@@ -2,22 +2,22 @@
 
 **DashBox** 是产品壳。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块，不再三套并列。
 
-目录仍是 `ALLProject/AIGCPannel`，远程仍名 AIGCPannel（还没改仓名）。代码融合第一刀未 commit。LibTV 是已否掉的拆仓候选。
+目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `543264e`（已双推，未强推）。LibTV 是已否掉的拆仓候选。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
 > 文档基准日：2026-08-27。集群设备 / GPU / 挂载 / 凭据只看 [`../ToIV/AGENTS.md`](../ToIV/AGENTS.md)，本文件不复制。
 
-## 远程（仓名仍 AIGCPannel，改名等 Gitee+GitHub 一起）
+## 远程（已改名 DashBox 并双推）
 
 本仓 **不是** `AICG-DownLoader`。旧 README、`STATE.json` 顶部 description、`DEVELOPMENT.md` 里「远程仍为 AICG-DownLoader、尚未 commit」的句子已过时，以 git 与 [`../项目登记册.md`](../项目登记册.md) 为准。
 
 | 远程 | URL | 说明 |
 |------|-----|------|
-| `origin` | https://gitee.com/Winery_z/AIGCPannel.git | Gitee，主远程 |
-| `github` | https://github.com/zhwangsir/AIGCPannel.git | GitHub 备份 |
+| `origin` | https://gitee.com/Winery_z/DashBox.git | Gitee，主远程 |
+| `github` | https://github.com/zhwangsir/DashBox.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`d89ee62`（`docs: 定位为专做 AI 短剧，ToIV 才是聚合平台`）。Gitee 已推；GitHub 待补
+- 当前 `main` 尖端：`543264e`（`feat: DashBox 主导融合，drama 反向代理入镜像`）。Gitee/GitHub 已双推
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
@@ -33,9 +33,9 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 
 工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=DashBox、下载器 config/models.json 是否可读、DashBox URL。
 
-## 短剧 API 反代（2026-08-27，代码未 commit）
+## 短剧 API 反代（2026-08-27，已进 `543264e`）
 
-DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧后端）。`:8080`/`:8780`/`:8100` 的 `/api/drama/health` 均 200。Studio 节点流水线仍走 DashBox R18，未改成 platform script/storyboard。LICENSE/NOTICE/品牌未动。目录/远程仍 AIGCPannel。
+DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧后端）。`:8080`/`:8780`/`:8100` 的 `/api/drama/health` 均 200。Studio 节点流水线仍走 DashBox R18，未改成 platform script/storyboard。LICENSE/NOTICE/品牌未动。
 
 ## 模型库 / 网关（2026-08-27，代码未 commit）
 

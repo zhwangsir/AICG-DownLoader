@@ -1,5 +1,7 @@
 # TEST_LOG.md — DashBox
 
+- 2026-08-27 dir+remotes renamed to DashBox and dual-pushed (no force): path /Users/wangzhenyu/Desktop/ALLProject/DashBox; origin https://gitee.com/Winery_z/DashBox; github https://github.com/zhwangsir/DashBox; tip 543264e feat: DashBox 主导融合，drama 反向代理入镜像. Local docs 6a8590f/42b0e38 were ancestors of 543264e (no fork). LICENSE/NOTICE/brand untouched. ToIV untouched.
+
 - 2026-08-27 canvas wiring (code uncommitted): DashBox :8780 reverse-proxies /api/drama/* to host.docker.internal:8100. /api/drama/health 200 on :8080/:8780/:8100. Studio node pipeline still DashBox R18, not switched to platform script/storyboard. LICENSE/NOTICE/brand untouched. dir/remotes still AIGCPannel. ToIV untouched.
 
 - 2026-08-27 fusion first cut (code uncommitted, repo name unchanged): product start ./start-dashbox.sh (drama backend :8100 + DashBox :8080/:8780). Main UI :8080. panel/status product=DashBox. start-aigcpannel.sh thin wrapper. LICENSE/NOTICE/brand untouched. dir still ALLProject/AIGCPannel, remotes still AIGCPannel. Next: canvas->:8100 then Gitee+GitHub rename together. ToIV untouched. Docs identity flipped to DashBox as shell; short-drama pipeline and downloader are modules.
