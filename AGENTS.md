@@ -20,9 +20,9 @@
 
 ## 2026-08-27 model library / gateway (code uncommitted)
 
-- registry: error when NAS unreadable, no empty list. Scan root includes `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`. MateBook `~/NAS` not SMB-mounted: disk checkpoint/lora=0, manifest LoRA=20.
+- registry: error when NAS unreadable, no empty list. Scan root includes `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`. MateBook `~/NAS` is SMB-mounted (not on boot). registry: loras 101, checkpoints 24. model root readable.
 - `gateway/health`: no studio04/01/02. Required: llm spark02, vlm spark01, LB :8188, H3 :8195, TTS :9200, ASR :9210. LTX required=false. Cluster SoT still `../ToIV/AGENTS.md`.
-- DashBox: local colima build in progress; `:8080`/`:8780` not listening yet. LICENSE/NOTICE/brand untouched.
+- DashBox: local colima; `:8080`/`:8780` listening; panel web/api_listening true; Colima disk 20G tight. LICENSE/NOTICE/brand untouched.
 
 ## 许可
 

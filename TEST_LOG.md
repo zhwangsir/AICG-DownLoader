@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-27 later: MateBook ~/NAS now SMB-mounted (not on boot); model root readable; registry loras 101, checkpoints 24. DashBox web :8080 and api :8780 listening; panel status web/api_listening true. LICENSE/NOTICE/brand untouched. Colima disk 20G tight. ToIV untouched. Code still uncommitted.
+
 - 2026-08-27 evening model library/gateway (code uncommitted): registry errors when NAS unreadable (no empty list); scan root includes /Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models. MateBook ~/NAS not SMB-mounted: disk checkpoint/lora=0, manifest LoRA=20. gateway/health no longer probes studio04/01/02; required: llm spark02, vlm spark01, LB :8188, H3 :8195, TTS :9200, ASR :9210; LTX required=false. DashBox colima build in progress, :8080/:8780 not listening. LICENSE/NOTICE/brand untouched. ToIV untouched.
 
 - 2026-08-27 用户明确 DashBox 也包含在 AIGCPannel 里，不是外挂。五件套改写成产品一块，不是可选旁路。LICENSE / NOTICE / DramaClaw 品牌文件仍不动、不改成 MIT。开发和测试归 AICG 开发。ToIV 不动。

@@ -35,11 +35,11 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 
 ## 模型库 / 网关（2026-08-27，代码未 commit）
 
-registry 在 NAS 不可读时明确报错，不再空列表。扫描根含 `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`。本机 MateBook `~/NAS` 未挂 SMB：disk checkpoint/lora=0，manifest LoRA=20。
+registry 在 NAS 不可读时明确报错，不再空列表。扫描根含 `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`。本机 MateBook `~/NAS` 已挂 NAS（非开机自动挂载），模型根可读。registry：loras 101、checkpoints 24。
 
 `gateway/health` 不再探测 studio04/01/02。必选健康：llm spark02、vlm spark01、LB :8188、H3 :8195、TTS :9200、ASR :9210。LTX required=false。集群设备仍只看 ToIV/AGENTS.md。
 
-DashBox 正在本机 colima 构建，:8080/:8780 尚未监听。LICENSE/NOTICE/品牌未改。ToIV 未动。
+DashBox 正在本机 web :8080 and api :8780 listening; panel web/api_listening true; Colima disk 20G tight. LICENSE/NOTICE/品牌未改。ToIV 未动。
 
 ## 许可（根 NOTICE）
 

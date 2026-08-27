@@ -3,7 +3,7 @@
   "version": "0.34.0",
   "last_updated": "2026-08-27",
   "description": "AIGCPannel 专做 AI 短剧（ToIV 才是聚合平台）。仓内三块一体：下载器 + 短剧工作台 + DashBox（产品一块，不是外挂）。远程已是 AIGCPannel。代码 AICG 开发，五件套项目管家。",
-  "model_library_gateway_2026_08_27": {"code": "uncommitted", "registry": "error when NAS unreadable; no empty list", "scan_root": "/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models", "matebook": "~/NAS not SMB-mounted; disk checkpoint/lora=0; manifest LoRA=20", "health_required": ["llm spark02", "vlm spark01", "LB :8188", "H3 :8195", "TTS :9200", "ASR :9210"], "health_dropped": ["studio04", "studio01", "studio02"], "ltx_required": false, "dashbox": "colima build; :8080/:8780 not listening; LICENSE/NOTICE/brand untouched", "toiv": "untouched"},
+  "model_library_gateway_2026_08_27": {"code": "uncommitted", "registry": "error when NAS unreadable; no empty list", "scan_root": "/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models", "matebook": "~/NAS SMB-mounted (not on boot); loras 101; checkpoints 24", "health_required": ["llm spark02", "vlm spark01", "LB :8188", "H3 :8195", "TTS :9200", "ASR :9210"], "health_dropped": ["studio04", "studio01", "studio02"], "ltx_required": false, "dashbox": "colima build; :8080/:8780 listening; panel web/api_listening true; Colima disk 20G tight; LICENSE/NOTICE/brand untouched", "toiv": "untouched"},
   "milestones": {
     "M0": {
       "name": "项目骨架",
