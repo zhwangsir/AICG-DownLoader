@@ -20,7 +20,7 @@
 
 **2026-08-27 画布接线**：DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。
 
-**2026-08-27 Studio `19a3141`**：`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`；剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。web 仍 docker cp（镜像在烤）。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。
+**2026-08-27 Studio `19a3141`**：`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`；剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。web 已烤进镜像 dashbox-web:latest e09bb3b548e8（容器与镜像 SPA md5 一致，不再 docker-cp overlay）。Dockerfile 未改故未 commit。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 

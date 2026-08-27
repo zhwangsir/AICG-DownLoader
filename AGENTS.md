@@ -15,7 +15,7 @@
 - `./start-aigcpannel.sh`：薄封装，转调 `start-dashbox.sh`。
 - `GET /api/panel/status`：product=DashBox；查 downloader `config` / `models.json` 是否可读。
 - DashBox `:8780` 反代 `/api/drama/*` → `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。
-- Studio `NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。`19a3141` 已双推。web 仍 docker cp（镜像在烤）。CSP `img-src` 含 `http://192.168.71.127:8188`。
+- Studio `NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。`19a3141` 已双推。web 已烤进镜像 dashbox-web:latest e09bb3b548e8（容器与镜像 SPA md5 一致，不再 docker-cp overlay）。Dockerfile 未改故未 commit。CSP `img-src` 含 `http://192.168.71.127:8188`。
 
 左侧导航已有「模型库」「引擎」。crate 名与 OS 配置目录仍是 `comfy-downloader`（保住已有 `models.json` 路径）。
 
