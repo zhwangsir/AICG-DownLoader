@@ -1,13 +1,13 @@
 # AGENTS.md — AIGCPannel
 
-> **最后更新**：2026-08-27（定位：专做 AI 短剧）
+> **最后更新**：2026-08-27（定位：专做 AI 短剧；DashBox 是产品一块）
 > **集群真相源**：`../ToIV/AGENTS.md`（禁止把设备清单/凭据复制进本文件）
 > **文档五件套**：README.md / AGENTS.md / DEVELOPMENT.md / STATE.json / TEST_LOG.md
 
 ## 本项目
 
 **AIGCPannel**（用户拼法 / 产品显示名）专做 AI 短剧。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。
-仓内仍是 ComfyUI 模型下载器 + 短剧工作台 + DashBox 引擎（短剧配套），一个项目、一个根。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。不是三仓。LibTV 是已否掉的拆仓候选。
+仓内三块一体：ComfyUI 模型下载器 + 短剧工作台 + DashBox 引擎。DashBox 是产品的一块，不是外挂、不是可选旁路。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。不是三仓。LibTV 是已否掉的拆仓候选。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
@@ -27,7 +27,7 @@
 1. 状态、端口、GPU、挂载、模型占用必须 SSH 真机验证，以 ToIV/AGENTS.md + 真机为准。
 2. 禁止跨项目改代码。ToIV 不动。
 3. 远程：origin https://gitee.com/Winery_z/AIGCPannel 与 github https://github.com/zhwangsir/AIGCPannel 均已推 e3e30c0。双远程同步。ToIV 不动。
-4. DashBox 上游 LICENSE / NOTICE / 品牌文件不要覆盖。
+4. DashBox 在产品内（`dashbox/`），开发和测试归 AICG 开发。只禁止覆盖上游 LICENSE / NOTICE / DramaClaw 品牌文件，不要改成 MIT。
 5. 旧文档已归档到 `ALLProject/.archive/docs-legacy-20260827/`。
 
 ## 2026-08-27 第一波融合（未 commit / push）

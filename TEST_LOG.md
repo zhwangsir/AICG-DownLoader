@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-27 用户明确 DashBox 也包含在 AIGCPannel 里，不是外挂。五件套改写成产品一块，不是可选旁路。LICENSE / NOTICE / DramaClaw 品牌文件仍不动、不改成 MIT。开发和测试归 AICG 开发。ToIV 不动。
+
 - 2026-08-27 融合收尾（仍未 commit/push）：CORS 已去掉 localhost:1420；frontend package.json 已无 @tauri-apps；backend .venv 已在 platform/backend 重建；引擎页可手动刷新探测 :8080/:8780。crate/安装器路径/GitHub URL 仍旧。远程仓名等用户点头再两边一起改。ToIV 和 dashbox 品牌文件未动。
 
 - 2026-08-27 第一波融合落盘（未 commit/push）：产品显示名 AIGCPannel。`./start-aigcpannel.sh` backend :8100 + frontend :3501；`./start-engine.sh` DashBox docker 默认 :8080/:8780。根 NOTICE 声明 dashbox/ 为 ELv2。crate/配置目录仍 comfy-downloader。远程仍 AICG-DownLoader。已删 platform/deploy 下 deepfilternet、hunyuanimage、latentsync、video-enhance、xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。GET /api/panel/status 可查 config/models.json 是否可读。ToIV 未动。dashbox 品牌文件未改。

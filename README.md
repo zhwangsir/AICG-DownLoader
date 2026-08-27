@@ -2,7 +2,7 @@
 
 **AIGCPannel** 专做 AI 短剧。ToIV 是聚合平台；本仓不是第二个 ToIV。
 
-仓内仍是融合结构：**ComfyUI 模型下载器** + **AI 短剧工作台**（`platform/`）+ **DashBox 引擎**（`dashbox/`），作为短剧生产配套。产品显示名 **AIGCPannel**（拼法以用户为准）。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。**一个项目、一个根，不是三仓。** LibTV 是已否掉的拆仓候选。
+仓内三块一体：**ComfyUI 模型下载器** + **AI 短剧工作台**（`platform/`）+ **DashBox 引擎**（`dashbox/`）。DashBox 是产品的一块，不是外挂、不是可选旁路。产品显示名 **AIGCPannel**（拼法以用户为准）。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。**一个项目、一个根，不是三仓。** LibTV 是已否掉的拆仓候选。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -39,14 +39,14 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 
 一等代码（platform、src、packaging 以及 dashbox 以外文件）为 MIT，见 [LICENSE](LICENSE)，Copyright 2026 WangZhenYu (Winery)。
 
-dashbox 目录是第三方（DramaClaw / DashBox / SuperTale CE），协议为 Elastic License 2.0（ELv2），不是 MIT。不要改 dashbox 的 LICENSE、NOTICE 或品牌文件，不要把 dashbox 当成本仓 MIT。本仓只捆绑启动、状态与链接。
+dashbox 目录是产品内的引擎树（DramaClaw / DashBox / SuperTale CE），协议为 Elastic License 2.0（ELv2），不是 MIT。不要改 dashbox 的 LICENSE、NOTICE 或品牌文件，不要把 dashbox 当成本仓 MIT。
 
 ## 仓库结构
 
 - src/：Rust 桌面下载器（crate 名 comfy-downloader；main.rs 与 sys_info.rs）
 - platform/：AI 短剧工作台。backend 为 FastAPI（drama-platform-backend 0.4.0，Python 3.11+，uv）；frontend 为 React + TypeScript + Vite + Zustand（dev 端口 3501）
 - platform/deploy/ 只保留 comfyui-lb
-- dashbox/：捆绑引擎（ELv2，第三方树）
+- dashbox/：产品引擎块（ELv2 第三方树，在仓内，不是旁路）
 - packaging/：下载器 Windows / macOS / Linux 安装器元数据
 - 根目录启动脚本：start-aigcpannel（sh/py/bat）与 start-engine（sh/py）
 - NOTICE、LICENSE、Cargo.toml，以及文末五件套
