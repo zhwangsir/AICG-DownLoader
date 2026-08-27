@@ -79,3 +79,45 @@ def test_registry_corrupt_downloader_index_fail_open(service, monkeypatch, tmp_p
     reg = service.get_registry()
     assert reg["stats"]["downloader_total_models"] == 0
     assert all(l["downloaded"] is False for l in reg["loras"])
+
+
+def test_registry_scans_disk_tree(service, models_json, tmp_path, monkeypatch):
+    """磁盘上真实存在的 checkpoint/LoRA 出现在 registry，并标 downloaded。"""
+    from app.config import settings
+    from app.services.nas_library_service import NasLibraryService
+    import app.services.nas_library_service as nas_mod
+
+    root = tmp_path / "models"
+    (root / "checkpoints").mkdir(parents=True)
+    (root / "loras").mkdir(parents=True)
+    (root / "checkpoints" / "majicMIX_v7.safetensors").write_bytes(b"ckpt")
+    (root / "loras" / "Cinematic_Photography_style_v1.safetensors").write_bytes(b"lora")
+    monkeypatch.setattr(settings, "nas_model_roots", str(root))
+    monkeypatch.setattr(nas_mod, "_manifest_models_root", lambda: None)
+    nas_mod.nas_library_service = NasLibraryService()
+
+    reg = service.get_registry()
+    assert reg["stats"]["disk_checkpoints"] == 1
+    assert any(c["filename"] == "majicMIX_v7.safetensors" for c in reg["checkpoints"])
+    cinematic = next(
+        l for l in reg["loras"] if l["filename"] == "Cinematic_Photography_style_v1.safetensors"
+    )
+    assert cinematic["downloaded"] is True
+    assert reg["sources"]["error"] is None
+
+
+def test_registry_unreadable_roots_sets_error(service, monkeypatch, tmp_path):
+    """Mac 看不见 NAS 时 registry 仍 200，但 sources.error 明确说明路径。"""
+    from app.config import settings
+    from app.services.nas_library_service import NasLibraryService
+    import app.services.nas_library_service as nas_mod
+
+    monkeypatch.setenv("DOWNLOADER_MODELS_JSON", str(tmp_path / "nonexistent.json"))
+    monkeypatch.setattr(settings, "nas_model_roots", str(tmp_path / "no-such-models"))
+    monkeypatch.setattr(nas_mod, "_manifest_models_root", lambda: None)
+    nas_mod.nas_library_service = NasLibraryService()
+
+    reg = service.get_registry()
+    assert reg["stats"]["disk_checkpoints"] == 0
+    assert reg["sources"]["error"]
+    assert "不可读" in reg["sources"]["error"]

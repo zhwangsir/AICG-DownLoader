@@ -94,8 +94,8 @@ class TestHealthRouting:
 
     async def test_health_report_structure(self, gateway, monkeypatch):
         async def fake_probe(self, endpoint, path):
-            # asr 主端点（含 9212）与 image 端点健康，其余离线
-            return ("9212" in endpoint or "8188" in endpoint, "ok")
+            # asr 主端点（workstation :9210）与 image 端点健康，其余离线
+            return ("9210" in endpoint or "8188" in endpoint, "ok")
 
         monkeypatch.setattr(ModelGateway, "_probe", fake_probe)
         # 确保 image/asr 主端点含预期端口（测试环境 .env 可能改写）
@@ -105,8 +105,9 @@ class TestHealthRouting:
         report = await gateway2.health_report()
         assert "image" in report and "asr" in report
         assert report["image"]["healthy"] is True
-        # asr 主端点 :9212 健康 → 整体健康
+        # asr 主端点 :9210 健康 → 整体健康
         assert report["asr"]["healthy"] is True
+        assert report["asr"]["required"] is True
         for cap in report.values():
             assert cap["endpoints"] and all("endpoint" in e for e in cap["endpoints"])
 
@@ -128,3 +129,28 @@ class TestMetrics:
         report = gateway.metrics_report()
         assert report["llm"]["calls"] == 1
         assert report["image"]["calls"] == 1
+
+
+    def test_required_capabilities_skip_retired_studio(self, gateway):
+        """MacStudio 已下线：必选能力不得再指向 studio04 VLM / studio02 ASR / studio01 demucs。"""
+        studio = ("100.126.182.23", "100.91.0.121", "100.67.43.40")
+        for spec in gateway._build_registry().values():
+            if not spec.required:
+                continue
+            joined = " ".join(spec.endpoints)
+            for ip in studio:
+                assert ip not in joined, f"{spec.name} still probes {ip}"
+
+    async def test_optional_demucs_does_not_fail_closed(self, gateway, monkeypatch):
+        """demucs 为可选：不探测 studio01，healthy 视为通过（不失败闭合）。"""
+        probed: list[str] = []
+
+        async def fake_probe(self, endpoint, path):
+            probed.append(endpoint)
+            return (True, "ok")
+
+        monkeypatch.setattr(ModelGateway, "_probe", fake_probe)
+        report = await gateway.health_report()
+        assert report["demucs"]["required"] is False
+        assert report["demucs"]["healthy"] is True
+        assert not any("100.67.43.40" in e for e in probed)

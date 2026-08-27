@@ -128,6 +128,10 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5173,
       proxy: {
+        "/api/drama": {
+          target: apiTarget,
+          changeOrigin: true,
+        },
         "/api/v1": {
           target: apiTarget,
           changeOrigin: true,

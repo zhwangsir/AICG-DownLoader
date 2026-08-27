@@ -94,6 +94,14 @@ const NODE_TYPE_ICON: Record<CanvasNodeType, LucideIcon> = {
   [CANVAS_NODE_TYPES.nsfwStoryboard]: LayoutGrid,
   [CANVAS_NODE_TYPES.nsfwVideoBatch]: Film,
   [CANVAS_NODE_TYPES.nsfwDramaStudio]: Clapperboard,
+  [CANVAS_NODE_TYPES.nsfwFactoryInit]: Flame,
+  [CANVAS_NODE_TYPES.nsfwFactoryScript]: ScrollText,
+  [CANVAS_NODE_TYPES.nsfwFactoryAsset]: ImageIcon,
+  [CANVAS_NODE_TYPES.nsfwFactoryStoryboard]: LayoutGrid,
+  [CANVAS_NODE_TYPES.nsfwFactoryShot]: Film,
+  [CANVAS_NODE_TYPES.nsfwFactoryAudio]: AudioLines,
+  [CANVAS_NODE_TYPES.nsfwFactoryCompose]: Film,
+  [CANVAS_NODE_TYPES.nsfwFactoryQc]: Sparkles,
   [CANVAS_NODE_TYPES.skill]: Sparkles,
 };
 

@@ -3,7 +3,8 @@ FROM python:3.12-slim
 # 项目全程用 uv 管理(与 host 一致)。Dockerfile 也用 uv,使 uv.lock 锁版本 +
 # [[tool.uv.dependency-metadata]] override(da2 的 torch==2.5.0 冲突、sharp 的 gsplat)
 # 生效——pip 不认这些 override,会在 da2/world 解析冲突时 build 失败。
-RUN pip install --no-cache-dir uv
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple uv
 
 ENV ST_EDITION=ce \
     ST_CONTROL_PLANE_DSN= \
@@ -17,7 +18,15 @@ ENV ST_EDITION=ce \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     HERMES_CLI_PATH=/root/.local/bin/hermes
 
-RUN apt-get update \
+# Launch fix: apt via Tsinghua (deb.debian.org is slow from this LAN). Not a brand change.
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+      sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
+    fi; \
+    apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 

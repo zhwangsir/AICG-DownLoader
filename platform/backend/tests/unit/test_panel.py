@@ -44,13 +44,15 @@ def test_panel_status_ok(client, tmp_path, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["backend"] == "ok"
-    assert body["product"] == "AIGCPannel"
+    assert body["product"] == "DashBox"
     assert body["downloader_config_readable"] is True
     assert body["models_json_readable"] is True
     assert body["dashbox"]["web"] == "http://127.0.0.1:8080"
+    assert body["drama_backend"]["api"].startswith("http://127.0.0.1:8100")
     assert body["dashbox"]["api"] == "http://127.0.0.1:8780"
     assert body["dashbox"]["web_listening"] is True
     assert body["dashbox"]["api_listening"] is False
+    assert isinstance(body.get("nas_model_roots"), list)
 
 
 def test_panel_status_missing_files(client, tmp_path, monkeypatch):

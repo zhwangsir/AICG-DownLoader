@@ -15,6 +15,7 @@
 | `NOVELVIDEO_STATE_DIR` | `$DATA_ROOT/state` | Local state. |
 | `NOVELVIDEO_RUNTIME_DIR` | `$DATA_ROOT/runtime` | Runtime temporary directory. |
 | `ST_CONTROL_PLANE_DSN` / `ST_REDIS_URL` / `ST_CELERY_BROKER_URL` / `ST_CELERY_RESULT_BACKEND` | Empty (forced empty in CE) | Used only by EE/distributed; CE runs tasks inline in-process, so leave empty. |
+| `ST_DRAMA_API_URL` | `http://127.0.0.1:8100` (Compose: `http://host.docker.internal:8100`) | Platform short-drama FastAPI origin. DashBox API reverse-proxies `/api/drama/*` here. |
 
 ## Model Gateway
 

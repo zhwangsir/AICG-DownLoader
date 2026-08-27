@@ -500,7 +500,7 @@ export const NSFWStoryboardNode = memo(({ id, data, selected }: NSFWStoryboardNo
                         onClick={(event) => {
                           event.stopPropagation();
                           const childId = spawnFrameChild(frame);
-                          if (childId) updateFrame(frame.id, { childNodeId });
+                          if (childId) updateFrame(frame.id, { childNodeId: childId });
                         }}
                         className="nodrag inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/[0.06] text-text-muted transition-colors hover:bg-white/[0.12] hover:text-text-dark"
                       >

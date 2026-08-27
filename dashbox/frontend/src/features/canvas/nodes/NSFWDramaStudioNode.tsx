@@ -58,7 +58,6 @@ import {
   useR18Compose,
   useR18ScriptPlan,
   useR18Tts,
-  type R18SceneData,
 } from '@/lib/queries/model-library';
 import { parseCharactersText } from '@/features/canvas/nodes/NSFWScriptNode';
 import {
@@ -67,6 +66,7 @@ import {
 } from '@/features/canvas/nodes/NSFWVideoBatchNode';
 import { ModelNamePicker } from '@/components/settings/model-name-picker';
 import { uploadFreezoneImage } from '@/api/ops';
+import { getDramaHealth } from '@/api/drama';
 import { useUpstreamImages } from '@/features/canvas/application/useUpstreamGraph';
 
 type NSFWDramaStudioNodeProps = NodeProps & {
@@ -117,9 +117,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
   // ── 输入 ──
   const synopsis = data.synopsis ?? '';
   const charactersText = data.charactersText ?? '';
-  const styleHint = data.styleHint ?? '';
   const durationSec = data.durationSec ?? 90;
-  const aspect = data.aspect ?? '9:16';
   const checkpoint = data.checkpoint ?? '';
   const size = data.size ?? '832x1216';
   const voice = data.voice || R18_TTS_VOICE_OPTIONS[0].value;
@@ -136,12 +134,23 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
   const error = data.error ?? null;
 
   const [isUploading, setIsUploading] = useState(false);
+  const [dramaHealth, setDramaHealth] = useState<'unknown' | 'ok' | 'down'>('unknown');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const runningRef = useRef(false);
 
   useEffect(() => {
     updateNodeInternals(id);
   }, [id, updateNodeInternals]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    void getDramaHealth(ac.signal)
+      .then((health) => setDramaHealth(health.status === 'ok' ? 'ok' : 'down'))
+      .catch(() => {
+        if (!ac.signal.aborted) setDramaHealth('down');
+      });
+    return () => ac.abort();
+  }, []);
 
   /** 从 store 读最新 data（长流水线防闭包过期）。 */
   const latest = useCallback((): NSFWDramaStudioNodeData => {
@@ -405,19 +414,6 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
     [id, updateNodeData],
   );
 
-  /** 确认阶段可编辑镜头提示词。 */
-  const updateSceneField = useCallback(
-    (sceneNo: number, field: 'image_prompt' | 'dialogue' | 'emotion', value: string) => {
-      const cur = latest();
-      updateNodeData(id, {
-        scenes: cur.scenes.map((s) =>
-          s.scene_no === sceneNo ? { ...s, [field]: value } : s,
-        ),
-      });
-    },
-    [id, latest, updateNodeData],
-  );
-
   // ── 派生统计 ──
   const framesDone = scenes.filter((s) => frameUrls[s.scene_no]).length;
   const videoDone = scenes.filter((s) => shotOutputs[s.scene_no]?.videoUrl).length;
@@ -490,6 +486,10 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
               输入梗概与角色卡，一键拍完一部短剧
               <br />
               （剧本 → 首帧 → 配音 → 出片 → 合成）
+              <br />
+              <span className={dramaHealth === 'ok' ? 'text-emerald-200/80' : dramaHealth === 'down' ? 'text-amber-200/70' : 'text-text-muted/45'}>
+                {dramaHealth === 'ok' ? '短剧模块已连接' : dramaHealth === 'down' ? '短剧模块不可达' : '短剧模块…'}
+              </span>
             </span>
           </div>
         )}

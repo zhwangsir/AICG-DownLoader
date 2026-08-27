@@ -15,7 +15,7 @@ const mockStatus = vi.mocked(getPanelStatus);
 
 const SAMPLE: Awaited<ReturnType<typeof getPanelStatus>> = {
   backend: "ok",
-  product: "AIGCPannel",
+  product: "DashBox",
   downloader_config_path: "/tmp/config.json",
   downloader_config_readable: true,
   models_json_path: "/tmp/models.json",

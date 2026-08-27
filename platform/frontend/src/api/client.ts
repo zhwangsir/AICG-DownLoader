@@ -1035,6 +1035,12 @@ export interface PanelStatus {
   downloader_config_readable: boolean;
   models_json_path: string;
   models_json_readable: boolean;
+  nas_model_roots?: { path: string; readable: boolean }[];
+  nas_model_roots_error?: string | null;
+  drama_backend?: {
+    api: string;
+    note: string;
+  };
   dashbox: {
     web: string;
     api: string;

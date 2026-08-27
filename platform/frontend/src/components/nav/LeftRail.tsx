@@ -57,7 +57,7 @@ export default function LeftRail() {
         className={
           "left-rail-btn" + (activePanel === "engine" ? " active" : "")
         }
-        title="引擎"
+        title="DashBox（主界面 :8080）"
         onClick={() => togglePanel("engine")}
       >
         <Server size={18} />

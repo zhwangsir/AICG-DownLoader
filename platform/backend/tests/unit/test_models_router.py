@@ -67,6 +67,19 @@ class TestLibrary:
         assert kwargs["query"] == "style"
         assert kwargs["refresh"] is True
 
+    def test_list_library_unreadable_roots_503(self, client, mock_services):
+        mock_services["nas"].list_models.return_value = {
+            "items": [],
+            "total": 0,
+            "types": [],
+            "scanned_at": 1.0,
+            "cache_hit": False,
+            "error": "模型根目录不可读（本机未见 ToIV ComfyUI 模型树）。已配置: /tmp/x。",
+        }
+        resp = client.get("/api/models/library")
+        assert resp.status_code == 503
+        assert "不可读" in resp.json()["detail"]
+
 
 class TestSearch:
     def test_search_ok(self, client, mock_services):

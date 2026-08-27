@@ -10,8 +10,9 @@ def main():
     if not DASHBOX.is_dir():
         print("error: dashbox/ not found", file=sys.stderr)
         raise SystemExit(1)
-    print("DashBox / DramaClaw engine (third-party, Elastic License 2.0)")
-    print("AIGCPannel does not rebrand this engine. See NOTICE and dashbox/LICENSE.")
+    print("DashBox is the product. Engine is DramaClaw/DashBox CE (third-party, Elastic License 2.0).")
+    print("Do not rebrand upstream SuperTale/DramaClaw files. See NOTICE and dashbox/LICENSE.")
+    print("Fused start: ./start-dashbox.sh  (drama :8100 + web :8080). This script is engine-only.")
     print("  Web UI : http://127.0.0.1:8080")
     print("  API    : http://127.0.0.1:8780")
     print()

@@ -6,7 +6,7 @@
 输出示例：
     node=pipeline.script status=start task_id=abc premise=末日便利店...
     node=llm.chat status=ok elapsed_ms=1234.5 model=qwen3.6-uncensored
-    node=gateway.route status=ok capability=asr endpoint=http://100.91.0.121:9212
+    node=gateway.route status=ok capability=asr endpoint=http://192.168.71.127:9210
     node=comfyui.submit status=error worker_url=http://192.168.71.127:8188 error=...
 
 使用方式：

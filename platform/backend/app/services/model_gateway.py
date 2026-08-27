@@ -5,11 +5,11 @@ DramaClaw 的外部服务依赖 → 本项目本地部署服务的映射：
 | DramaClaw 外部依赖          | 本地替换服务                              |
 |-----------------------------|-------------------------------------------|
 | 灵山编导大模型（远程网关）  | spark02 qwen3.6-uncensored :8000（LLM）   |
-| Gemini Flash（草图 VLM 门禁）| spark02 VLM / studio04 Qwen2.5-VL-72B :9303 |
+| Gemini Flash（草图 VLM 门禁）| spark01 Qwen3-VL :8000（MacStudio studio04 已下线） |
 | NanoBanana（宫格/草图生成） | ComfyUI-LB SDXL :8188（图像）             |
 | Seedance/happyhorse（视频） | MiniMax H3 :8195 / LTX-2.5 :8198（视频）  |
 | edge-tts / IndexTTS2(fal)   | IndexTTS2 :9200（TTS 配音）               |
-| OpenAI Whisper API          | whisper.cpp :9212 / faster-whisper :9210  |
+| OpenAI Whisper API          | workstation faster-whisper :9210            |
 | 阿里云 OSS（产物存储）      | 本地 output/ + NAS（44T SMB）             |
 
 能力注册表（Capability）：每种能力声明主端点 + 可选回退链 + 健康探针。
@@ -48,6 +48,8 @@ class CapabilitySpec:
     health_path: str = ""
     # 端点类型标签（统计/展示用）
     kind: str = "http"
+    # False = 退役/可选，健康报告不因它失败闭合，也不探测死端点
+    required: bool = True
 
 
 @dataclass
@@ -101,8 +103,8 @@ class ModelGateway:
             ),
             "vlm_heavy": CapabilitySpec(
                 name="vlm_heavy",
-                description="重型 VLM 反推：studio04 Qwen2.5-VL-72B-4bit（SFW 图+全视频）",
-                endpoints=("http://100.126.182.23:9303",),
+                description="重型 VLM：spark01 Qwen3-VL（MacStudio studio04 :9303 已下线）",
+                endpoints=(s.visual_model_url.removesuffix("/v1"),),
                 health_path="/v1/models",
             ),
             "image": CapabilitySpec(
@@ -125,9 +127,10 @@ class ModelGateway:
             ),
             "video_ltx": CapabilitySpec(
                 name="video_ltx",
-                description="视频生成（空镜/动作/长场景/分镜预览）：LTX-2.5 专用实例",
+                description="视频生成（空镜/动作/长场景/分镜预览）：LTX-2.5 专用实例（已退役）",
                 endpoints=(s.ltx_comfyui_url,),
                 health_path="/system_stats",
+                required=bool(s.ltx_enabled),
             ),
             "tts": CapabilitySpec(
                 name="tts",
@@ -137,11 +140,8 @@ class ModelGateway:
             ),
             "asr": CapabilitySpec(
                 name="asr",
-                description="ASR 字幕：studio02 whisper.cpp（主）→ workstation faster-whisper（回退）",
-                endpoints=(
-                    "http://100.91.0.121:9212",
-                    s.ai_omni_asr_endpoint,
-                ),
+                description="ASR 字幕：workstation faster-whisper :9210（MacStudio studio02 已下线）",
+                endpoints=(s.ai_omni_asr_endpoint,),
                 health_path="/health",
             ),
             "embedding": CapabilitySpec(
@@ -158,9 +158,10 @@ class ModelGateway:
             ),
             "demucs": CapabilitySpec(
                 name="demucs",
-                description="人声分离：studio01 demucs-mlx htdemucs",
+                description="人声分离：studio01 demucs-mlx（MacStudio 已下线，非必选）",
                 endpoints=("http://100.67.43.40:9221",),
                 health_path="/health",
+                required=False,
             ),
         }
 
@@ -250,6 +251,23 @@ class ModelGateway:
         """全能力健康报告（/gateway/health 用）。"""
         report: dict[str, Any] = {}
         for name, spec in self._all_specs().items():
+            if not spec.required:
+                # 退役/可选能力不探测死端点，避免拖垮 /gateway/health 也不失败闭合
+                eps = [
+                    {
+                        "endpoint": ep,
+                        "healthy": False,
+                        "detail": "optional/retired, not required",
+                    }
+                    for ep in spec.endpoints
+                ]
+                report[name] = {
+                    "description": spec.description,
+                    "endpoints": eps,
+                    "healthy": True,
+                    "required": False,
+                }
+                continue
             eps = []
             for ep in spec.endpoints:
                 ok = await self.is_healthy(name, ep)
@@ -263,6 +281,7 @@ class ModelGateway:
                 "description": spec.description,
                 "endpoints": eps,
                 "healthy": any(e["healthy"] for e in eps),
+                "required": True,
             }
         return report
 

@@ -53,7 +53,7 @@ const NODE_H = 460;
 const PANEL_HEIGHT = 260;
 const PANEL_GAP = 12;
 
-type PendingAsset = { kind: 'character' | 'scene'; name: string; desc: string };
+type PendingAsset = { kind: 'character' | 'scene' | 'prop'; name: string; desc: string };
 
 /** 角色 + 场景（分镜行去重）→ 待生成资产清单。
  *
@@ -102,6 +102,9 @@ export function buildPendingAssets(
 function assetPrompt(item: PendingAsset): string {
   if (item.kind === 'character') {
     return `${item.desc || item.name}, masterpiece, best quality, detailed, solo portrait, character reference sheet`;
+  }
+  if (item.kind === 'prop') {
+    return `${item.desc || item.name}, masterpiece, best quality, detailed object, product shot`;
   }
   return `${item.desc}, masterpiece, best quality, detailed environment, establishing shot, scenery`;
 }

@@ -15,11 +15,13 @@ from fastapi import APIRouter
 
 from app.config import settings
 from app.services.model_registry_service import _default_models_json
+from app.services.nas_library_service import describe_roots, roots_error_message
 
 router = APIRouter(prefix="/api/panel", tags=["panel"])
 
-DASHBOX_WEB = "http://127.0.0.1:8080"
-DASHBOX_API = "http://127.0.0.1:8780"
+DASHBOX_WEB = "http://127.0.0.1:%s" % os.environ.get("ST_WEB_PORT", "8080")
+DASHBOX_API = "http://127.0.0.1:%s" % os.environ.get("ST_API_PORT", "8780")
+DRAMA_API = os.environ.get("DRAMA_API_BASE", "http://127.0.0.1:8100").rstrip("/")
 # Cheap localhost listen probe. Closed ports must not stall the API.
 _PROBE_TIMEOUT = 0.3
 _PROBE_HOST = "127.0.0.1"
@@ -28,7 +30,7 @@ _PROBE_HOST = "127.0.0.1"
 def _resolved_config_path() -> Path:
     path = Path(settings.downloader_config_path)
     if not path.is_absolute():
-        # app/routers/panel.py -> AIGCPannel repo root is parents[4]
+        # app/routers/panel.py -> repo root is parents[4]
         path = Path(__file__).resolve().parents[4] / path
     return path
 
@@ -100,18 +102,25 @@ async def panel_status() -> dict:
         _probe_listening(DASHBOX_WEB),
         _probe_listening(DASHBOX_API),
     )
+    nas_roots = describe_roots()
     return {
         "backend": "ok",
-        "product": "AIGCPannel",
+        "product": "DashBox",
         "downloader_config_path": str(cfg),
         "downloader_config_readable": _readable(cfg),
         "models_json_path": str(models),
         "models_json_readable": _readable(models),
+        "nas_model_roots": nas_roots,
+        "nas_model_roots_error": roots_error_message(nas_roots),
+        "drama_backend": {
+            "api": DRAMA_API,
+            "note": "platform/ FastAPI short-drama module. Main UI is DashBox :8080.",
+        },
         "dashbox": {
             "web": DASHBOX_WEB,
             "api": DASHBOX_API,
             "web_listening": bool(web_listening),
             "api_listening": bool(api_listening),
-            "note": "Bundled DramaClaw/DashBox engine (ELv2). Launch via ./start-engine.sh. Not rebranded.",
+            "note": "DashBox CE (DramaClaw/SuperTale upstream, ELv2). Main UI. ./start-dashbox.sh. Not rebranded.",
         },
     }

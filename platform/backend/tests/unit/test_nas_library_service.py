@@ -118,7 +118,10 @@ class TestScan:
     def test_missing_root_tolerated(self, monkeypatch, tmp_path):
         monkeypatch.setattr(settings, "nas_model_roots", str(tmp_path / "nonexistent"))
         svc = NasLibraryService()
-        assert svc.list_models()["total"] == 0
+        result = svc.list_models()
+        assert result["total"] == 0
+        assert result["error"]  # 不可读时明确失败，不再静默空列表
+        assert "不可读" in result["error"]
 
     def test_stat_failure_skipped(self, nas_tree, monkeypatch):
         """stat 抛 OSError 的文件被跳过且不阻断扫描（77-79 行覆盖）。"""

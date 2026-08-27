@@ -15,6 +15,7 @@
 | `NOVELVIDEO_STATE_DIR` | `$DATA_ROOT/state` | 本地状态。 |
 | `NOVELVIDEO_RUNTIME_DIR` | `$DATA_ROOT/runtime` | 运行时临时目录。 |
 | `ST_CONTROL_PLANE_DSN` / `ST_REDIS_URL` / `ST_CELERY_BROKER_URL` / `ST_CELERY_RESULT_BACKEND` | 空(CE 强制清空) | EE/分布式才用;CE 任务进程内 inline 执行,留空。 |
+| `ST_DRAMA_API_URL` | `http://127.0.0.1:8100`（Compose：`http://host.docker.internal:8100`） | 短剧模块 FastAPI 源。DashBox API 把 `/api/drama/*` 反代到这里。 |
 
 ## 模型网关
 

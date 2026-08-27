@@ -1,15 +1,16 @@
 """NAS 模型库浏览服务（M27）。
 
-扫描 core 挂载的 NAS 模型根目录（settings.nas_model_roots），产出统一模型条目：
-- name / rel_path / root（来源根）/ type（子目录即 ComfyUI 模型类别）/ size / mtime / nsfw
-- TTL 缓存（nas_library_cache_ttl），refresh 强制重扫
-- NSFW 标记：文件名关键词（nsfw_keywords，小写子串）或精确名单（nsfw_exact_names）
-- root 目录缺失/不可读不阻断（记 warning，按空目录处理）
+扫描 settings.nas_model_roots（workstation CIFS: /mnt/toiv-nas/...）以及
+lora_manifest.json 的 destination_dir 父目录（Mac: ~/NAS/Windows/ComfyUI/...）。
+产出统一模型条目：name / rel_path / root / type / size / mtime / nsfw。
+全部根目录不可读时在返回体里带 error，由路由层 503，避免静默空列表。
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -19,16 +20,71 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 默认落盘库（下载服务写入的 root）：主模型库
+# 默认落盘库（下载服务写入的 root）：主模型库（workstation）
 DEFAULT_DOWNLOAD_ROOT = "/mnt/toiv-nas/Windows/ComfyUI/ComfyUIModel/models"
+_LORA_MANIFEST = Path(__file__).resolve().parents[2] / "scripts" / "lora_manifest.json"
 
 
 def _split_csv(value: str) -> list[str]:
     return [x.strip() for x in value.split(",") if x.strip()]
 
 
+def _manifest_models_root() -> Path | None:
+    """lora_manifest destination_dir 指向 .../models/loras，父目录即 ToIV ComfyUI 模型树。"""
+    try:
+        if not _LORA_MANIFEST.is_file():
+            return None
+        data = json.loads(_LORA_MANIFEST.read_text(encoding="utf-8").lstrip("\ufeff"))
+        dest = (data.get("destination_dir") or "").strip()
+        if not dest:
+            return None
+        path = Path(dest)
+        return path.parent if path.name.lower() == "loras" else path
+    except Exception as e:
+        logger.warning("读取 lora_manifest destination_dir 失败: %s", e)
+        return None
+
+
 def model_roots() -> list[Path]:
-    return [Path(p) for p in _split_csv(settings.nas_model_roots)]
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for raw in _split_csv(settings.nas_model_roots):
+        path = Path(raw)
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            roots.append(path)
+    extra = _manifest_models_root()
+    if extra is not None:
+        key = str(extra)
+        if key not in seen:
+            roots.append(extra)
+    return roots
+
+
+def describe_roots() -> list[dict[str, Any]]:
+    info: list[dict[str, Any]] = []
+    for root in model_roots():
+        readable = False
+        try:
+            readable = root.is_dir() and os.access(root, os.R_OK)
+        except OSError:
+            readable = False
+        info.append({"path": str(root), "readable": readable})
+    return info
+
+
+def roots_error_message(roots_info: list[dict[str, Any]] | None = None) -> str | None:
+    info = roots_info if roots_info is not None else describe_roots()
+    if any(r["readable"] for r in info):
+        return None
+    paths = ", ".join(r["path"] for r in info) or "(none)"
+    return (
+        "模型根目录不可读（本机未见 ToIV ComfyUI 模型树）。"
+        f"已配置: {paths}。"
+        "请把 NAS 挂到 lora_manifest destination_dir 的父目录"
+        "（.../Windows/ComfyUI/ComfyUIModel/models）；不要把 SMB 密码写入仓库。"
+    )
 
 
 def model_extensions() -> set[str]:
@@ -104,7 +160,7 @@ class NasLibraryService:
         include_nsfw: bool = False,
         refresh: bool = False,
     ) -> dict[str, Any]:
-        """列出模型（带过滤）。返回 {items, total, types, scanned_at, cache_hit}。"""
+        """列出模型（带过滤）。返回 {items, total, types, scanned_at, cache_hit, roots, error}。"""
         with self._lock:
             now = time.time()
             cache_valid = (
@@ -126,12 +182,15 @@ class NasLibraryService:
             q = query.lower()
             items = [e for e in items if q in e["name"].lower() or q in e["rel_path"].lower()]
 
+        roots_info = describe_roots()
         return {
             "items": items,
             "total": len(items),
             "types": types,
             "scanned_at": self._cache_at,
             "cache_hit": cache_hit,
+            "roots": roots_info,
+            "error": roots_error_message(roots_info),
         }
 
 

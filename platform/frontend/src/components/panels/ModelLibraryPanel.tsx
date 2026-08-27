@@ -140,6 +140,7 @@ function LoraRegistryList() {
   const [loras, setLoras] = useState<ModelLoraEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [rootError, setRootError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +148,8 @@ function LoraRegistryList() {
       .then((reg) => {
         if (cancelled) return;
         setLoras(reg.loras ?? []);
+        const srcErr = (reg.sources as { error?: string | null } | undefined)?.error;
+        setRootError(typeof srcErr === "string" && srcErr ? srcErr : "");
       })
       .catch((e) => {
         if (cancelled) return;
@@ -163,10 +166,18 @@ function LoraRegistryList() {
 
   if (loading) return <Hint loading>加载模型注册表…</Hint>;
   if (error) return <Hint>加载失败：{error}</Hint>;
-  if (loras.length === 0) return <Hint>暂无 LoRA 注册记录。</Hint>;
+  if (loras.length === 0) {
+    return (
+      <>
+        {rootError ? <Hint>模型树不可读：{rootError}</Hint> : null}
+        <Hint>暂无 LoRA 注册记录。</Hint>
+      </>
+    );
+  }
 
   return (
     <div className="asset-list">
+      {rootError ? <Hint>模型树不可读：{rootError}</Hint> : null}
       {loras.map((m) => (
         <div key={m.filename} className="asset-card asset-card-model">
           <div className="asset-card-body">

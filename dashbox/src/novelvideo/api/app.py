@@ -292,6 +292,9 @@ def create_app() -> FastAPI:
             return
         await lifecycle.on_shutdown()
 
+    from novelvideo.api.routes import drama_proxy
+
+    application.include_router(drama_proxy.router)
     application.include_router(api_router)
 
     @application.get(

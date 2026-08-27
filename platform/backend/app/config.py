@@ -261,8 +261,8 @@ class Settings(BaseSettings):
 
     # ====================================================================
     # NAS 模型库浏览 / 模型下载整合（2026-08-16，M27）
-    # core 经 CIFS 挂载 /mnt/toiv-nas 直读 NAS；下载通道与 Rust 下载器同策略
-    # （civitai.red 镜像 + hf-mirror，core 实测 civitai.com/huggingface.co 不可达）
+    # workstation: CIFS /mnt/toiv-nas/... ；Mac 另扫 lora_manifest destination_dir
+    # 父目录（~/NAS/Windows/ComfyUI/ComfyUIModel/models）。不要把 SMB 密码写入仓库。
     # ====================================================================
     nas_model_roots: str = "/mnt/toiv-nas/Windows/ComfyUI/ComfyUIModel/models,/mnt/toiv-nas/toiv/comfyui-models"
     nas_library_cache_ttl: float = 60.0  # 模型库扫描缓存秒数
@@ -289,9 +289,9 @@ class Settings(BaseSettings):
     rag_top_k: int = 5
 
     # 后端服务
-    backend_host: str = "0.0.0.0"
+    backend_host: str = "127.0.0.1"
     backend_port: int = 8100
-    cors_origins: str = "http://localhost:3501,http://localhost:3508,http://localhost:3509,http://localhost:8085,http://localhost:5173,http://192.168.71.47:3501"
+    cors_origins: str = "http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:3501,http://localhost:3501,http://localhost:3508,http://localhost:3509,http://localhost:8085,http://localhost:5173,http://192.168.71.47:3501"
 
     # 运行时填充
     downloader_config: DownloaderConfig | None = None

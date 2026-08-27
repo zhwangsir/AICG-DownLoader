@@ -54,8 +54,8 @@ export default function EnginePanel() {
   return (
     <div className="engine-panel">
       <p className="engine-panel-lead">
-        捆绑的 <strong>DramaClaw / DashBox</strong> 引擎（第三方，Elastic License 2.0）。
-        AIGCPannel 只做启动 / 状态 / 链接，不抓取其页面、不改其品牌。
+        <strong>DashBox</strong> 是本产品主界面（Web :8080 / API :8780）。短剧 pipeline 在 :8100。
+        上游 <strong>DramaClaw / DashBox</strong> 引擎为第三方 Elastic License 2.0，不抓取其页面、不改其品牌文件。
       </p>
 
       <div className="engine-panel-toolbar">
@@ -92,8 +92,8 @@ export default function EnginePanel() {
       </div>
 
       <p className="engine-panel-hint">
-        启动：仓库根目录 <code>./start-engine.sh</code>
-        （或 <code>./start-engine.sh --up</code> 直接 compose）。
+        启动：仓库根目录 <code>./start-dashbox.sh</code>
+        （DashBox :8080 + 短剧后端 :8100；引擎-only 仍可用 <code>./start-engine.sh --up</code>）。
       </p>
 
       {loading && (
@@ -109,6 +109,7 @@ export default function EnginePanel() {
       )}
       {status && !loading && (
         <ul className="engine-panel-meta">
+          <li>产品：{status.product}</li>
           <li>后端：{status.backend}</li>
           <li>
             config.json：{status.downloader_config_readable ? "可读" : "不可读"}
@@ -116,6 +117,14 @@ export default function EnginePanel() {
           <li>
             models.json：{status.models_json_readable ? "可读" : "不可读"}
           </li>
+          {(status.nas_model_roots ?? []).map((r) => (
+            <li key={r.path}>
+              模型树：{r.readable ? "可读" : "不可读"} — {r.path}
+            </li>
+          ))}
+          {status.nas_model_roots_error ? (
+            <li className="engine-panel-error">{status.nas_model_roots_error}</li>
+          ) : null}
         </ul>
       )}
     </div>

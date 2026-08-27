@@ -37,12 +37,15 @@ def list_library(
     """浏览 NAS 模型库（名称/大小/类型/修改日期/NSFW 标记）。"""
     # include_nsfw=true 时仍需设置端已开启才放行（双保险：前端隐藏 + 后端校验）
     nsfw_on = settings_service.nsfw_status()["nsfw_enabled"]
-    return nas_library_service.list_models(
+    result = nas_library_service.list_models(
         type_filter=type,
         query=q,
         include_nsfw=include_nsfw and nsfw_on,
         refresh=refresh,
     )
+    if result.get("error") and not result.get("items"):
+        raise HTTPException(status_code=503, detail=result["error"])
+    return result
 
 
 # ---------- 模型搜索 ----------

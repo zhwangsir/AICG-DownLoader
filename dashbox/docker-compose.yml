@@ -36,6 +36,11 @@ services:
       # 不在此处硬写 NEWAPI_BASE_URL —— 留给 .env / 网页设置驱动,避免覆盖用户配置。
       # provisioner 开放,网页设置页才能保存官方 key(官方模式不需 newapi 数据库)。
       NEWAPI_PROVISIONER_ENABLED: "true"
+      # Platform short-drama FastAPI on the Mac host (:8100).
+      # 127.0.0.1 inside this container is not the host.
+      ST_DRAMA_API_URL: ${ST_DRAMA_API_URL:-http://host.docker.internal:8100}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # 宿主发布端口可配，便于一机多套（每套换 ST_API_PORT + 换 -p 项目名）。
     # 冒号右侧 8780 是容器内端口，固定不变（web 经内部网络访问它）。
     ports:

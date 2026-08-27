@@ -22,3 +22,6 @@ rag_storage/
 *.zip
 *.srt
 *.docx
+.venv/
+works/
+.pytest_cache/
