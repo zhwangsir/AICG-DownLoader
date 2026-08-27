@@ -2,7 +2,24 @@
   "project": "DashBox",
   "version": "0.34.0",
   "last_updated": "2026-08-28",
-  "description": "DashBox 是产品壳（ToIV 才是聚合平台）。短剧流水线与下载器是模块。目录 ALLProject/DashBox；远程 Gitee/GitHub 均名 DashBox，尖端 19a3141。代码 AICG 开发，五件套项目管家。",
+  "description": "DashBox 是产品壳（ToIV 才是聚合平台）。短剧流水线与下载器是模块。目录 ALLProject/DashBox；远程 Gitee/GitHub 均名 DashBox，尖端 4185c30。代码 AICG 开发，五件套项目管家。",
+  "gui_display_name_2026_08_28": {
+    "commit": "4185c30",
+    "subject": "feat: GUI/打包显示名改为 DashBox 模型库",
+    "display_name": "DashBox 模型库",
+    "crate": "comfy-downloader",
+    "installer": "DefaultDirName/AppId unchanged for upgrade",
+    "notice": "still historically AIGCPannel",
+    "old_slugs": "AICG-DownLoader / AIGCPannel are redirects; do not delete",
+    "health": ":8080 and :8780/:8100 /api/drama/health 200",
+    "docs_included": [
+      "2117d92",
+      "2829ff8"
+    ],
+    "force": false,
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "dashbox_shell_2026_08_27": {
     "code": "uncommitted",
     "start": "./start-dashbox.sh",

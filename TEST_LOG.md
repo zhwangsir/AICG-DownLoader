@@ -1,5 +1,7 @@
 # TEST_LOG.md — DashBox
 
+- 2026-08-28 4185c30 dual-pushed (no force): GUI/packaging display name is DashBox 模型库; crate/OS config dir still comfy-downloader; installer DefaultDirName/AppId unchanged for upgrade. NOTICE still historically AIGCPannel. old slugs AICG-DownLoader/AIGCPannel are redirects, do not delete. health :8080 and :8780/:8100 /api/drama/health 200. docs 2117d92 and 2829ff8 went up with it. LICENSE/NOTICE/brand and ToIV untouched.
+
 - 2026-08-28 web baked: dashbox-web:latest e09bb3b548e8, container SPA md5 matches image, no docker-cp overlay. :8080/ and :8080/:8780/:8100 /api/drama/health 200. Dockerfile unchanged so not committed. remote code still 19a3141. LICENSE/NOTICE/brand and ToIV untouched.
 
 - 2026-08-27 Studio 19a3141 dual-pushed (no force): drama edit allows omitting subtitle_url (no empty SRT download); empty subs no longer fall back to R18. Gitee+GitHub aligned at 19a3141. web still docker cp (image baking). LICENSE/NOTICE/brand and ToIV untouched.

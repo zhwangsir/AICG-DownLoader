@@ -2,7 +2,7 @@
 
 **DashBox** 是产品壳。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块，不再三套并列。
 
-目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `19a3141`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
+目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `4185c30`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -17,11 +17,11 @@
 | `origin` | https://gitee.com/Winery_z/DashBox.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/DashBox.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`19a3141`（`fix: Studio drama 合成允许无字幕，空 subtitle_url 不再回退 R18`）。Gitee/GitHub 已双推，未强推
+- 当前 `main` 尖端：`4185c30`（`feat: GUI/打包显示名改为 DashBox 模型库`）。Gitee/GitHub 已双推，未强推；`2117d92`/`2829ff8` docs 已一并上去
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
-Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。`Cargo.toml` 的 `package.name` 仍为 `comfy-downloader` 0.1.0；其 `homepage` / `repository` 字段仍写旧仓名，**以本表 git remote 为准**。
+胶水层 GUI/打包显示名是 **DashBox 模型库**。Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。安装 `DefaultDirName`/`AppId` 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。`Cargo.toml` 的 `package.name` 仍为 `comfy-downloader` 0.1.0；其 `homepage` / `repository` 字段仍写旧仓名，**以本表 git remote 为准**。
 
 ## 启动
 
