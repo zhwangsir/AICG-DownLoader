@@ -3,10 +3,10 @@ Version: __VERSION__
 Section: graphics
 Priority: optional
 Architecture: amd64
-Maintainer: Winery (WangZhenYu) <https://github.com/zhwangsir/AICG-DownLoader>
-Homepage: https://github.com/zhwangsir/AICG-DownLoader
+Maintainer: Winery (WangZhenYu) <https://github.com/zhwangsir/DashBox>
+Homepage: https://github.com/zhwangsir/DashBox
 Depends: libc6 (>= 2.31), libgtk-3-0
-Description: AIGCPannel 模型库桌面助手
+Description: DashBox 模型库桌面助手
  Native GUI tool that downloads ComfyUI models from Civitai and HuggingFace
  into the correct model subfolders, with resume, SHA256 verification and a
  download queue. Single self-contained executable, no command line needed.

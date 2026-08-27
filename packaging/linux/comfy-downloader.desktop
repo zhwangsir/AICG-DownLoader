@@ -3,7 +3,7 @@
 # 随 tar.gz 一并分发；制作 AppImage 时也会被打进 AppDir。
 Type=Application
 Version=1.0
-Name=AIGCPannel
+Name=DashBox 模型库
 GenericName=Model Downloader
 Comment=Download ComfyUI models from Civitai / HuggingFace into the right folders
 # Exec 仅写二进制名：要求 comfy-downloader 在 PATH 中，或 AppImage 运行时自动注入。

@@ -3,10 +3,10 @@ name = "comfy-downloader"
 version = "0.1.0"
 edition = "2021"
 authors = ["Winery (WangZhenYu)"]
-description = "AIGCPannel 模型库桌面助手 — Civitai/HuggingFace 模型一键下载到 ComfyUI 目录。作者 Winery (WangZhenYu)。"
+description = "DashBox 模型库桌面助手 — Civitai/HuggingFace 模型一键下载到 ComfyUI 目录。作者 Winery (WangZhenYu)。"
 license = "MIT"
-homepage = "https://github.com/zhwangsir/AICG-DownLoader"
-repository = "https://github.com/zhwangsir/AICG-DownLoader"
+homepage = "https://github.com/zhwangsir/DashBox"
+repository = "https://github.com/zhwangsir/DashBox"
 
 [dependencies]
 eframe = "0.29"

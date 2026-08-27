@@ -20,12 +20,12 @@ mod sys_info;
 // 作者 Winery（真名 WangZhenYu）。这些常量是全应用署名的唯一来源，
 // 用于窗口标题、「关于」页与（经 Cargo/winresource）二进制元数据。
 // 授权 MIT：可用可改，但必须保留版权与许可声明（详见仓库 LICENSE）。
-const APP_NAME: &str = "AIGCPannel";
+const APP_NAME: &str = "DashBox 模型库";
 const APP_AUTHOR: &str = "Winery (WangZhenYu)";
 const APP_COPYRIGHT: &str = "© 2026 WangZhenYu";
-const APP_HOMEPAGE: &str = "https://github.com/zhwangsir/AICG-DownLoader";
+const APP_HOMEPAGE: &str = "https://github.com/zhwangsir/DashBox";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-const WINDOW_TITLE: &str = "AIGCPannel — 模型库 · by Winery";
+const WINDOW_TITLE: &str = "DashBox 模型库 · by Winery";
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
