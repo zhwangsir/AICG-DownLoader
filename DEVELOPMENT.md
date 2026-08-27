@@ -2,7 +2,7 @@
 
 > 合并自旧 PROJECT_INIT / docs / 根目录散文档。原文在 `ALLProject/.archive/docs-legacy-20260827/`。
 > 最后更新：2026-08-27
-> 身份：DashBox 为壳；短剧流水线与下载器是模块。目录 `ALLProject/DashBox`，远程 Gitee/GitHub 均名 DashBox，尖端 `3429167`。上游 LICENSE/NOTICE/品牌不要覆盖、不要改成 MIT。
+> 身份：DashBox 为壳；短剧流水线与下载器是模块。目录 `ALLProject/DashBox`，远程 Gitee/GitHub 均名 DashBox，尖端 `19a3141`。上游 LICENSE/NOTICE/品牌不要覆盖、不要改成 MIT。
 >
 > **2026-08-27 融合第一刀**：`./start-dashbox.sh`（短剧 :8100 + DashBox :8080/:8780，主界面 :8080）；`start-aigcpannel.sh` 薄封装转调。根 NOTICE 声明 dashbox/ 为 ELv2。crate 仍 `comfy-downloader`。已删 platform/deploy 下 deepfilternet / hunyuanimage / latentsync / video-enhance / xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。`GET /api/panel/status`。未 commit/push。
 > **2026-08-27 model library/gateway (uncommitted):** registry errors if NAS unreadable; health required spark02/spark01/LB:8188/H3:8195/TTS:9200/ASR:9210; no studio04/01/02; LTX required=false. DashBox web :8080 and api :8780 listening; Colima disk 20G tight. NAS mounted at ~/NAS (not on boot); loras 101 checkpoints 24.
@@ -20,7 +20,7 @@
 
 **2026-08-27 画布接线**：DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。
 
-**2026-08-27 Studio `3429167`**：`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`；剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 缺 `subtitle_url` 回退 R18。web/api 镜像已 recreate。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。
+**2026-08-27 Studio `19a3141`**：`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`；剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。web 仍 docker cp（镜像在烤）。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 

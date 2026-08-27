@@ -1,5 +1,7 @@
 # TEST_LOG.md — DashBox
 
+- 2026-08-27 Studio 19a3141 dual-pushed (no force): drama edit allows omitting subtitle_url (no empty SRT download); empty subs no longer fall back to R18. Gitee+GitHub aligned at 19a3141. web still docker cp (image baking). LICENSE/NOTICE/brand and ToIV untouched.
+
 - 2026-08-27 Studio 3429167 dual-pushed (1567fc6..3429167, no force): TTS/video/edit also default /api/drama/{voice|video|edit}/generate_async, fail fallback R18. web/api images recreated. nginx CSP img-src includes http://192.168.71.127:8188. edit missing subtitle_url fails then R18. LICENSE/NOTICE/brand and ToIV untouched.
 
 - 2026-08-27 Studio 1567fc6 dual-pushed (no force): NSFWDramaStudioNode default pipelineEngine=drama; script/first-frame via /api/drama/script|storyboard/generate_async; fail fallback R18; switchable. TTS/video/compose still R18. web/api images not fully rebuilt (docker cp). CSP may block ComfyUI :8188 thumbnails. LICENSE/NOTICE/brand and ToIV untouched. Root five-doc set untouched.

@@ -6,7 +6,7 @@
 
 ## 本项目
 
-**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `3429167`。不是三仓。LibTV / comfy-downloader / AIGCPannel 旧 slug 是本仓 rename 跳转，禁止当独立仓删。本地只有 `ALLProject/DashBox`。
+**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `19a3141`。不是三仓。LibTV / comfy-downloader / AIGCPannel 旧 slug 是本仓 rename 跳转，禁止当独立仓删。本地只有 `ALLProject/DashBox`。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
@@ -15,7 +15,7 @@
 - `./start-aigcpannel.sh`：薄封装，转调 `start-dashbox.sh`。
 - `GET /api/panel/status`：product=DashBox；查 downloader `config` / `models.json` 是否可读。
 - DashBox `:8780` 反代 `/api/drama/*` → `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。
-- Studio `NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 缺 `subtitle_url` 回退 R18。`3429167` 已双推。web/api 镜像已 recreate。CSP `img-src` 含 `http://192.168.71.127:8188`。
+- Studio `NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。`19a3141` 已双推。web 仍 docker cp（镜像在烤）。CSP `img-src` 含 `http://192.168.71.127:8188`。
 
 左侧导航已有「模型库」「引擎」。crate 名与 OS 配置目录仍是 `comfy-downloader`（保住已有 `models.json` 路径）。
 

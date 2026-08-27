@@ -2,7 +2,7 @@
 
 **DashBox** 是产品壳。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块，不再三套并列。
 
-目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `3429167`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
+目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `19a3141`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -17,7 +17,7 @@
 | `origin` | https://gitee.com/Winery_z/DashBox.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/DashBox.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`3429167`（`feat: Studio TTS/出片/合成走 /api/drama generate_async，CSP 放行 ComfyUI :8188`）。Gitee/GitHub 已双推，未强推
+- 当前 `main` 尖端：`19a3141`（`fix: Studio drama 合成允许无字幕，空 subtitle_url 不再回退 R18`）。Gitee/GitHub 已双推，未强推
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
@@ -37,9 +37,9 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 
 DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧后端）。`:8080`/`:8780`/`:8100` 的 `/api/drama/health` 均 200。
 
-## 画布 Studio（2026-08-27，`3429167`）
+## 画布 Studio（2026-08-27，`19a3141`）
 
-`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 缺 `subtitle_url` 会失败回退 R18。web/api 镜像已 recreate 重建。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。LICENSE/NOTICE/品牌未动。
+`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。web 仍 docker cp（镜像在烤）。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。LICENSE/NOTICE/品牌未动。
 
 ## 模型库 / 网关（2026-08-27，代码未 commit）
 
