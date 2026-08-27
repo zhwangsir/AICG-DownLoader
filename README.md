@@ -17,7 +17,7 @@
 | `origin` | https://gitee.com/Winery_z/AIGCPannel.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/AIGCPannel.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`c0b73d0`（`docs: 记录 AIGCPannel 双远程已推 e3e30c0`）
+- 当前 `main` 尖端：`54fe7e6`（`docs: 定位为专做 AI 短剧，ToIV 才是聚合平台`）。Gitee 已推；GitHub 待补
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 

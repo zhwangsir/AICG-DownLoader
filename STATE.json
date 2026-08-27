@@ -2,7 +2,7 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-08-27",
-  "description": "AIGCPannel：下载器 + 短剧工作台 + DashBox 引擎。第一波融合已落盘（未 commit/push）。远程仓仍为 AICG-DownLoader。",
+  "description": "AIGCPannel 专做 AI 短剧（ToIV 才是聚合平台）。仓内下载器 + 短剧工作台 + DashBox。远程已是 AIGCPannel。代码 AICG 开发，五件套项目管家。",
   "milestones": {
     "M0": {
       "name": "项目骨架",
