@@ -433,13 +433,16 @@ export async function generateDramaCompose(
       project_id: payload.project_id || "",
       title: payload.title || "",
       transition: payload.transition || "none",
-      segments: (payload.segments ?? []).map((seg) => ({
-        scene_id: seg.scene_id,
-        video_url: toDramaBackendAssetUrl(seg.video_url),
-        audio_url: toDramaBackendAssetUrl(seg.audio_url || ""),
-        subtitle_url: toDramaBackendAssetUrl(seg.subtitle_url || ""),
-        duration_seconds: seg.duration_seconds ?? 5,
-      })),
+      segments: (payload.segments ?? []).map((seg) => {
+        const subtitleUrl = toDramaBackendAssetUrl(seg.subtitle_url || "");
+        return {
+          scene_id: seg.scene_id,
+          video_url: toDramaBackendAssetUrl(seg.video_url),
+          audio_url: toDramaBackendAssetUrl(seg.audio_url || ""),
+          ...(subtitleUrl ? { subtitle_url: subtitleUrl } : {}),
+          duration_seconds: seg.duration_seconds ?? 5,
+        };
+      }),
     },
     opts?.signal,
   );

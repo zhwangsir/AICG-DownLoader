@@ -26,6 +26,19 @@ class TestParseResolution:
         assert _parse_resolution("1280x720") == (1280, 720)
 
 
+class TestEditSegmentSchema:
+    def test_subtitle_url_optional(self):
+        """Studio 无字幕时可省略 subtitle_url，仍能构造 EditSegment。"""
+        seg = EditSegment.model_validate(
+            {
+                "scene_id": 1,
+                "video_url": "http://example.com/v1.mp4",
+                "audio_url": "http://example.com/a1.mp3",
+            }
+        )
+        assert seg.subtitle_url == ""
+
+
 class TestLocalPathFromUrl:
     def test_local_audio(self, tmp_path):
         # OUTPUT_DIR 预期为 .../output/video，其父目录是 .../output
@@ -350,6 +363,40 @@ class TestH3NativeAudioMix:
         assert "-an" not in args  # 未禁音：默认映射保留原音轨
         # 无人声时无需探测音轨
         assert _ffprobe_audio_probe_calls(mock_exec) == []
+
+    async def test_skip_subtitles_when_url_empty(
+        self, agent, mock_httpx_download, tmp_path
+    ):
+        """无字幕 URL：不下载 SRT、不烧 subtitles 滤镜，仍能处理片段。"""
+        downloaded: list[str] = []
+        orig = agent._download
+
+        async def spy(url, dest):
+            downloaded.append(url)
+            return await orig(url, dest)
+
+        with patch.object(agent, "_download", side_effect=spy):
+            with patch("app.agents.edit_agent.asyncio.create_subprocess_exec") as mock_exec:
+                mock_exec.side_effect = _make_side_effect(has_audio=True)
+                await agent._process_segment(
+                    EditSegment(
+                        scene_id=1,
+                        video_url="http://example.com/v1.mp4",
+                        audio_url="http://example.com/a1.mp3",
+                        subtitle_url="",
+                    ),
+                    tmp_path,
+                    1080,
+                    1920,
+                    24,
+                )
+
+        ffmpeg_cmds = _ffmpeg_calls(mock_exec)
+        assert len(ffmpeg_cmds) == 1
+        cmd_str = " ".join(map(str, ffmpeg_cmds[0].args))
+        assert "subtitles=" not in cmd_str
+        assert "http://example.com/v1.mp4" in downloaded
+        assert all(".srt" not in url for url in downloaded)
 
     async def test_fallback_to_voice_only_when_mix_fails(
         self, agent, mock_httpx_download, tmp_path, caplog

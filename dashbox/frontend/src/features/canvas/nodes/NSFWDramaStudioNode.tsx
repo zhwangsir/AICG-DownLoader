@@ -524,7 +524,6 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
         scene_id: scene.scene_no,
         video_url: out.videoUrl,
         audio_url: out.audioUrl || '',
-        subtitle_url: '',
         duration_seconds: scene.duration_sec || 5,
       })),
     });

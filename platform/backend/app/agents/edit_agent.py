@@ -203,7 +203,14 @@ class EditAgent(BaseAgent):
         seg_dir.mkdir(exist_ok=True)
 
         video_path = await self._download(segment.video_url, seg_dir / "video.mp4")
-        subtitle_path = await self._download(segment.subtitle_url, seg_dir / "subtitle.srt")
+
+        # 字幕可选：空 URL 表示不烧字幕（Studio 无字幕时仍走 drama 合成）
+        subtitle_filter = ""
+        if (segment.subtitle_url or "").strip():
+            subtitle_path = await self._download(segment.subtitle_url, seg_dir / "subtitle.srt")
+            # subtitles 滤镜需要字幕文件为绝对路径并转义特殊字符
+            sub_path_escaped = str(subtitle_path).replace("\\", "/").replace(":", "\\:")
+            subtitle_filter = f"subtitles='{sub_path_escaped}',"
 
         # 人声可选：audio_url 为空表示纯场景镜头
         audio_path: Path | None = None
@@ -212,11 +219,9 @@ class EditAgent(BaseAgent):
 
         output_path = seg_dir / "segment_final.mp4"
 
-        # 统一分辨率/帧率，烧录字幕
-        # subtitles 滤镜需要字幕文件为绝对路径并转义特殊字符
-        sub_path_escaped = str(subtitle_path).replace("\\", "/").replace(":", "\\:")
+        # 统一分辨率/帧率；有字幕才烧录
         vf = (
-            f"subtitles='{sub_path_escaped}',"
+            f"{subtitle_filter}"
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
             f"fps={fps},format=yuv420p"
