@@ -7,9 +7,9 @@
  *
  * 五阶段状态机持久化在 node data：刷新页面后产物（scenes/frameUrls/
  * shotOutputs/composeUrl）仍在，显示「继续拍摄」从第一个未完成镜头接续。
- * 剧本/首帧默认走 platform 短剧模块（/api/drama/script|storyboard/generate_async，
- * 线稿 sketch_mode），失败或面板切到「R18」时回退 r18-script/plan + generate-image。
- * 配音/出片/合成仍走既有 R18 hooks。页面需保持打开。
+ * 剧本/首帧/配音/出片/合成默认走 platform 短剧模块
+ * （/api/drama/{script|storyboard|voice|video|edit}/generate_async，线稿 sketch_mode），
+ * 失败或面板切到「R18」时回退既有 R18 hooks。不调用 /pipeline/run。页面需保持打开。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -68,8 +68,11 @@ import {
 import { ModelNamePicker } from '@/components/settings/model-name-picker';
 import { uploadFreezoneImage } from '@/api/ops';
 import {
+  generateDramaCompose,
   generateDramaScript,
   generateDramaStoryboard,
+  generateDramaVideo,
+  generateDramaVoice,
   getDramaHealth,
   mapDramaScenesToR18,
   pingDramaScriptAsync,
@@ -342,7 +345,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
     await stageFramesR18();
   }, [id, latest, stageFramesDrama, stageFramesR18, updateNodeData]);
 
-  const stageShots = useCallback(async () => {
+  const stageShotsR18 = useCallback(async () => {
     const d = latest();
     const projectId = readUrl().project;
     if (!projectId) throw new Error('缺少项目上下文（project 参数）');
@@ -404,7 +407,80 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
     updateNodeData(id, { pipeline: 'composing' });
   }, [generateVideo, id, latest, synthesizeTts, updateNodeData]);
 
-  const stageCompose = useCallback(async () => {
+  const stageShotsDrama = useCallback(async () => {
+    const d = latest();
+    // 1) TTS via /api/drama/voice/generate_async
+    for (const scene of d.scenes) {
+      const text = (scene.dialogue || scene.narration || '').trim();
+      if (scene.audio !== 'tts' || !text) continue;
+      if (d.shotOutputs[scene.scene_no]?.audioUrl) continue;
+      const result = await generateDramaVoice({
+        scene_id: scene.scene_no,
+        dialogues: [
+          {
+            text,
+            character_name: '',
+            character_role: scene.dialogue?.trim() ? '主角' : '旁白',
+            rate: scene.dialogue?.trim() ? '+0%' : '+5%',
+          },
+        ],
+      });
+      const url = result.audio_url || '';
+      if (!url) throw new Error(`镜头 S${scene.scene_no} 短剧配音失败`);
+      const cur = latest();
+      updateNodeData(id, {
+        shotOutputs: {
+          ...cur.shotOutputs,
+          [scene.scene_no]: { videoUrl: cur.shotOutputs[scene.scene_no]?.videoUrl ?? '', audioUrl: url },
+        },
+      });
+    }
+    // 2) 视频 via /api/drama/video/generate_async（不跑 /pipeline/run）
+    for (const scene of d.scenes) {
+      const frameUrl = latest().frameUrls[scene.scene_no];
+      if (!frameUrl) continue;
+      if (latest().shotOutputs[scene.scene_no]?.videoUrl) continue;
+      const prompt =
+        scene.video_prompt?.trim() ||
+        scene.image_prompt?.trim() ||
+        'subtle motion, gentle breathing, slow camera push in, cinematic';
+      const result = await generateDramaVideo({
+        scene_id: scene.scene_no,
+        image_url: frameUrl,
+        prompt,
+        duration_seconds: Math.min(10, Math.max(1, scene.duration_sec || 5)),
+      });
+      const url = result.video_url || '';
+      if (!url) throw new Error(`镜头 S${scene.scene_no} 短剧出片失败`);
+      const cur = latest();
+      updateNodeData(id, {
+        shotOutputs: {
+          ...cur.shotOutputs,
+          [scene.scene_no]: { videoUrl: url, audioUrl: cur.shotOutputs[scene.scene_no]?.audioUrl ?? null },
+        },
+      });
+    }
+    updateNodeData(id, { pipeline: 'composing' });
+  }, [id, latest, updateNodeData]);
+
+  const stageShots = useCallback(async () => {
+    const d = latest();
+    const engine = resolveStudioEngine(d.pipelineEngine);
+    if (engine === 'drama') {
+      try {
+        await stageShotsDrama();
+        return;
+      } catch (err) {
+        console.warn('[nsfw-drama-studio] drama tts/video failed, fallback R18', err);
+        updateNodeData(id, {
+          error: `短剧配音/出片失败，本轮回退 R18：${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+    await stageShotsR18();
+  }, [id, latest, stageShotsDrama, stageShotsR18, updateNodeData]);
+
+  const stageComposeR18 = useCallback(async () => {
     const d = latest();
     const projectId = readUrl().project;
     if (!projectId) throw new Error('缺少项目上下文（project 参数）');
@@ -433,6 +509,50 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
       pipeline: 'done',
     });
   }, [composeFinal, id, latest, resolvedTitle, updateNodeData]);
+
+  const stageComposeDrama = useCallback(async () => {
+    const d = latest();
+    const projectId = readUrl().project || '';
+    const ready = d.scenes
+      .map((s) => ({ scene: s, out: d.shotOutputs[s.scene_no] }))
+      .filter((x) => x.out?.videoUrl);
+    if (ready.length === 0) throw new Error('没有任何已完成的镜头视频，无法合成');
+    const result = await generateDramaCompose({
+      project_id: projectId,
+      title: d.planTitle || resolvedTitle,
+      segments: ready.map(({ scene, out }) => ({
+        scene_id: scene.scene_no,
+        video_url: out.videoUrl,
+        audio_url: out.audioUrl || '',
+        subtitle_url: '',
+        duration_seconds: scene.duration_sec || 5,
+      })),
+    });
+    const url = result.final_video_url || '';
+    if (!url) throw new Error('短剧合成返回为空');
+    updateNodeData(id, {
+      composeUrl: url,
+      composeDurationSec: result.duration_seconds ?? null,
+      pipeline: 'done',
+    });
+  }, [id, latest, resolvedTitle, updateNodeData]);
+
+  const stageCompose = useCallback(async () => {
+    const d = latest();
+    const engine = resolveStudioEngine(d.pipelineEngine);
+    if (engine === 'drama') {
+      try {
+        await stageComposeDrama();
+        return;
+      } catch (err) {
+        console.warn('[nsfw-drama-studio] drama compose failed, fallback R18', err);
+        updateNodeData(id, {
+          error: `短剧合成失败，本轮回退 R18：${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+    await stageComposeR18();
+  }, [id, latest, stageComposeDrama, stageComposeR18, updateNodeData]);
 
   /** 主流水线：从当前阶段推进到底（产物在则跳过）。 */
   const runPipeline = useCallback(
@@ -800,7 +920,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-center gap-2">
-            <div className="flex shrink-0 rounded-md border border-white/10 bg-white/[0.04] p-0.5" title="剧本/首帧走短剧模块或 DashBox R18">
+            <div className="flex shrink-0 rounded-md border border-white/10 bg-white/[0.04] p-0.5" title="剧本/首帧/配音/出片/合成走短剧模块或 DashBox R18">
               {(['drama', 'r18'] as const).map((eng) => (
                 <button
                   key={eng}

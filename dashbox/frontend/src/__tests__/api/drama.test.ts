@@ -4,13 +4,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   dramaApiPath,
+  firstDramaAudioUrl,
+  generateDramaCompose,
   generateDramaScript,
   generateDramaStoryboard,
+  generateDramaVideo,
+  generateDramaVoice,
   mapDramaScenesToR18,
   pingDramaScriptAsync,
+  pingDramaVideoAsync,
+  pingDramaVoiceAsync,
   rewriteDramaAssetUrl,
   scenesPerEpisodeForDuration,
   resolveStudioEngine,
+  toDramaBackendAssetUrl,
 } from "@/api/drama";
 
 afterEach(() => {
@@ -42,6 +49,17 @@ describe("drama api helpers", () => {
     expect(rewriteDramaAssetUrl("http://192.168.1.10:8188/view?filename=a.png")).toBe(
       "http://192.168.1.10:8188/view?filename=a.png",
     );
+    expect(toDramaBackendAssetUrl("/api/drama/static/storyboard/s1.png")).toBe(
+      "http://127.0.0.1:8100/static/storyboard/s1.png",
+    );
+    expect(toDramaBackendAssetUrl("http://192.168.71.127:8188/view?filename=a.png")).toBe(
+      "http://192.168.71.127:8188/view?filename=a.png",
+    );
+    expect(
+      firstDramaAudioUrl({
+        audio_urls: [{ audio_url: "http://127.0.0.1:8100/static/audio/a.mp3" }],
+      }),
+    ).toBe("/api/drama/static/audio/a.mp3");
   });
 
   it("maps platform scenes onto R18 canvas scene rows", () => {
@@ -172,5 +190,148 @@ describe("drama async generate", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     await expect(pingDramaScriptAsync()).resolves.toBe(422);
+  });
+
+  it("creates a voice task then polls pipeline/status", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/drama/voice/generate_async") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          scene_id: 1,
+          dialogues: [{ text: "你回来了" }],
+        });
+        return new Response(JSON.stringify({ task_id: "voice-1", agent: "voice", status: "pending" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/drama/pipeline/status/voice-1")) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              task_id: "voice-1",
+              status: "completed",
+              percent: 100,
+              message: "ok",
+              error: null,
+              result: {
+                scene_id: 1,
+                audio_urls: [{ audio_url: "http://127.0.0.1:8100/static/audio/a.mp3" }],
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const voice = await generateDramaVoice(
+      { scene_id: 1, dialogues: [{ text: "你回来了" }] },
+      { intervalMs: 1, timeoutMs: 1000 },
+    );
+    expect(voice.audio_url).toBe("/api/drama/static/audio/a.mp3");
+  });
+
+  it("posts video generate_async with backend image url and rewrites video url", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/drama/video/generate_async") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          scene_id: 1,
+          image_url: "http://127.0.0.1:8100/static/storyboard/s1.png",
+          duration_seconds: 5,
+        });
+        return new Response(JSON.stringify({ task_id: "vid-1", agent: "video", status: "pending" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/drama/pipeline/status/vid-1")) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              task_id: "vid-1",
+              status: "completed",
+              percent: 100,
+              message: "ok",
+              error: null,
+              result: { scene_id: 1, video_url: "/static/video/s1.mp4", duration_seconds: 5 },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const video = await generateDramaVideo(
+      {
+        scene_id: 1,
+        image_url: "/api/drama/static/storyboard/s1.png",
+        prompt: "rain night",
+        duration_seconds: 5,
+      },
+      { intervalMs: 1, timeoutMs: 1000 },
+    );
+    expect(video.video_url).toBe("/api/drama/static/video/s1.mp4");
+  });
+
+  it("posts edit generate_async and rewrites final video url", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/drama/edit/generate_async") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          title: "杯底的血",
+          segments: [{ scene_id: 1, video_url: "http://127.0.0.1:8100/static/video/s1.mp4" }],
+        });
+        return new Response(JSON.stringify({ task_id: "edit-1", agent: "edit", status: "pending" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/drama/pipeline/status/edit-1")) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: {
+              task_id: "edit-1",
+              status: "completed",
+              percent: 100,
+              message: "ok",
+              error: null,
+              result: { final_video_url: "http://127.0.0.1:8100/static/video/final.mp4", duration_seconds: 6 },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const composed = await generateDramaCompose(
+      {
+        title: "杯底的血",
+        segments: [{ scene_id: 1, video_url: "/api/drama/static/video/s1.mp4" }],
+      },
+      { intervalMs: 1, timeoutMs: 1000 },
+    );
+    expect(composed.final_video_url).toBe("/api/drama/static/video/final.mp4");
+  });
+
+  it("pings voice/video generate_async with empty body and does not start work", async () => {
+    const seen: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(String(input));
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBe("{}");
+      return new Response(JSON.stringify({ detail: "请求参数校验失败" }), { status: 422 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(pingDramaVoiceAsync()).resolves.toBe(422);
+    await expect(pingDramaVideoAsync()).resolves.toBe(422);
+    expect(seen).toEqual(["/api/drama/voice/generate_async", "/api/drama/video/generate_async"]);
   });
 });

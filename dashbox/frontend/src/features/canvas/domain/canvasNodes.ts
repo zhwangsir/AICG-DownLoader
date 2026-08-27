@@ -545,7 +545,7 @@ export interface NSFWDramaStudioNodeData extends NodeDisplayData {
   voice: string;
   /** 剧本完成后不停顿直接出片（默认 false=暂停等确认可改词）。 */
   autoConfirm: boolean;
-  /** 剧本/首帧：短剧模块 (/api/drama/*) 或 DashBox R18。失败时本轮回退 R18。 */
+  /** 剧本/首帧/配音/出片/合成：短剧模块 (/api/drama/* generate_async) 或 DashBox R18。失败时本轮回退 R18。 */
   pipelineEngine?: 'drama' | 'r18';
   /** 短剧模块剧本原文（分镜 generate_async 需要 Scene 对象）。 */
   dramaScript?: {

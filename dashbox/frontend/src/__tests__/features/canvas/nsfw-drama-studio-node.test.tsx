@@ -144,4 +144,10 @@ describe("NSFWDramaStudioNode drama wiring", () => {
     await user.click(await screen.findByText("R18"));
     expect(updateNodeData).toHaveBeenCalledWith("studio-1", { pipelineEngine: "r18" });
   });
+
+  it("engine toggle covers tts/video/compose wiring copy", async () => {
+    renderNode();
+    const toggle = await screen.findByTitle("剧本/首帧/配音/出片/合成走短剧模块或 DashBox R18");
+    expect(toggle).toBeTruthy();
+  });
 });
