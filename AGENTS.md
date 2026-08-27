@@ -6,7 +6,7 @@
 
 ## 本项目
 
-**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `543264e`。不是三仓。LibTV 是已否掉的拆仓候选。
+**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `543264e`。不是三仓。LibTV / comfy-downloader / AIGCPannel 旧 slug 是本仓 rename 跳转，禁止当独立仓删。本地只有 `ALLProject/DashBox`。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动

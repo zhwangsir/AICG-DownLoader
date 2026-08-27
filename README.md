@@ -2,7 +2,7 @@
 
 **DashBox** 是产品壳。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块，不再三套并列。
 
-目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `543264e`（已双推，未强推）。LibTV 是已否掉的拆仓候选。
+目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `543264e`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -10,7 +10,7 @@
 
 ## 远程（已改名 DashBox 并双推）
 
-本仓 **不是** `AICG-DownLoader`。旧 README、`STATE.json` 顶部 description、`DEVELOPMENT.md` 里「远程仍为 AICG-DownLoader、尚未 commit」的句子已过时，以 git 与 [`../项目登记册.md`](../项目登记册.md) 为准。
+旧 slug `AICG-DownLoader` / `AIGCPannel` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要当独立仓删**。旧 README / `STATE.json` / `DEVELOPMENT.md` 里「远程仍为 AICG-DownLoader」的句子已过时，以 git 与 [`../项目登记册.md`](../项目登记册.md) 为准。
 
 | 远程 | URL | 说明 |
 |------|-----|------|

@@ -1,5 +1,7 @@
 # TEST_LOG.md — DashBox
 
+- 2026-08-27 keep only the fused DashBox repo. GitHub/Gitee have no independent AICG-DownLoader / AIGCPannel / LibTV / comfy-downloader repos; those slugs are DashBox rename redirects — do not delete. Local disk only ALLProject/DashBox. Registry no longer lists those copies as independent repos. LICENSE/NOTICE/brand untouched. ToIV untouched.
+
 - 2026-08-27 dir+remotes renamed to DashBox and dual-pushed (no force): path /Users/wangzhenyu/Desktop/ALLProject/DashBox; origin https://gitee.com/Winery_z/DashBox; github https://github.com/zhwangsir/DashBox; tip 543264e feat: DashBox 主导融合，drama 反向代理入镜像. Local docs 6a8590f/42b0e38 were ancestors of 543264e (no fork). LICENSE/NOTICE/brand untouched. ToIV untouched.
 
 - 2026-08-27 canvas wiring (code uncommitted): DashBox :8780 reverse-proxies /api/drama/* to host.docker.internal:8100. /api/drama/health 200 on :8080/:8780/:8100. Studio node pipeline still DashBox R18, not switched to platform script/storyboard. LICENSE/NOTICE/brand untouched. dir/remotes still AIGCPannel. ToIV untouched.
