@@ -17,7 +17,7 @@
 | `origin` | https://gitee.com/Winery_z/AIGCPannel.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/AIGCPannel.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`54fe7e6`（`docs: 定位为专做 AI 短剧，ToIV 才是聚合平台`）。Gitee 已推；GitHub 待补
+- 当前 `main` 尖端：`d89ee62`（`docs: 定位为专做 AI 短剧，ToIV 才是聚合平台`）。Gitee 已推；GitHub 待补
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
@@ -32,6 +32,14 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 左侧导航已有「模型库」「引擎」。引擎页只做启动说明、状态与链接，可手动刷新探测本机 8080/8780。
 
 工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=AIGCPannel、下载器 config/models.json 是否可读、DashBox URL。
+
+## 模型库 / 网关（2026-08-27，代码未 commit）
+
+registry 在 NAS 不可读时明确报错，不再空列表。扫描根含 `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`。本机 MateBook `~/NAS` 未挂 SMB：disk checkpoint/lora=0，manifest LoRA=20。
+
+`gateway/health` 不再探测 studio04/01/02。必选健康：llm spark02、vlm spark01、LB :8188、H3 :8195、TTS :9200、ASR :9210。LTX required=false。集群设备仍只看 ToIV/AGENTS.md。
+
+DashBox 正在本机 colima 构建，:8080/:8780 尚未监听。LICENSE/NOTICE/品牌未改。ToIV 未动。
 
 ## 许可（根 NOTICE）
 

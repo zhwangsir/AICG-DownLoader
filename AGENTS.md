@@ -18,6 +18,12 @@
 
 左侧导航已有「模型库」「引擎」。crate 名与 OS 配置目录仍是 `comfy-downloader`（保住已有 `models.json` 路径）。
 
+## 2026-08-27 model library / gateway (code uncommitted)
+
+- registry: error when NAS unreadable, no empty list. Scan root includes `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`. MateBook `~/NAS` not SMB-mounted: disk checkpoint/lora=0, manifest LoRA=20.
+- `gateway/health`: no studio04/01/02. Required: llm spark02, vlm spark01, LB :8188, H3 :8195, TTS :9200, ASR :9210. LTX required=false. Cluster SoT still `../ToIV/AGENTS.md`.
+- DashBox: local colima build in progress; `:8080`/`:8780` not listening yet. LICENSE/NOTICE/brand untouched.
+
 ## 许可
 
 根 `NOTICE`：`platform/`、`src/` 等一等代码 MIT；`dashbox/` 是第三方（DramaClaw / DashBox），**ELv2，不是 MIT**。不要改 `dashbox/` LICENSE / NOTICE / 品牌文件，不要把 dashbox 当成本仓 MIT。

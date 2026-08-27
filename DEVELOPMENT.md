@@ -5,6 +5,7 @@
 > 身份：AIGCPannel（用户拼法；原 AICG-DownLoader-main）。DashBox 是产品的一块（仓内 `dashbox/`），不是外挂。上游 LICENSE/NOTICE/品牌文件不要覆盖、不要改成 MIT。远程已是 AIGCPannel。
 >
 > **2026-08-27 第一波融合**：`./start-aigcpannel.sh`（:8100/:3501）、`./start-engine.sh`（DashBox :8080/:8780）。根 NOTICE 声明 dashbox/ 为 ELv2。crate 仍 `comfy-downloader`。已删 platform/deploy 下 deepfilternet / hunyuanimage / latentsync / video-enhance / xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。`GET /api/panel/status`。未 commit/push。
+> **2026-08-27 model library/gateway (uncommitted):** registry errors if NAS unreadable; health required spark02/spark01/LB:8188/H3:8195/TTS:9200/ASR:9210; no studio04/01/02; LTX required=false. DashBox colima build, ports not up yet.
 
 
 ## 启动（第一波融合）
