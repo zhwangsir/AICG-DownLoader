@@ -14,6 +14,7 @@
 - `./start-dashbox.sh`：短剧后端 `:8100` + DashBox `:8080`/`:8780`。主界面 `:8080`。
 - `./start-aigcpannel.sh`：薄封装，转调 `start-dashbox.sh`。
 - `GET /api/panel/status`：product=DashBox；查 downloader `config` / `models.json` 是否可读。
+- DashBox `:8780` 反代 `/api/drama/*` → `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。Studio 节点仍走 DashBox R18，未改成 platform script/storyboard。
 
 左侧导航已有「模型库」「引擎」。crate 名与 OS 配置目录仍是 `comfy-downloader`（保住已有 `models.json` 路径）。
 

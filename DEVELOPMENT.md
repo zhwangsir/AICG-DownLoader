@@ -18,6 +18,8 @@
 
 `GET /api/panel/status` 返回 product=`DashBox`、downloader config/models.json 可读性、DashBox URL。不拉起 Rust 桌面端。
 
+**2026-08-27 画布接线（未 commit）**：DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。Studio 节点流水线仍走 DashBox R18，未改成 platform script/storyboard。
+
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 
 # 原 PROJECT_INIT

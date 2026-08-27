@@ -1,5 +1,7 @@
 # TEST_LOG.md — DashBox
 
+- 2026-08-27 canvas wiring (code uncommitted): DashBox :8780 reverse-proxies /api/drama/* to host.docker.internal:8100. /api/drama/health 200 on :8080/:8780/:8100. Studio node pipeline still DashBox R18, not switched to platform script/storyboard. LICENSE/NOTICE/brand untouched. dir/remotes still AIGCPannel. ToIV untouched.
+
 - 2026-08-27 fusion first cut (code uncommitted, repo name unchanged): product start ./start-dashbox.sh (drama backend :8100 + DashBox :8080/:8780). Main UI :8080. panel/status product=DashBox. start-aigcpannel.sh thin wrapper. LICENSE/NOTICE/brand untouched. dir still ALLProject/AIGCPannel, remotes still AIGCPannel. Next: canvas->:8100 then Gitee+GitHub rename together. ToIV untouched. Docs identity flipped to DashBox as shell; short-drama pipeline and downloader are modules.
 
 - 2026-08-27 drama smoke (code uncommitted): idea rain-night convenience store -> script-ef4765a34f37 completed. project 杯底的血 id bed1ceac-10cb-46a6-9cea-93669d264432, 2 chars 2 shots. storyboard-1c3cb3b243de sketch scene1 completed, PNG ~630KB from ComfyUI :8188. LLM spark02 live. H3 not submitted. script sync 240s too short, used generate_async, wall ~20min. character preview HTTP 200 but LLM 45s timeout fell back to template. ToIV / DashBox brand untouched.

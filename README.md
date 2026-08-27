@@ -33,6 +33,10 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 
 工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=DashBox、下载器 config/models.json 是否可读、DashBox URL。
 
+## 短剧 API 反代（2026-08-27，代码未 commit）
+
+DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧后端）。`:8080`/`:8780`/`:8100` 的 `/api/drama/health` 均 200。Studio 节点流水线仍走 DashBox R18，未改成 platform script/storyboard。LICENSE/NOTICE/品牌未动。目录/远程仍 AIGCPannel。
+
 ## 模型库 / 网关（2026-08-27，代码未 commit）
 
 registry 在 NAS 不可读时明确报错，不再空列表。扫描根含 `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`。本机 MateBook `~/NAS` 已挂 NAS（非开机自动挂载），模型根可读。registry：loras 101、checkpoints 24。
