@@ -1,20 +1,19 @@
-# AGENTS.md — AIGCPannel
+# AGENTS.md — DashBox
 
-> **最后更新**：2026-08-27（定位：专做 AI 短剧；DashBox 是产品一块）
+> **最后更新**：2026-08-27（身份：DashBox 为壳；短剧流水线/下载器是模块）
 > **集群真相源**：`../ToIV/AGENTS.md`（禁止把设备清单/凭据复制进本文件）
 > **文档五件套**：README.md / AGENTS.md / DEVELOPMENT.md / STATE.json / TEST_LOG.md
 
 ## 本项目
 
-**AIGCPannel**（用户拼法 / 产品显示名）专做 AI 短剧。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。
-仓内三块一体：ComfyUI 模型下载器 + 短剧工作台 + DashBox 引擎。DashBox 是产品的一块，不是外挂、不是可选旁路。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。不是三仓。LibTV 是已否掉的拆仓候选。
+**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径仍 `ALLProject/AIGCPannel`，远程仍名 AIGCPannel。不是三仓。LibTV 是已否掉的拆仓候选。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
 
-- `./start-aigcpannel.sh`：工作台 backend `:8100` + frontend `:3501`
-- `./start-engine.sh`：DashBox docker（默认 Web `:8080` / API `:8780`）。默认只打印命令，`--up` 才拉起。
-- `GET /api/panel/status`：查 downloader `config` / `models.json` 是否可读，并返回 DashBox URL。
+- `./start-dashbox.sh`：短剧后端 `:8100` + DashBox `:8080`/`:8780`。主界面 `:8080`。
+- `./start-aigcpannel.sh`：薄封装，转调 `start-dashbox.sh`。
+- `GET /api/panel/status`：product=DashBox；查 downloader `config` / `models.json` 是否可读。
 
 左侧导航已有「模型库」「引擎」。crate 名与 OS 配置目录仍是 `comfy-downloader`（保住已有 `models.json` 路径）。
 
@@ -34,7 +33,7 @@
 1. 状态、端口、GPU、挂载、模型占用必须 SSH 真机验证，以 ToIV/AGENTS.md + 真机为准。
 2. 禁止跨项目改代码。ToIV 不动。
 3. 远程：origin https://gitee.com/Winery_z/AIGCPannel 与 github https://github.com/zhwangsir/AIGCPannel 均已推 e3e30c0。双远程同步。ToIV 不动。
-4. DashBox 在产品内（`dashbox/`），开发和测试归 AICG 开发。只禁止覆盖上游 LICENSE / NOTICE / DramaClaw 品牌文件，不要改成 MIT。
+4. DashBox 是产品壳（主界面 `:8080`），开发和测试归 AICG 开发。只禁止覆盖上游 LICENSE / NOTICE / DramaClaw 品牌文件，不要改成 MIT。
 5. 旧文档已归档到 `ALLProject/.archive/docs-legacy-20260827/`。
 
 ## 2026-08-27 第一波融合（未 commit / push）

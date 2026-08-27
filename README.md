@@ -1,14 +1,14 @@
-# AIGCPannel
+# DashBox
 
-**AIGCPannel** 专做 AI 短剧。ToIV 是聚合平台；本仓不是第二个 ToIV。
+**DashBox** 是产品壳。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块，不再三套并列。
 
-仓内三块一体：**ComfyUI 模型下载器** + **AI 短剧工作台**（`platform/`）+ **DashBox 引擎**（`dashbox/`）。DashBox 是产品的一块，不是外挂、不是可选旁路。产品显示名 **AIGCPannel**（拼法以用户为准）。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。**一个项目、一个根，不是三仓。** LibTV 是已否掉的拆仓候选。
+目录仍是 `ALLProject/AIGCPannel`，远程仍名 AIGCPannel（还没改仓名）。代码融合第一刀未 commit。LibTV 是已否掉的拆仓候选。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
 > 文档基准日：2026-08-27。集群设备 / GPU / 挂载 / 凭据只看 [`../ToIV/AGENTS.md`](../ToIV/AGENTS.md)，本文件不复制。
 
-## 远程（已改名并推送）
+## 远程（仓名仍 AIGCPannel，改名等 Gitee+GitHub 一起）
 
 本仓 **不是** `AICG-DownLoader`。旧 README、`STATE.json` 顶部 description、`DEVELOPMENT.md` 里「远程仍为 AICG-DownLoader、尚未 commit」的句子已过时，以 git 与 [`../项目登记册.md`](../项目登记册.md) 为准。
 
@@ -25,13 +25,13 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 
 ## 启动
 
-工作台用仓库根目录的 start-aigcpannel 脚本（Windows 另有 bat）：backend 8100，frontend 3501。引擎用 start-engine 脚本：DashBox，Web 8080，API 8780；默认只打印命令，传入 --up 才拉起。
+产品启动 `./start-dashbox.sh`：短剧后端 `:8100` + DashBox `:8080`/`:8780`。主界面 `:8080`。`start-aigcpannel.sh` 是薄封装转调。
 
 脚本实际调用同目录 python 启动器。
 
 左侧导航已有「模型库」「引擎」。引擎页只做启动说明、状态与链接，可手动刷新探测本机 8080/8780。
 
-工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=AIGCPannel、下载器 config/models.json 是否可读、DashBox URL。
+工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=DashBox、下载器 config/models.json 是否可读、DashBox URL。
 
 ## 模型库 / 网关（2026-08-27，代码未 commit）
 
@@ -54,9 +54,9 @@ dashbox 目录是产品内的引擎树（DramaClaw / DashBox / SuperTale CE）�
 - src/：Rust 桌面下载器（crate 名 comfy-downloader；main.rs 与 sys_info.rs）
 - platform/：AI 短剧工作台。backend 为 FastAPI（drama-platform-backend 0.4.0，Python 3.11+，uv）；frontend 为 React + TypeScript + Vite + Zustand（dev 端口 3501）
 - platform/deploy/ 只保留 comfyui-lb
-- dashbox/：产品引擎块（ELv2 第三方树，在仓内，不是旁路）
+- dashbox/：产品壳引擎树（ELv2 第三方树；LICENSE/NOTICE/品牌不要覆盖）
 - packaging/：下载器 Windows / macOS / Linux 安装器元数据
-- 根目录启动脚本：start-aigcpannel（sh/py/bat）与 start-engine（sh/py）
+- 根目录启动脚本：start-dashbox.sh 为主；start-aigcpannel.sh 薄封装；start-engine 仍可单独拉引擎
 - NOTICE、LICENSE、Cargo.toml，以及文末五件套
 
 2026-08-27 已从 platform/deploy 删除 deepfilternet、hunyuanimage、latentsync、video-enhance、xdit-video（M23 已下线且无 Python import），只保留 comfyui-lb。

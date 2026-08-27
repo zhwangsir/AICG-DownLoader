@@ -1,10 +1,10 @@
-# DEVELOPMENT.md — AIGCPannel
+# DEVELOPMENT.md — DashBox
 
 > 合并自旧 PROJECT_INIT / docs / 根目录散文档。原文在 `ALLProject/.archive/docs-legacy-20260827/`。
 > 最后更新：2026-08-27
-> 身份：AIGCPannel（用户拼法；原 AICG-DownLoader-main）。DashBox 是产品的一块（仓内 `dashbox/`），不是外挂。上游 LICENSE/NOTICE/品牌文件不要覆盖、不要改成 MIT。远程已是 AIGCPannel。
+> 身份：DashBox 为壳；短剧流水线与下载器是模块。目录/远程仍名 AIGCPannel。上游 LICENSE/NOTICE/品牌不要覆盖、不要改成 MIT。
 >
-> **2026-08-27 第一波融合**：`./start-aigcpannel.sh`（:8100/:3501）、`./start-engine.sh`（DashBox :8080/:8780）。根 NOTICE 声明 dashbox/ 为 ELv2。crate 仍 `comfy-downloader`。已删 platform/deploy 下 deepfilternet / hunyuanimage / latentsync / video-enhance / xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。`GET /api/panel/status`。未 commit/push。
+> **2026-08-27 融合第一刀**：`./start-dashbox.sh`（短剧 :8100 + DashBox :8080/:8780，主界面 :8080）；`start-aigcpannel.sh` 薄封装转调。根 NOTICE 声明 dashbox/ 为 ELv2。crate 仍 `comfy-downloader`。已删 platform/deploy 下 deepfilternet / hunyuanimage / latentsync / video-enhance / xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。`GET /api/panel/status`。未 commit/push。
 > **2026-08-27 model library/gateway (uncommitted):** registry errors if NAS unreadable; health required spark02/spark01/LB:8188/H3:8195/TTS:9200/ASR:9210; no studio04/01/02; LTX required=false. DashBox web :8080 and api :8780 listening; Colima disk 20G tight. NAS mounted at ~/NAS (not on boot); loras 101 checkpoints 24.
 
 
@@ -12,10 +12,11 @@
 
 | 脚本 | 作用 | 端口 |
 |------|------|------|
-| `./start-aigcpannel.sh` | 工作台 FastAPI + 前端 | backend `:8100`，frontend `:3501` |
-| `./start-engine.sh` | 打印（或 `--up` 执行）DashBox docker compose | Web `:8080`，API `:8780` |
+| `./start-dashbox.sh` | 短剧后端 + DashBox | `:8100` + `:8080`/`:8780`；主界面 `:8080` |
+| `./start-aigcpannel.sh` | 薄封装，转调 start-dashbox | 同上 |
+| `./start-engine.sh` | 仅引擎（默认打印，`--up` 拉起） | Web `:8080`，API `:8780` |
 
-`GET /api/panel/status` 返回 product=`AIGCPannel`、downloader config/models.json 可读性、DashBox URL。不拉起 Rust 桌面端，不刮引擎。
+`GET /api/panel/status` 返回 product=`DashBox`、downloader config/models.json 可读性、DashBox URL。不拉起 Rust 桌面端。
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 
