@@ -1,6 +1,6 @@
 # AGENTS.md — AIGCPannel
 
-> **最后更新**：2026-08-27（融合收尾回写）
+> **最后更新**：2026-08-27（双远程已推 e3e30c0）
 > **集群真相源**：`../ToIV/AGENTS.md`（禁止把设备清单/凭据复制进本文件）
 > **文档五件套**：README.md / AGENTS.md / DEVELOPMENT.md / STATE.json / TEST_LOG.md
 
@@ -25,12 +25,12 @@
 
 1. 状态、端口、GPU、挂载、模型占用必须 SSH 真机验证，以 ToIV/AGENTS.md + 真机为准。
 2. 禁止跨项目改代码。ToIV 不动。
-3. 未要求不要主动 git commit / push。远程仓仍是 `AICG-DownLoader`；Gitee + GitHub 改名要两边一起，等融合告一段落。
+3. 远程：origin https://gitee.com/Winery_z/AIGCPannel 与 github https://github.com/zhwangsir/AIGCPannel 均已推 e3e30c0。双远程同步。ToIV 不动。
 4. DashBox 上游 LICENSE / NOTICE / 品牌文件不要覆盖。
 5. 旧文档已归档到 `ALLProject/.archive/docs-legacy-20260827/`。
 
 ## 2026-08-27 第一波融合（未 commit / push）
 
 已删 `platform/deploy` 下 deepfilternet、hunyuanimage、latentsync、video-enhance、xdit-video（M23 已下线且无 Python import）。保留 `comfyui-lb`。
-CORS 已去掉 `localhost:1420`。frontend 已无 `@tauri-apps`。`platform/backend/.venv` 已重建。引擎页可手动刷新探测 `:8080`/`:8780`。crate / 安装器路径 / GitHub URL 仍旧。远程仓名等用户点头再两边一起改。
+CORS 已去掉 `localhost:1420`。frontend 已无 `@tauri-apps`。`platform/backend/.venv` 已重建。引擎页可手动刷新探测 `:8080`/`:8780`。crate / 安装器路径仍旧。Gitee 与 GitHub 均已推 e3e30c0。
 
