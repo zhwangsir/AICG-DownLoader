@@ -2,7 +2,7 @@
 
 **DashBox** 是产品壳。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块，不再三套并列。
 
-目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `543264e`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
+目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `1567fc6`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -17,7 +17,7 @@
 | `origin` | https://gitee.com/Winery_z/DashBox.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/DashBox.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`543264e`（`feat: DashBox 主导融合，drama 反向代理入镜像`）。Gitee/GitHub 已双推
+- 当前 `main` 尖端：`1567fc6`（`feat: 短剧工厂节点走 /api/drama script+storyboard，失败回退 R18`）。Gitee/GitHub 已双推，未强推
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
@@ -33,9 +33,13 @@ Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models
 
 工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=DashBox、下载器 config/models.json 是否可读、DashBox URL。
 
-## 短剧 API 反代（2026-08-27，已进 `543264e`）
+## 短剧 API 反代
 
-DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧后端）。`:8080`/`:8780`/`:8100` 的 `/api/drama/health` 均 200。Studio 节点流水线仍走 DashBox R18，未改成 platform script/storyboard。LICENSE/NOTICE/品牌未动。
+DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧后端）。`:8080`/`:8780`/`:8100` 的 `/api/drama/health` 均 200。
+
+## 画布 Studio（2026-08-27，`1567fc6`）
+
+`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧走 `/api/drama/script|storyboard/generate_async`；失败回退 R18；可切换。TTS/视频/合成仍 R18。web/api 镜像未完整重建（docker cp）。CSP 可能挡 ComfyUI `:8188` 缩略图。LICENSE/NOTICE/品牌未动。
 
 ## 模型库 / 网关（2026-08-27，代码未 commit）
 

@@ -1,5 +1,7 @@
 # TEST_LOG.md — DashBox
 
+- 2026-08-27 Studio 1567fc6 dual-pushed (no force): NSFWDramaStudioNode default pipelineEngine=drama; script/first-frame via /api/drama/script|storyboard/generate_async; fail fallback R18; switchable. TTS/video/compose still R18. web/api images not fully rebuilt (docker cp). CSP may block ComfyUI :8188 thumbnails. LICENSE/NOTICE/brand and ToIV untouched. Root five-doc set untouched.
+
 - 2026-08-27 keep only the fused DashBox repo. GitHub/Gitee have no independent AICG-DownLoader / AIGCPannel / LibTV / comfy-downloader repos; those slugs are DashBox rename redirects — do not delete. Local disk only ALLProject/DashBox. Registry no longer lists those copies as independent repos. LICENSE/NOTICE/brand untouched. ToIV untouched.
 
 - 2026-08-27 dir+remotes renamed to DashBox and dual-pushed (no force): path /Users/wangzhenyu/Desktop/ALLProject/DashBox; origin https://gitee.com/Winery_z/DashBox; github https://github.com/zhwangsir/DashBox; tip 543264e feat: DashBox 主导融合，drama 反向代理入镜像. Local docs 6a8590f/42b0e38 were ancestors of 543264e (no fork). LICENSE/NOTICE/brand untouched. ToIV untouched.
