@@ -1,8 +1,10 @@
 # AIGCPannel
 
-融合项目：**ComfyUI 模型下载器** + **AI 短剧工作台**（`platform/`）+ **DashBox 引擎**（`dashbox/`）。
+**AIGCPannel** 专做 AI 短剧。ToIV 是聚合平台；本仓不是第二个 ToIV。
 
-产品显示名 **AIGCPannel**（拼法以用户为准）。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。**一个项目、一个根，不是三仓。** LibTV 是已否掉的拆仓候选，不要按三仓维护。
+仓内仍是融合结构：**ComfyUI 模型下载器** + **AI 短剧工作台**（`platform/`）+ **DashBox 引擎**（`dashbox/`），作为短剧生产配套。产品显示名 **AIGCPannel**（拼法以用户为准）。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。**一个项目、一个根，不是三仓。** LibTV 是已否掉的拆仓候选。
+
+后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
 > 文档基准日：2026-08-27。集群设备 / GPU / 挂载 / 凭据只看 [`../ToIV/AGENTS.md`](../ToIV/AGENTS.md)，本文件不复制。
 

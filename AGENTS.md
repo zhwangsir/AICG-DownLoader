@@ -1,13 +1,14 @@
 # AGENTS.md — AIGCPannel
 
-> **最后更新**：2026-08-27（双远程已推 e3e30c0）
+> **最后更新**：2026-08-27（定位：专做 AI 短剧）
 > **集群真相源**：`../ToIV/AGENTS.md`（禁止把设备清单/凭据复制进本文件）
 > **文档五件套**：README.md / AGENTS.md / DEVELOPMENT.md / STATE.json / TEST_LOG.md
 
 ## 本项目
 
-**AIGCPannel**（用户拼法 / 产品显示名）：ComfyUI 模型下载器 + 短剧工作台 + DashBox 引擎，一个项目、一个根。
-路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。不是三仓。LibTV 是已否掉的拆仓候选。
+**AIGCPannel**（用户拼法 / 产品显示名）专做 AI 短剧。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。
+仓内仍是 ComfyUI 模型下载器 + 短剧工作台 + DashBox 引擎（短剧配套），一个项目、一个根。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。不是三仓。LibTV 是已否掉的拆仓候选。
+代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
 
