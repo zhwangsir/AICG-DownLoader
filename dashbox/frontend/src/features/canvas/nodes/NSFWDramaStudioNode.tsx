@@ -7,8 +7,9 @@
  *
  * 五阶段状态机持久化在 node data：刷新页面后产物（scenes/frameUrls/
  * shotOutputs/composeUrl）仍在，显示「继续拍摄」从第一个未完成镜头接续。
- * 复用既有 hooks：r18-script/plan、generate-image、r18-tts、generate-video、
- * r18-compose（纯前端编排，页面需保持打开）。
+ * 剧本/首帧默认走 platform 短剧模块（/api/drama/script|storyboard/generate_async，
+ * 线稿 sketch_mode），失败或面板切到「R18」时回退 r18-script/plan + generate-image。
+ * 配音/出片/合成仍走既有 R18 hooks。页面需保持打开。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -66,7 +67,16 @@ import {
 } from '@/features/canvas/nodes/NSFWVideoBatchNode';
 import { ModelNamePicker } from '@/components/settings/model-name-picker';
 import { uploadFreezoneImage } from '@/api/ops';
-import { getDramaHealth } from '@/api/drama';
+import {
+  generateDramaScript,
+  generateDramaStoryboard,
+  getDramaHealth,
+  mapDramaScenesToR18,
+  pingDramaScriptAsync,
+  resolveStudioEngine,
+  scenesPerEpisodeForDuration,
+  type DramaScene,
+} from '@/api/drama';
 import { useUpstreamImages } from '@/features/canvas/application/useUpstreamGraph';
 
 type NSFWDramaStudioNodeProps = NodeProps & {
@@ -122,6 +132,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
   const size = data.size ?? '832x1216';
   const voice = data.voice || R18_TTS_VOICE_OPTIONS[0].value;
   const autoConfirm = data.autoConfirm === true;
+  const pipelineEngine = resolveStudioEngine(data.pipelineEngine);
   const anchorUploadUrl = data.anchorUploadUrl ?? null;
   const anchorImageUrl = anchorUploadUrl ?? upstreamImages[0] ?? null;
 
@@ -135,6 +146,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
 
   const [isUploading, setIsUploading] = useState(false);
   const [dramaHealth, setDramaHealth] = useState<'unknown' | 'ok' | 'down'>('unknown');
+  const [dramaPing, setDramaPing] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const runningRef = useRef(false);
 
@@ -145,7 +157,18 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
   useEffect(() => {
     const ac = new AbortController();
     void getDramaHealth(ac.signal)
-      .then((health) => setDramaHealth(health.status === 'ok' ? 'ok' : 'down'))
+      .then(async (health) => {
+        if (ac.signal.aborted) return;
+        setDramaHealth(health.status === 'ok' ? 'ok' : 'down');
+        if (health.status === 'ok') {
+          try {
+            const status = await pingDramaScriptAsync(ac.signal);
+            if (!ac.signal.aborted) setDramaPing(status);
+          } catch {
+            if (!ac.signal.aborted) setDramaPing(0);
+          }
+        }
+      })
       .catch(() => {
         if (!ac.signal.aborted) setDramaHealth('down');
       });
@@ -159,7 +182,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
   }, [data, id]);
 
   // ── 阶段执行器 ──
-  const stagePlan = useCallback(async () => {
+  const stagePlanR18 = useCallback(async () => {
     const d = latest();
     const result = await planScript.mutateAsync({
       synopsis: d.synopsis.trim(),
@@ -173,6 +196,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
     updateNodeData(id, {
       planTitle: plan.title ?? '',
       scenes: plan.scenes,
+      dramaScript: null,
       frameUrls: {},
       shotOutputs: {},
       composeUrl: null,
@@ -180,7 +204,43 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
     });
   }, [id, latest, planScript, updateNodeData]);
 
-  const stageFrames = useCallback(async () => {
+  const stagePlan = useCallback(async () => {
+    const d = latest();
+    const engine = resolveStudioEngine(d.pipelineEngine);
+    if (engine === 'drama') {
+      try {
+        const script = await generateDramaScript({
+          premise: d.synopsis.trim(),
+          genre: d.styleHint.trim() || '都市悬疑',
+          style: '写实电影感',
+          episodes: 1,
+          scenes_per_episode: scenesPerEpisodeForDuration(d.durationSec),
+        });
+        const scenes = mapDramaScenesToR18(script.scenes);
+        if (!scenes.length) throw new Error('短剧模块剧本为空');
+        updateNodeData(id, {
+          planTitle: script.title ?? '',
+          scenes,
+          dramaScript: script,
+          frameUrls: {},
+          shotOutputs: {},
+          composeUrl: null,
+          pipeline: d.autoConfirm === true ? 'frames' : 'await_confirm',
+          error: null,
+        });
+        return;
+      } catch (err) {
+        console.warn('[nsfw-drama-studio] drama script failed, fallback R18', err);
+        updateNodeData(id, {
+          dramaScript: null,
+          error: `短剧模块失败，本轮回退 R18：${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+    await stagePlanR18();
+  }, [id, latest, stagePlanR18, updateNodeData]);
+
+  const stageFramesR18 = useCallback(async () => {
     const d = latest();
     const projectId = readUrl().project;
     if (!projectId) throw new Error('缺少项目上下文（project 参数）');
@@ -211,6 +271,76 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
     );
     updateNodeData(id, { pipeline: 'shots' });
   }, [anchorImageUrl, generateImage, id, latest, updateNodeData]);
+
+  const stageFramesDrama = useCallback(async () => {
+    const d = latest();
+    const script = d.dramaScript;
+    const dramaScenes = Array.isArray(script?.scenes) ? script.scenes : [];
+    if (!dramaScenes.length) throw new Error('缺少短剧模块场景，无法出线稿');
+    const pending = d.scenes.filter((s) => !d.frameUrls[s.scene_no]);
+    const queue = [...pending];
+    const characters = (script?.characters ?? []) as Array<{
+      character_id?: string;
+      name: string;
+      description?: string;
+    }>;
+    const style = (script?.genre || d.styleHint || '写实电影感').trim() || '写实电影感';
+    const worker = async () => {
+      for (;;) {
+        const scene = queue.shift();
+        if (!scene) return;
+        const dramaScene = (dramaScenes.find((item) => item.scene_id === scene.scene_no) ?? {
+          scene_id: scene.scene_no,
+          description: scene.shot_description,
+          prompt: scene.image_prompt,
+          dialogue: scene.dialogue,
+          emotion: scene.emotion,
+          duration_seconds: scene.duration_sec,
+        }) as DramaScene;
+        const board = await generateDramaStoryboard({
+          scene: dramaScene,
+          characters: characters.map((c, i) => ({
+            character_id: c.character_id || `char-${i + 1}`,
+            name: c.name,
+            description: c.description || '',
+          })),
+          style,
+          sketch_mode: true,
+        });
+        const url = board.image_url || '';
+        if (!url) throw new Error(`镜头 S${scene.scene_no} 短剧分镜返回为空`);
+        const cur = latest();
+        updateNodeData(id, {
+          frameUrls: { ...cur.frameUrls, [scene.scene_no]: url },
+        });
+      }
+    };
+    if (queue.length === 0) {
+      updateNodeData(id, { pipeline: 'shots' });
+      return;
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(FRAMES_CONCURRENCY, queue.length) }, worker),
+    );
+    updateNodeData(id, { pipeline: 'shots' });
+  }, [id, latest, updateNodeData]);
+
+  const stageFrames = useCallback(async () => {
+    const d = latest();
+    const engine = resolveStudioEngine(d.pipelineEngine);
+    if (engine === 'drama' && d.dramaScript?.scenes?.length) {
+      try {
+        await stageFramesDrama();
+        return;
+      } catch (err) {
+        console.warn('[nsfw-drama-studio] drama storyboard failed, fallback R18', err);
+        updateNodeData(id, {
+          error: `短剧分镜失败，本轮回退 R18：${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+    await stageFramesR18();
+  }, [id, latest, stageFramesDrama, stageFramesR18, updateNodeData]);
 
   const stageShots = useCallback(async () => {
     const d = latest();
@@ -370,7 +500,8 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
       updateNodeData(id, { error: '先输入剧情梗概' });
       return;
     }
-    if (!d.checkpoint?.trim()) {
+    const engine = resolveStudioEngine(d.pipelineEngine);
+    if (engine === 'r18' && !d.checkpoint?.trim()) {
       updateNodeData(id, { error: '先在面板选择底模' });
       return;
     }
@@ -378,6 +509,7 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
     updateNodeData(id, {
       planTitle: '',
       scenes: [],
+      dramaScript: null,
       frameUrls: {},
       shotOutputs: {},
       composeUrl: null,
@@ -481,14 +613,18 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
           <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-text-muted/55">
             <Clapperboard className="h-9 w-9 text-amber-300/50" aria-hidden />
             <span className="px-8 text-center text-[12px] leading-5">
-              R18 短剧工厂
+              {pipelineEngine === 'drama' ? '短剧模块流水线' : 'R18 短剧工厂'}
               <br />
               输入梗概与角色卡，一键拍完一部短剧
               <br />
               （剧本 → 首帧 → 配音 → 出片 → 合成）
               <br />
               <span className={dramaHealth === 'ok' ? 'text-emerald-200/80' : dramaHealth === 'down' ? 'text-amber-200/70' : 'text-text-muted/45'}>
-                {dramaHealth === 'ok' ? '短剧模块已连接' : dramaHealth === 'down' ? '短剧模块不可达' : '短剧模块…'}
+                {dramaHealth === 'ok'
+                  ? `短剧模块已连接${dramaPing === 422 ? ' · generate_async 可达' : dramaPing != null ? ` · ping ${dramaPing}` : ''}`
+                  : dramaHealth === 'down'
+                    ? '短剧模块不可达（可切 R18）'
+                    : '短剧模块…'}
               </span>
             </span>
           </div>
@@ -664,6 +800,23 @@ export const NSFWDramaStudioNode = memo(({ id, data, selected }: NSFWDramaStudio
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-center gap-2">
+            <div className="flex shrink-0 rounded-md border border-white/10 bg-white/[0.04] p-0.5" title="剧本/首帧走短剧模块或 DashBox R18">
+              {(['drama', 'r18'] as const).map((eng) => (
+                <button
+                  key={eng}
+                  type="button"
+                  disabled={isRunning}
+                  onClick={() => updateNodeData(id, { pipelineEngine: eng })}
+                  className={`h-7 rounded px-2 text-[11px] transition-colors ${
+                    pipelineEngine === eng
+                      ? 'bg-amber-400/20 text-amber-100'
+                      : 'text-text-muted/80 hover:bg-white/[0.08]'
+                  }`}
+                >
+                  {eng === 'drama' ? '短剧模块' : 'R18'}
+                </button>
+              ))}
+            </div>
             <div className="min-w-0 flex-1">
               <ModelNamePicker
                 value={checkpoint}

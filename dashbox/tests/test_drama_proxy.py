@@ -104,3 +104,66 @@ def test_drama_proxy_upstream_down(monkeypatch) -> None:
     body = response.json()
     assert body["ok"] is False
     assert body["data"]["upstream"] == "http://127.0.0.1:8100"
+
+
+def test_drama_proxy_rewrites_static_to_platform_static(monkeypatch) -> None:
+    from novelvideo.api.routes import drama_proxy
+
+    monkeypatch.setenv("ST_DRAMA_API_URL", "http://127.0.0.1:8100")
+    captured: dict[str, object] = {}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            _ = args, kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def request(self, method, url, content=None, headers=None):
+            captured["method"] = method
+            captured["url"] = url
+            return _FakeResponse(200, b"png", {"content-type": "image/png"})
+
+    monkeypatch.setattr(drama_proxy.httpx, "AsyncClient", _Client)
+    client = TestClient(_app())
+    response = client.get("/api/drama/static/storyboard/s1.png")
+    assert response.status_code == 200
+    assert captured["method"] == "GET"
+    assert captured["url"] == "http://127.0.0.1:8100/static/storyboard/s1.png"
+
+
+def test_drama_proxy_forwards_script_generate_async(monkeypatch) -> None:
+    from novelvideo.api.routes import drama_proxy
+
+    monkeypatch.setenv("ST_DRAMA_API_URL", "http://127.0.0.1:8100")
+    captured: dict[str, object] = {}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            _ = args, kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def request(self, method, url, content=None, headers=None):
+            captured["method"] = method
+            captured["url"] = url
+            captured["content"] = content
+            return _FakeResponse(
+                422,
+                b'{"detail":"request validation failed"}',
+                {"content-type": "application/json"},
+            )
+
+    monkeypatch.setattr(drama_proxy.httpx, "AsyncClient", _Client)
+    client = TestClient(_app())
+    response = client.post("/api/drama/script/generate_async", json={})
+    assert response.status_code == 422
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://127.0.0.1:8100/api/drama/script/generate_async"

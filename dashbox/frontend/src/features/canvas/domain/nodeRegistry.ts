@@ -370,6 +370,8 @@ const nsfwDramaStudioNodeDefinition: CanvasNodeDefinition<NSFWDramaStudioNodeDat
     anchorUploadUrl: null,
     voice: 'human-zh-paimon',
     autoConfirm: false,
+    pipelineEngine: 'drama',
+    dramaScript: null,
     planTitle: '',
     scenes: [],
     frameUrls: {},

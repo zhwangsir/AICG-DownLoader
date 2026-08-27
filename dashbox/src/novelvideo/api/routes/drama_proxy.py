@@ -60,7 +60,12 @@ def _sanitize_subpath(path: str) -> str | None:
 
 
 def _target_url(subpath: str, query: str) -> str:
-    url = f"{drama_api_base()}/api/drama/{subpath}" if subpath else f"{drama_api_base()}/api/drama"
+    # SPA cannot fetch :8100 /static/* (CSP connect/img-src self). Rewrite
+    # /api/drama/static/... onto the platform static mount.
+    if subpath.startswith("static/"):
+        url = f"{drama_api_base()}/{subpath}"
+    else:
+        url = f"{drama_api_base()}/api/drama/{subpath}" if subpath else f"{drama_api_base()}/api/drama"
     if query:
         url = f"{url}?{query}"
     return url

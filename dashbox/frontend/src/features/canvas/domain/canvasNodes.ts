@@ -545,6 +545,21 @@ export interface NSFWDramaStudioNodeData extends NodeDisplayData {
   voice: string;
   /** 剧本完成后不停顿直接出片（默认 false=暂停等确认可改词）。 */
   autoConfirm: boolean;
+  /** 剧本/首帧：短剧模块 (/api/drama/*) 或 DashBox R18。失败时本轮回退 R18。 */
+  pipelineEngine?: 'drama' | 'r18';
+  /** 短剧模块剧本原文（分镜 generate_async 需要 Scene 对象）。 */
+  dramaScript?: {
+    title: string;
+    genre?: string;
+    characters?: Array<{ character_id?: string; name: string; description?: string; [key: string]: unknown }>;
+    scenes?: Array<{
+      scene_id: number;
+      description?: string;
+      prompt?: string;
+      dialogue?: string;
+      [key: string]: unknown;
+    }>;
+  } | null;
 
   // ── 五阶段产物（断点续拍依据：产物在则跳过该阶段）──
   planTitle: string;
