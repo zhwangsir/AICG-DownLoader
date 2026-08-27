@@ -1,36 +1,79 @@
 # AIGCPannel
 
-融合项目：ComfyUI 模型下载器 + AI 短剧工作台（`platform/`）+ DashBox 引擎（`dashbox/`）。
-产品显示名 **AIGCPannel**。远程仓仍是 `AICG-DownLoader`（Gitee/GitHub 先别改）。
+融合项目：**ComfyUI 模型下载器** + **AI 短剧工作台**（`platform/`）+ **DashBox 引擎**（`dashbox/`）。
 
-- 工作台：`./start-aigcpannel.sh`（backend `:8100` + frontend `:3501`）
-- 引擎：`./start-engine.sh`（DashBox docker，默认 Web `:8080` / API `:8780`；加 `--up` 才拉起）
-- 状态：`GET /api/panel/status`（`config` / `models.json` 是否可读）
+产品显示名 **AIGCPannel**（拼法以用户为准）。路径：`ALLProject/AIGCPannel`（原 `AICG-DownLoader-main`）。**一个项目、一个根，不是三仓。** LibTV 是已否掉的拆仓候选，不要按三仓维护。
 
-根 [`NOTICE`](NOTICE)：`dashbox/` 为 Elastic License 2.0，不要改品牌文件。crate / 配置目录名仍是 `comfy-downloader`。
-集群真相：[`../ToIV/AGENTS.md`](../ToIV/AGENTS.md)。
+> 文档基准日：2026-08-27。集群设备 / GPU / 挂载 / 凭据只看 [`../ToIV/AGENTS.md`](../ToIV/AGENTS.md)，本文件不复制。
 
----
+## 远程（已改名并推送）
 
-# AICG-DownLoader · ComfyUI 模型下载器
+本仓 **不是** `AICG-DownLoader`。旧 README、`STATE.json` 顶部 description、`DEVELOPMENT.md` 里「远程仍为 AICG-DownLoader、尚未 commit」的句子已过时，以 git 与 [`../项目登记册.md`](../项目登记册.md) 为准。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Releases](https://img.shields.io/badge/Download-Releases-brightgreen.svg)](https://github.com/zhwangsir/AICG-DownLoader/releases)
+| 远程 | URL | 说明 |
+|------|-----|------|
+| `origin` | https://gitee.com/Winery_z/AIGCPannel.git | Gitee，主远程 |
+| `github` | https://github.com/zhwangsir/AIGCPannel.git | GitHub 备份 |
 
-纯 Rust 原生 GUI（egui），单文件可执行程序，支持 Windows / macOS / Linux。
-为本地 ComfyUI 用户设计：不碰命令行，把 Civitai / HuggingFace 上的模型下载到 ComfyUI 正确的子目录里。
+- 当前 `main` 尖端：`c0b73d0`（`docs: 记录 AIGCPannel 双远程已推 e3e30c0`）
+- 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
+- 其后文档提交即 `c0b73d0`
 
-> 下载安装包请到 [GitHub Releases](https://github.com/zhwangsir/AICG-DownLoader/releases) 页。
+Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。`Cargo.toml` 的 `package.name` 仍为 `comfy-downloader` 0.1.0；其 `homepage` / `repository` 字段仍写旧仓名，**以本表 git remote 为准**。
 
-## 姊妹项目：AI 短剧工作台（platform/）
+## 启动
 
-本仓库除下载器外，还包含 `platform/` 目录下的 **AI 短剧一条龙工作台**——一个从「一句话创意」到「可播放短剧成片」的内容生产平台（Python FastAPI 后端 + React/TS 前端，LLM/图像/视频/TTS/ASR 全链路 Agent 管线）。
+工作台用仓库根目录的 start-aigcpannel 脚本（Windows 另有 bat）：backend 8100，frontend 3501。引擎用 start-engine 脚本：DashBox，Web 8080，API 8780；默认只打印命令，传入 --up 才拉起。
 
-两者关系：下载器负责把 Civitai / HuggingFace 模型可靠地下载到 ComfyUI 模型目录；工作台负责用这些模型生产内容。两侧通过 **模型注册表**（工作台 `GET /api/drama/models/registry`，融合下载器 `models.json` 与工作台 `lora_manifest`）打通——下载器下载的模型可直接被工作台发现与引用，工作台后端也会共享下载器的 `config.json` 配置。
+脚本实际调用同目录 python 启动器。
 
-工作台的架构、启动方式见 [platform/README.md](platform/README.md)，部署见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+左侧导航已有「模型库」「引擎」。引擎页只做启动说明、状态与链接，可手动刷新探测本机 8080/8780。
 
-## 功能
+工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=AIGCPannel、下载器 config/models.json 是否可读、DashBox URL。
+
+## 许可（根 NOTICE）
+
+见 [NOTICE](NOTICE)。
+
+一等代码（platform、src、packaging 以及 dashbox 以外文件）为 MIT，见 [LICENSE](LICENSE)，Copyright 2026 WangZhenYu (Winery)。
+
+dashbox 目录是第三方（DramaClaw / DashBox / SuperTale CE），协议为 Elastic License 2.0（ELv2），不是 MIT。不要改 dashbox 的 LICENSE、NOTICE 或品牌文件，不要把 dashbox 当成本仓 MIT。本仓只捆绑启动、状态与链接。
+
+## 仓库结构
+
+- src/：Rust 桌面下载器（crate 名 comfy-downloader；main.rs 与 sys_info.rs）
+- platform/：AI 短剧工作台。backend 为 FastAPI（drama-platform-backend 0.4.0，Python 3.11+，uv）；frontend 为 React + TypeScript + Vite + Zustand（dev 端口 3501）
+- platform/deploy/ 只保留 comfyui-lb
+- dashbox/：捆绑引擎（ELv2，第三方树）
+- packaging/：下载器 Windows / macOS / Linux 安装器元数据
+- 根目录启动脚本：start-aigcpannel（sh/py/bat）与 start-engine（sh/py）
+- NOTICE、LICENSE、Cargo.toml，以及文末五件套
+
+2026-08-27 已从 platform/deploy 删除 deepfilternet、hunyuanimage、latentsync、video-enhance、xdit-video（M23 已下线且无 Python import），只保留 comfyui-lb。
+
+CORS 默认源已去掉 localhost:1420（旧 Tauri 桌面端口）。frontend 的 package.json 没有 @tauri-apps。默认 CORS 含 localhost:3501 等本地前端源（见 platform/backend/app/config.py 的 cors_origins）。
+
+## 短剧工作台（platform/）
+
+从「一句话创意」到「可播放短剧成片」。细节以 [platform/README.md](platform/README.md) 为准；引擎地址与 GPU 占用以 [../ToIV/AGENTS.md](../ToIV/AGENTS.md) 为准，勿把集群清单抄进本文件。
+
+Agent 管线（platform README）：剧本、角色、分镜、视频、配音、字幕、剪辑、文本质检、视觉质检；另有 ai_optimizer 与内置 RAG 提示词优化。
+
+视频双引擎路由：有台词或参考资产走 MiniMax H3；长镜或纯运动走 LTX-2.5；失败回退链为 ltx 到 h3 再到 comfyui Wan2.2。
+
+模型注册表融合工作台 lora_manifest 与下载器 models.json（drama router 的 models/registry）。左侧模型库走 models 路由与上述 registry。
+
+下载器配置环境变量：DOWNLOADER_CONFIG_PATH（默认仓库根 config.json）、DOWNLOADER_MODELS_JSON（可选覆盖清单）。后端挂载 static 下的 audio、subtitle、video。
+
+STATE.json 项目版本字段为 0.34.0（里程碑记到 M27）；后端 pyproject.toml 为 0.4.0。
+
+手工启动：在 platform/backend 执行 uv sync --extra dev，再用 uv run 启动 FastAPI，host 0.0.0.0、port 8100。frontend 的 vite 配置已固定 3501，代理 api 与 static 到 8100。
+
+## 模型下载器（Rust / egui）
+
+桌面端仍是纯 Rust 原生 GUI（eframe / egui 0.29），单文件可执行，Windows / macOS / Linux。给本地 ComfyUI 用户：把 Civitai / HuggingFace 模型下到正确子目录。产物名 target/release/comfy-downloader。融合后工作台左侧也可浏览与下载；桌面 crate 继续维护。
+
+## 模型下载器功能（现有 DEVELOPMENT / 源码仍支持）
 
 - **🔍 模型搜索（Civitai + HuggingFace）**：
   - Civitai：关键词 + 类型 + 底模（SDXL/Flux/Wan…）过滤，预览图卡片，游标分页「加载更多」；点卡片进详情页看版本/触发词（LoRA，可一键复制）/发布日期/画廊
@@ -50,63 +93,41 @@
 - **国内网络友好**：hf-mirror 镜像开关；自动读取系统代理环境变量（`HTTPS_PROXY`/`HTTP_PROXY`，适配 Clash 等）
 - **中文界面**：启动时自动加载系统 CJK 字体（Windows/macOS/Linux 主流路径 + 递归扫描兜底）
 
-## 安装
+### 编译与测试
 
-到 [GitHub Releases](https://github.com/zhwangsir/AICG-DownLoader/releases) 下载对应平台的安装包：
+需要 Rust 工具链（Windows 另需 MSVC C++ Build Tools）：
 
-- **Windows**：下载 `comfy-downloader-<版本>-windows-setup.exe`，双击运行向导即可（默认安装到当前用户目录，无需管理员权限），自动建开始菜单/桌面快捷方式。也可下载 `…-windows-x86_64.zip` 解压后直接运行 `comfy-downloader.exe`（便携模式）。
-- **Linux**：下载 `…-linux-amd64.deb` 后执行 `sudo dpkg -i comfy-downloader-*.deb`（缺依赖时再 `sudo apt-get -f install`），随后从应用菜单或终端 `comfy-downloader` 启动。或下载 `…-linux-x86_64.AppImage`，`chmod +x *.AppImage` 后直接运行。
-- **macOS**：下载 `…-macos-arm64.dmg`（或 `.zip`），把 `ComfyUI Downloader.app` 拖入「应用程序」。首次打开若被 Gatekeeper 拦（未签名），右键点 App 选「打开」确认一次即可；仍被拦时可在终端执行 `xattr -dr com.apple.quarantine "/Applications/ComfyUI Downloader.app"` 解除隔离属性。
+    cargo build --release
+    cargo test --release
+    cargo test --release -- --ignored
 
-每个安装包旁都附带同名 `.sha256` 校验文件，可下载后核对完整性。
+配置文件查找顺序：可执行文件同目录（便携）到系统配置目录（Windows 为 APPDATA 下 comfy-downloader，Linux 为 ~/.config/comfy-downloader/，macOS 为 ~/Library/Application Support/comfy-downloader/）。字段示例见 [config.json.example](config.json.example)。civitai_token 明文存在 config 里，不要分享该文件。
 
-## 编译
+ureq 禁用 gzip，以保证 Content-Length 与断点续传正确。HF tree API 单页 1000 项，超大目录可能查不到哈希（跳过校验，不影响下载）。
 
-需要 Rust 工具链（https://rustup.rs ，Windows 另需 MSVC C++ Build Tools）：
+## 测试基线（STATE.json test_summary，条目日期 2026-08-15）
 
-```bash
-cargo build --release
-```
+| 端 | 记录 |
+|----|------|
+| 后端 | 797 passed；覆盖率记 87.07%（unit + 部分 integration，门槛 80%） |
+| 前端 | vitest 110；tsc 0；build 成功 |
+| Rust | 46 passed / 0 failed（含 M24.3 trigger_words 4 例） |
+| 实机 | M24.4 API 47 项全过（STATE 记载） |
 
-产物：`target/release/comfy-downloader(.exe)`，双击运行。
+2026-08-27 融合收尾在 TEST_LOG.md 记了 CORS、去掉 Tauri、重建 .venv、引擎页探测；未在当日重跑上述全量数字。M25 在 STATE 中仍为 planning。
 
-## 配置
+## 同组与边界
 
-程序启动时按以下顺序找 `config.json`：可执行文件同目录（便携模式）→ 系统配置目录（Windows `%APPDATA%\comfy-downloader\`，Linux `~/.config/comfy-downloader/`，macOS `~/Library/Application Support/comfy-downloader/`）。也可直接在「⚙ 设置」页修改（含原生目录选择器）：
+- 同项目组还有 aigc-auth（鉴权，非 git，cloud 8001），见 [../aigc-auth/README.md](../aigc-auth/README.md)
+- 禁止改 ToIV；集群真相只在 ToIV/AGENTS.md
+- 不要改 dashbox 许可与品牌文件
+- 旧散文档已归档到 ALLProject/.archive/docs-legacy-20260827/
 
-```json
-{
-  "comfy_root": "D:\\ComfyUI",
-  "civitai_token": "你的 Civitai API 密钥（civitai.com/user/account 生成）",
-  "hf_mirror": true,
-  "max_concurrent": 2
-}
-```
+## 文档五件套
 
-> 注意：`civitai_token` 以明文存储在 config.json，请勿把该文件分享给他人。
+- [README.md](README.md) — 本文件
+- [AGENTS.md](AGENTS.md) — 本项目规则（集群见 ToIV/AGENTS.md）
+- [DEVELOPMENT.md](DEVELOPMENT.md) — 开发/部署长文（远程改名段落可能滞后，以本文「远程」节为准）
+- [STATE.json](STATE.json) — 状态快照（顶部 description 可能滞后）
+- [TEST_LOG.md](TEST_LOG.md) — 测试与核验日志
 
-## 测试
-
-```bash
-cargo test --release                # 单元测试
-cargo test --release -- --ignored   # 真实网络 e2e（下载/断点续传/SHA256/搜索分页）
-```
-
-## 技术栈
-
-`eframe`/`egui` 0.29（GUI）· `ureq` 2（rustls，禁用 gzip 保证续传正确）· `sha2`（校验）· `rfd`（原生文件对话框）· `serde_json`（宽松解析，抗 API schema 变动）· `regex`
-
-更多开发上下文（架构、已踩的坑、路线图）见 [开发提示词.md](开发提示词.md)。
-
-## 已知限制
-
-- Linux/macOS 的实机验证仍在完善中；打包（.deb / AppImage / .app / dmg）已由发布工作流自动产出，理论上 `cargo build --release` 即可用
-- HF tree API 单页 1000 项，超大目录的文件可能查不到哈希（此时跳过校验，不影响下载）
-
-## 作者 / License
-
-- 作者：**Winery (WangZhenYu)**
-- 项目主页：<https://github.com/zhwangsir/AICG-DownLoader>
-- 许可证：**MIT License**（详见 [LICENSE](LICENSE)），Copyright © 2026 WangZhenYu (Winery)
-
-本项目以 MIT 协议开源，可自由使用、修改与再分发。请在二次分发时保留应用内「关于」页的署名与本仓库的版权声明（MIT 要求保留版权与许可声明）。
