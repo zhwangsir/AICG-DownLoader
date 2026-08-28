@@ -44,7 +44,7 @@ DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧�
 
 ## 画布 Studio（2026-08-27，`19a3141`）
 
-`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。web 已烤进镜像 dashbox-web:latest e09bb3b548e8（容器与镜像 SPA md5 一致，不再 docker-cp overlay）。Dockerfile 未改故未 commit。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。LICENSE/NOTICE/品牌未动。
+`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。活 web 镜像 `dashbox-web:latest` `11444d78e507`（标题「AIGCPannel — 通用 AIGC 视频引擎」）。旧 ID `e09bb3b548e8` 已过时。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。LICENSE/NOTICE/品牌未动。
 
 ## 模型库 / 网关（2026-08-27，代码未 commit）
 
@@ -67,9 +67,9 @@ dashbox 目录是产品内的引擎树（DramaClaw / DashBox / SuperTale CE）�
 - src/：Rust 桌面下载器（crate 名 comfy-downloader；main.rs 与 sys_info.rs）
 - platform/：AI 短剧工作台。backend 为 FastAPI（drama-platform-backend 0.4.0，Python 3.11+，uv）；frontend 为 React + TypeScript + Vite + Zustand（dev 端口 3501）
 - platform/deploy/ 只保留 comfyui-lb
-- dashbox/：产品壳引擎树（ELv2 第三方树；LICENSE/NOTICE/品牌不要覆盖）
+- dashbox/：收尾引擎树（ELv2 第三方树；LICENSE/NOTICE/品牌不要覆盖，不要当独立产品）
 - packaging/：下载器 Windows / macOS / Linux 安装器元数据
-- 根目录启动脚本：start-dashbox.sh 为主；start-aigcpannel.sh 薄封装；start-engine 仍可单独拉引擎
+- 根目录启动脚本：`start-aigcpannel.sh` 是 canonical；`start-dashbox.sh` 转调同一入口；start-engine 仍可单独拉引擎
 - NOTICE、LICENSE、Cargo.toml，以及文末五件套
 
 2026-08-27 已从 platform/deploy 删除 deepfilternet、hunyuanimage、latentsync、video-enhance、xdit-video（M23 已下线且无 Python import），只保留 comfyui-lb。

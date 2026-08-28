@@ -75,7 +75,8 @@
     "wrapper": "start-aigcpannel.sh thin wrapper",
     "path": "ALLProject/DashBox",
     "remotes": "DashBox both pushed 543264e",
-    "toiv": "untouched"
+    "toiv": "untouched",
+    "superseded_by": "378f5c7 AIGCPannel; start-aigcpannel.sh canonical"
   },
   "dashbox_rename_2026_08_27": {
     "path": "/Users/wangzhenyu/Desktop/ALLProject/DashBox",
@@ -105,7 +106,7 @@
     "voice_video_edit": "/api/drama/{voice|video|edit}/generate_async",
     "fallback": "R18 on failure; switchable",
     "edit_subtitle_url": "optional; omit instead of empty SRT; empty no longer falls back to R18",
-    "images": "web baked dashbox-web:latest e09bb3b548e8; container SPA md5 matches image; no docker-cp overlay; :8080/ and three-port /api/drama/health 200; Dockerfile unchanged so not committed",
+    "images": "live web dashbox-web:latest 11444d78e507 (title AIGCPannel — 通用 AIGC 视频引擎); e09bb3b548e8 superseded",
     "csp": "nginx img-src includes http://192.168.71.127:8188",
     "brand": "untouched",
     "toiv": "untouched"
@@ -1630,7 +1631,7 @@
   },
   "web_image_bake_2026_08_28": {
     "image": "dashbox-web:latest",
-    "id": "e09bb3b548e8",
+    "id": "11444d78e507",
     "spa_md5": "container matches image",
     "overlay": "no docker-cp",
     "health": ":8080/ and :8080/:8780/:8100 /api/drama/health 200",
@@ -1638,6 +1639,15 @@
     "remote_code": "19a3141",
     "local_docs": "2117d92 then this commit",
     "brand": "untouched",
+    "toiv": "untouched",
+    "note": "e09bb3b548e8 superseded; live image rebuilt 2026-08-28"
+  },
+  "live_web_image_2026_08_28": {
+    "image": "dashbox-web:latest",
+    "id": "11444d78e507",
+    "title": "AIGCPannel — 通用 AIGC 视频引擎",
+    "supersedes": "e09bb3b548e8",
+    "code_tip": "378f5c7",
     "toiv": "untouched"
   }
 }

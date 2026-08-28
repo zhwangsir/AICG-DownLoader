@@ -20,7 +20,7 @@
 
 **2026-08-27 画布接线**：DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。
 
-**2026-08-27 Studio `19a3141`**：`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`；剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。web 已烤进镜像 dashbox-web:latest e09bb3b548e8（容器与镜像 SPA md5 一致，不再 docker-cp overlay）。Dockerfile 未改故未 commit。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。
+**2026-08-27 Studio `19a3141`**：`NSFWDramaStudioNode` 默认 `pipelineEngine=drama`；剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。活 web 镜像 `dashbox-web:latest` `11444d78e507`。旧 ID `e09bb3b548e8` 已过时。nginx CSP `img-src` 含 `http://192.168.71.127:8188`。
 
 
 **2026-08-28 `4185c30`**：GUI/打包显示名改为「DashBox 模型库」（窗口、托盘、build.rs ProductName、安装器显示名）。crate/OS 配置目录仍 `comfy-downloader`；安装 DefaultDirName/AppId 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。旧 slug AICG-DownLoader / AIGCPannel 是 redirect，不要删。健康：`:8080`、`:8780/api/drama/health`、`:8100/api/drama/health` 均为 200。Gitee/GitHub main 均 `4185c30`（未强推）；本地 docs `2117d92`/`2829ff8` 已一并上去。LICENSE/品牌/ToIV 未动。
@@ -36,9 +36,11 @@
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 
-# 原 PROJECT_INIT
+# 原 PROJECT_INIT（2026-07-12 归档；不要当现行路径抄）
 
-# AICG-DownLoader · 项目初始化文档
+> 当前：产品/仓名 **AIGCPannel**，路径 `/Users/wangzhenyu/Desktop/ALLProject/AIGCPannel`，origin https://gitee.com/Winery_z/AIGCPannel.git ，github https://github.com/zhwangsir/AIGCPannel 。canonical `./start-aigcpannel.sh`。`dashbox/` 是收尾引擎。以下为历史快照。
+
+# AICG-DownLoader · 项目初始化文档（历史标题）
 
 > 由项目管理中枢自动生成 | 更新日期: 2026-07-12 | 负责人: zhwangsir
 
@@ -46,14 +48,14 @@
 
 | 字段 | 值 |
 |------|----|
-| 项目名称 | DashBox（壳；短剧流水线 + 下载器是模块） |
+| 项目名称 | AIGCPannel（dashbox/ 是收尾引擎，不再当独立产品） |
 | 当前版本 | 0.1.0 |
 | 创建日期 | 2026 年 |
 | 负责人 | zhwangsir（Winery / WangZhenYu） |
-| 项目路径 | /Users/wangzhenyu/Desktop/ALLProject/DashBox |
-| 远程仓库 | https://gitee.com/Winery_z/DashBox （origin） / https://github.com/zhwangsir/DashBox |
+| 项目路径 | /Users/wangzhenyu/Desktop/ALLProject/AIGCPannel |
+| 远程仓库 | https://gitee.com/Winery_z/AIGCPannel （origin） / https://github.com/zhwangsir/AIGCPannel |
 | 仓库可见性 | 公开；一等代码 MIT，dashbox/ 为 ELv2（见根 NOTICE） |
-| 线上地址 | https://github.com/zhwangsir/AICG-DownLoader/releases |
+| 线上地址 | https://github.com/zhwangsir/AIGCPannel |
 
 ## 二、项目概述与核心功能
 
