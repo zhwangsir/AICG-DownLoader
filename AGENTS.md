@@ -11,7 +11,7 @@
 
 ## 启动
 
-- `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。活着的 `:8080` 镜像标题现为 AIGCPannel（web 已 rebuild，无新代码 commit）。
+- `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。
 - `./start-dashbox.sh`：转调同一入口。
 - `GET /api/panel/status`：product=AIGCPannel；查 downloader `config` / `models.json` 是否可读。
 - `5a19c8d`：无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 设备清单不复制。

@@ -30,7 +30,7 @@
 
 ## 启动
 
-产品启动 `./start-aigcpannel.sh`：短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。`start-dashbox.sh` 转调同一入口。活着的 `:8080` 镜像标题现为 AIGCPannel（web 已 rebuild，无新代码 commit）。
+产品启动 `./start-aigcpannel.sh`：短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。`start-dashbox.sh` 转调同一入口。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。
 
 脚本实际调用同目录 python 启动器。
 

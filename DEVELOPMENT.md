@@ -32,7 +32,7 @@
 **2026-08-28 `5a19c8d`**：无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 叠在 docs `7aa28cc` 上。Gitee/GitHub 已双推，未强推。LICENSE/品牌/ToIV 未动。
 
 
-**2026-08-28 `378f5c7`**：引擎壳与仓名收成 AIGCPannel。目录 `ALLProject/AIGCPannel`；origin `gitee.com/Winery_z/AIGCPannel`，github `github.com/zhwangsir/AIGCPannel`。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 均为跳转，不要删。`dashbox/` 不再当独立产品。crate 仍 `comfy-downloader`。LICENSE/NOTICE 未改。活着的 `:8080` 镜像标题现为 AIGCPannel（web 已 rebuild，无新代码 commit）。Gitee/GitHub 已双推，未强推。ToIV 未动。
+**2026-08-28 `378f5c7`**：引擎壳与仓名收成 AIGCPannel。目录 `ALLProject/AIGCPannel`；origin `gitee.com/Winery_z/AIGCPannel`，github `github.com/zhwangsir/AIGCPannel`。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 均为跳转，不要删。`dashbox/` 不再当独立产品。crate 仍 `comfy-downloader`。LICENSE/NOTICE 未改。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。Gitee/GitHub 已双推，未强推。ToIV 未动。
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 
