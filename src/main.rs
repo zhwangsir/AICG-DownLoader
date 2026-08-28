@@ -23,7 +23,7 @@ mod sys_info;
 const APP_NAME: &str = "AIGCPannel 模型库";
 const APP_AUTHOR: &str = "Winery (WangZhenYu)";
 const APP_COPYRIGHT: &str = "© 2026 WangZhenYu";
-const APP_HOMEPAGE: &str = "https://github.com/zhwangsir/DashBox";
+const APP_HOMEPAGE: &str = "https://github.com/zhwangsir/AIGCPannel";
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const WINDOW_TITLE: &str = "AIGCPannel 模型库 · by Winery";
 

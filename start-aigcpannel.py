@@ -2,8 +2,8 @@
 
 ONE product: AIGCPannel (one-liner to finished film).
   Drama backend  : http://127.0.0.1:8100  (platform/ FastAPI module)
-  DashBox engine : http://127.0.0.1:8080  (dashbox/ finishing engine, ELv2)
-  DashBox API    : http://127.0.0.1:8780
+  Engine web     : http://127.0.0.1:8080  (dashbox/ finishing engine, ELv2)
+  Engine API     : http://127.0.0.1:8780
   Legacy UI      : http://127.0.0.1:3501  (platform frontend; default OFF)
 
 Does not rebrand upstream SuperTale/DramaClaw files.
@@ -115,11 +115,11 @@ def print_plan(args: argparse.Namespace, *, web_up: bool, api_up: bool, backend_
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="start-aigcpannel",
-        description="Start AIGCPannel: drama backend :8100 + DashBox engine :8080 / API :8780. Legacy platform UI :3501 is OFF by default.",
+        description="Start AIGCPannel: drama backend :8100 + finishing engine :8080 / API :8780. Legacy platform UI :3501 is OFF by default.",
     )
     p.add_argument("--dry-run", action="store_true", help="Print the plan and commands; do not start anything")
     p.add_argument("--legacy-ui", action="store_true", help="Also start platform frontend on :3501 (legacy workbench; default off)")
-    p.add_argument("--no-engine", action="store_true", help="Do not start DashBox compose even if :8080 is down")
+    p.add_argument("--no-engine", action="store_true", help="Do not start engine compose even if :8080 is down")
     p.add_argument(
         "--foreground-engine",
         action="store_true",
@@ -182,19 +182,19 @@ def main(argv: list[str] | None = None) -> None:
 
     if not args.no_engine:
         if web_up:
-            print("%s DashBox engine already up; leaving compose alone" % BANNER)
+            print("%s finishing engine already up; leaving compose alone" % BANNER)
         elif args.foreground_engine:
             if kids:
                 print("%s handing off to start-engine.py --up (backend stays as child)" % BANNER)
             engine = ROOT / "start-engine.py"
             os.execv(sys.executable, [sys.executable, str(engine), "--up"])
         else:
-            print("%s starting DashBox engine compose up -d (cwd=dashbox/)" % BANNER)
+            print("%s starting finishing engine compose up -d (cwd=dashbox/)" % BANNER)
             cmd = engine_up_cmd()
             rc = subprocess.call(cmd, cwd=str(DASHBOX))
             if rc != 0:
                 die("error: docker compose up -d exited %s" % rc)
-            print("%s DashBox engine %s  api %s" % (BANNER, DASHBOX_WEB, DASHBOX_API))
+            print("%s engine %s  api %s" % (BANNER, DASHBOX_WEB, DASHBOX_API))
 
     if not kids:
         print("%s nothing spawned; stack already up. Ctrl-C exits this launcher only." % BANNER)

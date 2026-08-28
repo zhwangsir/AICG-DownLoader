@@ -1,7 +1,7 @@
 {
   "name": "supertale-fe",
   "private": true,
-  "description": "DashBox — 通用 AIGC 视频引擎前端 / General-purpose AIGC video engine frontend",
+  "description": "AIGCPannel — 通用 AIGC 视频引擎前端 / General-purpose AIGC video engine frontend",
   "version": "0.0.0",
   "license": "Elastic-2.0",
   "type": "module",

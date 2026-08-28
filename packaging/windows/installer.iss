@@ -22,7 +22,7 @@
 #define AppName "AIGCPannel 模型库"
 #define AppExeName "comfy-downloader.exe"
 #define AppPublisher "Winery (WangZhenYu)"
-#define AppURL "https://github.com/zhwangsir/DashBox"
+#define AppURL "https://github.com/zhwangsir/AIGCPannel"
 
 [Setup]
 AppId={{A1C6D0AD-1E5E-4F3B-9C2A-7E3B0F5D2C11}}

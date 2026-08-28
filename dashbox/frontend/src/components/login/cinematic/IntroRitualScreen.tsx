@@ -23,14 +23,14 @@ export function IntroRitualScreen({
   return (
     <section
       className={styles.layer}
-      aria-label="DashBox intro"
+      aria-label="AIGCPannel intro"
       onClick={onComplete}
       onWheel={onComplete}
     >
       <div className={styles.aperture} aria-hidden="true" />
       <div className={styles.scanline} aria-hidden="true" />
       <div className={styles.focusFrame} aria-hidden="true">
-        <div className={styles.hudTopLeft}>A001_C012 · DASHBOX</div>
+        <div className={styles.hudTopLeft}>A001_C012 · AIGCPANNEL</div>
         <div className={styles.hudTopRight}>TC 00:00:00:10</div>
         <div className={styles.hudBottomLeft}>
           <span className={styles.recDot} />

@@ -1,7 +1,7 @@
 {
   "app": {
-    "title": "SuperTale",
-    "subtitle": "SuperTale candidate generation and asset commit workbench",
+    "title": "AIGCPannel",
+    "subtitle": "AIGCPannel candidate generation and asset commit workbench",
     "updateRequired": {
       "title": "App updated",
       "description": "This page is referencing an expired app file. Refresh to load the latest version.",
@@ -967,7 +967,7 @@
     },
     "community": {
       "label": "Community works",
-      "heading": "DashBox TV",
+      "heading": "AIGCPannel TV",
       "likes": "{{count}} likes",
       "openWork": "Open work \"{{title}}\"",
       "works": {

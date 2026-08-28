@@ -1,7 +1,7 @@
 {
   "app": {
-    "title": "SuperTale",
-    "subtitle": "SuperTale 候选图生成与资产提交工作台",
+    "title": "AIGCPannel",
+    "subtitle": "AIGCPannel 候选图生成与资产提交工作台",
     "updateRequired": {
       "title": "应用已更新",
       "description": "当前页面引用的应用文件已经失效。请刷新页面以加载最新版本。",
@@ -967,7 +967,7 @@
     },
     "community": {
       "label": "社区作品",
-      "heading": "DashBox TV",
+      "heading": "AIGCPannel TV",
       "likes": "{{count}} 次喜欢",
       "openWork": "打开作品「{{title}}」",
       "works": {

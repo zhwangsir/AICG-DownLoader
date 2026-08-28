@@ -207,7 +207,7 @@ export function Header() {
                   src="/brand/dashbox-wordmark.svg"
                   alt=""
                   aria-hidden="true"
-                  className="h-[22.7px] w-auto max-w-[113px] object-contain"
+                  className="h-[22.7px] w-auto max-w-[168px] object-contain"
                 />
               </TooltipTrigger>
               <TooltipContent

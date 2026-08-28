@@ -2475,7 +2475,7 @@ export function SuperChatPanel({
   const taskEventBus = useEventBus();
   const chat = useSuperChat({
     project: params.project,
-    displayName: username || "SuperTale",
+    displayName: username || "AIGCPannel",
   });
   const isChatInitializing = !chat.historyReady && chat.messages.length === 0 && (chat.connecting || chat.connected);
 

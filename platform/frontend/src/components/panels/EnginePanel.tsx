@@ -20,8 +20,7 @@ function ListenBadge({ up }: { up: boolean | undefined }) {
 }
 
 /**
- * Bundled DashBox finishing engine (DramaClaw upstream) — launch/status/link only.
- * Does not scrape or rebrand the engine UI.
+ * AIGCPannel finishing-engine view (DramaClaw/SuperTale upstream, ELv2) — launch/status/link only.
  */
 export default function EnginePanel() {
   const [status, setStatus] = useState<PanelStatus | null>(null);
@@ -54,8 +53,8 @@ export default function EnginePanel() {
   return (
     <div className="engine-panel">
       <p className="engine-panel-lead">
-        <strong>DashBox 引擎</strong>（Web :8080 / API :8780）是成片引擎模块。短剧 pipeline 在 :8100。
-        上游 <strong>DramaClaw / DashBox</strong> 为第三方 Elastic License 2.0，不抓取其页面、不改其品牌文件。
+        <strong>成片引擎</strong>（Web :8080 / API :8780）是 AIGCPannel 的引擎视图，不是单独产品。短剧 pipeline 在 :8100。
+        上游 <strong>DramaClaw / SuperTale</strong> 为第三方 Elastic License 2.0，LICENSE/NOTICE 保留。
       </p>
 
       <div className="engine-panel-toolbar">
@@ -93,7 +92,7 @@ export default function EnginePanel() {
 
       <p className="engine-panel-hint">
         启动：仓库根目录 <code>./start-aigcpannel.sh</code>
-        （AIGCPannel：短剧后端 :8100 + DashBox 引擎 :8080；引擎-only 仍可用 <code>./start-engine.sh --up</code>）。
+        （AIGCPannel：短剧后端 :8100 + 成片引擎 :8080；引擎-only 仍可用 <code>./start-engine.sh --up</code>）。
       </p>
 
       {loading && (

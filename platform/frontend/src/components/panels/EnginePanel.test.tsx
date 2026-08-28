@@ -35,9 +35,9 @@ describe("EnginePanel", () => {
     mockStatus.mockResolvedValue(SAMPLE);
   });
 
-  it("shows DashBox default URLs and ELv2 note", async () => {
+  it("shows engine default URLs and ELv2 note", async () => {
     render(<EnginePanel />);
-    expect(screen.getByText(/DramaClaw \/ DashBox/)).toBeInTheDocument();
+    expect(screen.getByText(/DramaClaw \/ SuperTale/)).toBeInTheDocument();
     expect(screen.getByText(/Elastic License 2.0/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("http://127.0.0.1:8080")).toBeInTheDocument());

@@ -3,8 +3,8 @@ Version: __VERSION__
 Section: graphics
 Priority: optional
 Architecture: amd64
-Maintainer: Winery (WangZhenYu) <https://github.com/zhwangsir/DashBox>
-Homepage: https://github.com/zhwangsir/DashBox
+Maintainer: Winery (WangZhenYu) <https://github.com/zhwangsir/AIGCPannel>
+Homepage: https://github.com/zhwangsir/AIGCPannel
 Depends: libc6 (>= 2.31), libgtk-3-0
 Description: AIGCPannel 模型库桌面助手
  Native GUI tool that downloads ComfyUI models from Civitai and HuggingFace

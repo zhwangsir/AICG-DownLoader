@@ -13,7 +13,7 @@ describe("LeftRail", () => {
     expect(screen.getByTitle("画布")).toBeInTheDocument();
     expect(screen.getByTitle("角色库（主体库）")).toBeInTheDocument();
     expect(screen.getByTitle("模型库")).toBeInTheDocument();
-    expect(screen.getByTitle("DashBox 引擎 :8080")).toBeInTheDocument();
+    expect(screen.getByTitle("成片引擎 :8080")).toBeInTheDocument();
   });
 
   it("默认画布为 active 态（activePanel=null）", () => {

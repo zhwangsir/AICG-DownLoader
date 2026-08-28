@@ -1,4 +1,4 @@
-"""Fused-panel status: backend + downloader config/models.json + DashBox engine URLs.
+"""Fused-panel status: backend + downloader config/models.json + AIGCPannel engine URLs.
 
 Does not spawn the Rust desktop helper. Launch/status/link only.
 """
@@ -121,6 +121,6 @@ async def panel_status() -> dict:
             "api": DASHBOX_API,
             "web_listening": bool(web_listening),
             "api_listening": bool(api_listening),
-            "note": "DashBox finishing engine (DramaClaw/SuperTale upstream, ELv2). Web :8080 / API :8780. Canonical start: ./start-aigcpannel.sh. Not rebranded.",
+            "note": "AIGCPannel finishing-engine view (DramaClaw/SuperTale upstream, ELv2). Web :8080 / API :8780. Canonical start: ./start-aigcpannel.sh.",
         },
     }

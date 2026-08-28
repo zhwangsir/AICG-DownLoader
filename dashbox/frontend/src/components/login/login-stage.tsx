@@ -10,9 +10,9 @@ import { PRODUCT_MANUAL_URL } from "@/lib/product-manual";
 import styles from "./login.module.css";
 
 // 登录页右上角 GitHub 链接目标。如需指向具体仓库/主页，改这里即可。
-const GITHUB_URL = "https://github.com/dramaclaw/dramaclaw";
+const GITHUB_URL = "https://github.com/zhwangsir/AIGCPannel";
 // 从 GITHUB_URL 推导出 owner/repo，用于拉取 star 数。
-const GITHUB_REPO = "dramaclaw/dramaclaw";
+const GITHUB_REPO = "zhwangsir/AIGCPannel";
 
 function formatStars(count: number): string {
   if (count < 1000) return String(count);
@@ -31,7 +31,7 @@ function GithubMark() {
 
 export function Brand({ className }: { className?: string }) {
   return (
-    <div className={className ?? styles.brand} aria-label="DashBox">
+    <div className={className ?? styles.brand} aria-label="AIGCPannel">
       <img
         className={styles.brandLogo}
         src="/brand/dashbox-wordmark.svg"
