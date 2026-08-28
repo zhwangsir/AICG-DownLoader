@@ -1,8 +1,8 @@
-# DashBox
+# AIGCPannel
 
-**DashBox** 是产品壳。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块，不再三套并列。
+**AIGCPannel** 是短剧产品。DashBox 是引擎模块（`:8080`/`:8780`）。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块。仓名/目录仍 `ALLProject/DashBox`，不要改名、不要删旧 slug。
 
-目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `4185c30`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
+目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `46b1994`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -17,21 +17,21 @@
 | `origin` | https://gitee.com/Winery_z/DashBox.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/DashBox.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`4185c30`（`feat: GUI/打包显示名改为 DashBox 模型库`）。Gitee/GitHub 已双推，未强推；`2117d92`/`2829ff8` docs 已一并上去
+- 当前 `main` 尖端：`46b1994`（`feat: 产品身份收成 AIGCPannel，DashBox 作引擎模块`）。Gitee/GitHub 已双推，未强推；含 docs `923b940`
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
-胶水层 GUI/打包显示名是 **DashBox 模型库**。Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。安装 `DefaultDirName`/`AppId` 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。`Cargo.toml` 的 `package.name` 仍为 `comfy-downloader` 0.1.0；其 `homepage` / `repository` 字段仍写旧仓名，**以本表 git remote 为准**。
+胶水层产品名 **AIGCPannel**。DashBox 是引擎模块。Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。安装 `DefaultDirName`/`AppId` 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。`Cargo.toml` 的 `package.name` 仍为 `comfy-downloader` 0.1.0；其 `homepage` / `repository` 字段仍写旧仓名，**以本表 git remote 为准**。
 
 ## 启动
 
-产品启动 `./start-dashbox.sh`：短剧后端 `:8100` + DashBox `:8080`/`:8780`。主界面 `:8080`。`start-aigcpannel.sh` 是薄封装转调。
+产品启动 `./start-aigcpannel.sh`：短剧后端 `:8100` + DashBox 引擎 `:8080`/`:8780`。主界面 `:8080`。`start-dashbox.sh` 转调同一入口。
 
 脚本实际调用同目录 python 启动器。
 
 左侧导航已有「模型库」「引擎」。引擎页只做启动说明、状态与链接，可手动刷新探测本机 8080/8780。
 
-工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=DashBox、下载器 config/models.json 是否可读、DashBox URL。
+工作台 panel 状态：HTTP GET `/api/panel/status`（不拉起 Rust 桌面端）。返回 product=AIGCPannel、下载器 config/models.json 是否可读、DashBox URL。
 
 ## 短剧 API 反代
 

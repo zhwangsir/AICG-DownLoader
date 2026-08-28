@@ -1,23 +1,23 @@
 # AGENTS.md — DashBox
 
-> **最后更新**：2026-08-28（身份：DashBox 为壳；短剧流水线/下载器是模块；尖端 4185c30）
+> **最后更新**：2026-08-28（身份：AIGCPannel 是产品；DashBox 是引擎模块；尖端 46b1994）
 > **集群真相源**：`../ToIV/AGENTS.md`（禁止把设备清单/凭据复制进本文件）
 > **文档五件套**：README.md / AGENTS.md / DEVELOPMENT.md / STATE.json / TEST_LOG.md
 
 ## 本项目
 
-**DashBox** 是产品壳。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `4185c30`。不是三仓。LibTV / comfy-downloader / AIGCPannel 旧 slug 是本仓 rename 跳转，禁止当独立仓删。本地只有 `ALLProject/DashBox`。
+**AIGCPannel** 是短剧产品。DashBox 是引擎模块（`:8080`/`:8780`）。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`（仓名/目录不要改）。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `46b1994`。不是三仓。LibTV / comfy-downloader / AIGCPannel 旧 slug 是本仓 rename 跳转，禁止当独立仓删。本地只有 `ALLProject/DashBox`。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
 
-- `./start-dashbox.sh`：短剧后端 `:8100` + DashBox `:8080`/`:8780`。主界面 `:8080`。
-- `./start-aigcpannel.sh`：薄封装，转调 `start-dashbox.sh`。
-- `GET /api/panel/status`：product=DashBox；查 downloader `config` / `models.json` 是否可读。
+- `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + DashBox 引擎 `:8080`/`:8780`。主界面 `:8080`。
+- `./start-dashbox.sh`：转调同一入口。
+- `GET /api/panel/status`：product=AIGCPannel；查 downloader `config` / `models.json` 是否可读。
 - DashBox `:8780` 反代 `/api/drama/*` → `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。
 - Studio `NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。`19a3141` 已双推。web 已烤进镜像 dashbox-web:latest e09bb3b548e8（容器与镜像 SPA md5 一致，不再 docker-cp overlay）。Dockerfile 未改故未 commit。CSP `img-src` 含 `http://192.168.71.127:8188`。
 
-左侧导航已有「模型库」「引擎」。胶水层 GUI/打包显示名「DashBox 模型库」。crate 名与 OS 配置目录仍是 `comfy-downloader`（保住已有 `models.json` 路径）。安装 DefaultDirName/AppId 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。
+左侧导航已有「模型库」「引擎」。胶水层产品名 AIGCPannel。crate 名与 OS 配置目录仍是 `comfy-downloader`（保住已有 `models.json` 路径）。安装 DefaultDirName/AppId 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。
 
 ## 2026-08-27 model library / gateway (code uncommitted)
 
