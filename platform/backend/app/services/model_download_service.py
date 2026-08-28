@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import threading
 import time
 import uuid
@@ -45,10 +46,47 @@ def sanitize_filename(filename: str) -> str:
     return name
 
 
+def _is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _is_writable_dir(path: Path) -> bool:
+    try:
+        return path.is_dir() and os.access(path, os.W_OK)
+    except OSError:
+        return False
+
+
+def _is_readable_dir(path: Path) -> bool:
+    try:
+        return path.is_dir() and os.access(path, os.R_OK)
+    except OSError:
+        return False
+
+
 def resolve_download_root() -> Path:
-    """下载落盘的 NAS 根目录（取 nas_model_roots 第一项，回退 DEFAULT_DOWNLOAD_ROOT）。"""
-    roots = [p.strip() for p in settings.nas_model_roots.split(",") if p.strip()]
-    return Path(roots[0]) if roots else Path(DEFAULT_DOWNLOAD_ROOT)
+    """下载落盘的 NAS 根目录：取 nas_model_roots 中第一个可用路径。
+
+    优先存在且可写的目录；否则第一个存在且可读的目录；再否则第一个存在的目录。
+    全部不可用时保底旧行为（列表第一项，或 DEFAULT_DOWNLOAD_ROOT）。
+    不硬编码本机家目录，路径一律来自 settings.nas_model_roots / 环境变量 NAS_MODEL_ROOTS。
+    """
+    roots = [Path(p.strip()) for p in settings.nas_model_roots.split(",") if p.strip()]
+    if not roots:
+        return Path(DEFAULT_DOWNLOAD_ROOT)
+    for root in roots:
+        if _is_writable_dir(root):
+            return root
+    for root in roots:
+        if _is_readable_dir(root):
+            return root
+    for root in roots:
+        if _is_dir(root):
+            return root
+    return roots[0]
 
 
 def apply_hf_mirror(url: str) -> str:

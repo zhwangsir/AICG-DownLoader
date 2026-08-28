@@ -281,3 +281,38 @@ class TestDownload:
 
     def test_get_task_missing(self, svc):
         assert svc.get_task("missing") is None
+
+
+class TestResolveDownloadRootReadableFirst:
+    """Mac 上 nas_model_roots 第一项常是不可读的 /mnt/toiv-nas，应跳到第一个可读根。"""
+
+    def test_skips_missing_first_picks_readable_second(self, monkeypatch, tmp_path):
+        missing = tmp_path / "mnt-toiv-nas"
+        readable = tmp_path / "ok-nas"
+        readable.mkdir()
+        monkeypatch.setattr(settings, "nas_model_roots", f"{missing},{readable}")
+        assert resolve_download_root() == readable
+
+    def test_prefers_writable_over_readonly(self, monkeypatch, tmp_path):
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        ok = tmp_path / "ok"
+        ok.mkdir()
+        locked.chmod(0o500)
+        try:
+            monkeypatch.setattr(settings, "nas_model_roots", f"{locked},{ok}")
+            assert resolve_download_root() == ok
+        finally:
+            locked.chmod(0o700)
+
+    def test_empty_list_falls_back_to_default(self, monkeypatch):
+        from app.services.nas_library_service import DEFAULT_DOWNLOAD_ROOT
+
+        monkeypatch.setattr(settings, "nas_model_roots", "  ,  ")
+        assert resolve_download_root() == Path(DEFAULT_DOWNLOAD_ROOT)
+
+    def test_neither_exists_keeps_first_listed(self, monkeypatch, tmp_path):
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        monkeypatch.setattr(settings, "nas_model_roots", f"{a}, {b}")
+        assert resolve_download_root() == a
