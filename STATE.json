@@ -3,6 +3,39 @@
   "version": "0.34.0",
   "last_updated": "2026-08-28",
   "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 bc85d48。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "engine_map_2026_08_28": {
+    "source": "AICG 开发 HF+Civitai 今晚调研；H3 冒烟与 Round1 已落",
+    "start": "./start-aigcpannel.sh :8100 drama + :8080/:8780 engine",
+    "video": {
+      "h3": "main path UP",
+      "ltx25": "globally off because :8198 down; code retained",
+      "wan22_i2v": "silent cluster fallback"
+    },
+    "round1": [
+      "script thinking off",
+      "NAS first readable download root",
+      "Colima prune",
+      "H3 one-shot smoke"
+    ],
+    "open_source": {
+      "dialogue_lock": "MiniMax H3 (Hailuo 3.0), not Hailuo 2.3",
+      "preview_empty": "LTX-2.5 not 2.3; Civitai LoRA still mostly 2.3",
+      "silent_i2v": "Wan 2.2 Apache; Comfy pack ~4.67M dl (AICG survey)",
+      "keyframes_watch": [
+        "Z-Image-Turbo",
+        "FLUX.2",
+        "Qwen-Image-Edit-2511"
+      ],
+      "sulphur2": "LTX NSFW finetune",
+      "low_priority": [
+        "SkyReels V3",
+        "Hunyuan 1.5"
+      ]
+    },
+    "toiv_mapping": "asked ToIV 开发 to check against repo",
+    "brand": "untouched",
+    "toiv_code": "untouched"
+  },
   "h3_smoke_2026_08_28": {
     "commit": "none",
     "head": "71d616f",
@@ -25,7 +58,8 @@
     "force": false,
     "brand": "untouched",
     "toiv": "untouched",
-    "next": "H3 generate_async smoked"
+    "next": "H3 generate_async smoked",
+    "colima_prune": true
   },
   "repo_rename_aigcpannel_2026_08_28": {
     "commit": "378f5c7",

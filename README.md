@@ -26,6 +26,11 @@
 
 
 
+
+## 引擎对照（2026-08-28 晚，AICG 调研 HF+Civitai）
+
+视频：H3 主路 UP；LTX-2.5 因集群 `:8198` 挂而全局关（代码保留）；Wan 2.2 I2V 仍是集群无声 fallback。Round 1 已落：剧本加速、NAS 可读下载根、Colima prune、H3 一镜冒烟。 对白/锁人开源主路 = MiniMax **H3**（海螺 3.0），不是 Hailuo 2.3。预览/空镜开源 = **LTX-2.5**（不是 2.3；Civitai LoRA 仍多 2.3）。无声 I2V 生态 = **Wan 2.2**（Apache；Comfy 包约 467 万 dl，AICG 今晚调研）。关键帧值得看：Z-Image-Turbo、FLUX.2、Qwen-Image-Edit-2511。Sulphur-2 = LTX NSFW 微调。SkyReels V3 / 混元 1.5 优先级低。 对照请 ToIV 开发按仓回。LICENSE/NOTICE/ToIV 未动。
+
 ## H3 出片冒烟（2026-08-28，无新代码）
 
 H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。 LICENSE/NOTICE/ToIV 未动。
