@@ -12,7 +12,7 @@
     "old_slugs": "AICG-DownLoader / DashBox / LibTV / comfy-downloader are redirects; do not delete",
     "engine": "dashbox/ finishing engine, not an independent product",
     "crate": "comfy-downloader",
-    "live_8080_title": "still DashBox 虾导; source already AIGCPannel; web image rebuilding",
+    "live_8080_title": "AIGCPannel; web image rebuilt; no new code commit; tip still 378f5c7",
     "license": "ELv2 LICENSE/NOTICE retained",
     "force": false,
     "toiv": "untouched"

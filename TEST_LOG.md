@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-28 web image rebuilt: :8080 title is AIGCPannel. no new code commit; tip still 378f5c7. LICENSE/NOTICE and ToIV untouched.
+
 - 2026-08-28 378f5c7 dual-pushed (no force): repo/dir renamed to AIGCPannel (ALLProject/AIGCPannel; gitee.com/Winery_z/AIGCPannel; github.com/zhwangsir/AIGCPannel). dashbox/ is finishing engine, not an independent product. old slugs AICG-DownLoader/DashBox/LibTV/comfy-downloader are redirects, do not delete. crate still comfy-downloader. live :8080 image title still DashBox 虾导 (source already renamed; web image rebuilding). LICENSE/NOTICE ELv2 and ToIV untouched.
 
 - 2026-08-28 5a19c8d dual-pushed (no force, on 7aa28cc): no-.env defaults LTX off, TTS=IndexTTS, LLM spark02 qwen3.6-uncensored, VLM spark01 qwen3-vl-32b, aligned with ToIV/.env.example. LICENSE/NOTICE/brand and ToIV untouched.
