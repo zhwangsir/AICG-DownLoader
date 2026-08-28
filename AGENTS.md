@@ -1,17 +1,17 @@
-# AGENTS.md — DashBox
+# AGENTS.md — AIGCPannel
 
-> **最后更新**：2026-08-28（身份：AIGCPannel 是产品；DashBox 是引擎模块；尖端 5a19c8d）
+> **最后更新**：2026-08-28（身份：AIGCPannel 是产品；dashbox/ 是收尾引擎；尖端 378f5c7）
 > **集群真相源**：`../ToIV/AGENTS.md`（禁止把设备清单/凭据复制进本文件）
 > **文档五件套**：README.md / AGENTS.md / DEVELOPMENT.md / STATE.json / TEST_LOG.md
 
 ## 本项目
 
-**AIGCPannel** 是短剧产品。DashBox 是引擎模块（`:8080`/`:8780`）。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/DashBox`（仓名/目录不要改）。远程 origin Gitee `Winery_z/DashBox` 与 github `zhwangsir/DashBox`，尖端 `5a19c8d`。不是三仓。LibTV / comfy-downloader / AIGCPannel 旧 slug 是本仓 rename 跳转，禁止当独立仓删。本地只有 `ALLProject/DashBox`。
+**AIGCPannel** 是短剧产品。`dashbox/` 是收尾引擎（`:8080`/`:8780`），不再当独立产品。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/AIGCPannel`。远程 origin Gitee `Winery_z/AIGCPannel` 与 github `zhwangsir/AIGCPannel`，尖端 `378f5c7`。不是三仓。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 是本仓 rename 跳转，禁止删。本地只有 `ALLProject/AIGCPannel`。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
 
-- `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + DashBox 引擎 `:8080`/`:8780`。主界面 `:8080`。
+- `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。活着的 `:8080` 镜像标题仍是「DashBox 虾导」（源码已改，web 镜像在 rebuild）。
 - `./start-dashbox.sh`：转调同一入口。
 - `GET /api/panel/status`：product=AIGCPannel；查 downloader `config` / `models.json` 是否可读。
 - `5a19c8d`：无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 设备清单不复制。

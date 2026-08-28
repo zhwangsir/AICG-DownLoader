@@ -1,8 +1,22 @@
 {
-  "project": "DashBox",
+  "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-08-28",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。DashBox 是引擎模块 :8080/:8780。目录 ALLProject/DashBox（仓名不要改）；远程 Gitee/GitHub 均名 DashBox，尖端 5a19c8d。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 378f5c7。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "repo_rename_aigcpannel_2026_08_28": {
+    "commit": "378f5c7",
+    "subject": "feat: 引擎壳与仓名收成 AIGCPannel",
+    "path": "/Users/wangzhenyu/Desktop/ALLProject/AIGCPannel",
+    "origin": "https://gitee.com/Winery_z/AIGCPannel.git",
+    "github": "https://github.com/zhwangsir/AIGCPannel",
+    "old_slugs": "AICG-DownLoader / DashBox / LibTV / comfy-downloader are redirects; do not delete",
+    "engine": "dashbox/ finishing engine, not an independent product",
+    "crate": "comfy-downloader",
+    "live_8080_title": "still DashBox 虾导; source already AIGCPannel; web image rebuilding",
+    "license": "ELv2 LICENSE/NOTICE retained",
+    "force": false,
+    "toiv": "untouched"
+  },
   "config_defaults_2026_08_28": {
     "commit": "5a19c8d",
     "subject": "fix: config.py 默认端点与 ToIV/.env.example 对齐",

@@ -1,27 +1,27 @@
 # AIGCPannel
 
-**AIGCPannel** 是短剧产品。DashBox 是引擎模块（`:8080`/`:8780`）。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块。仓名/目录仍 `ALLProject/DashBox`，不要改名、不要删旧 slug。
+**AIGCPannel** 是短剧产品。`dashbox/` 是收尾引擎（`:8080`/`:8780`），不再当独立产品。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块。仓名/目录 `ALLProject/AIGCPannel`。旧 slug 只跳转不删。
 
-目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `5a19c8d`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
+目录 `ALLProject/AIGCPannel`。远程 origin [gitee.com/Winery_z/AIGCPannel](https://gitee.com/Winery_z/AIGCPannel) 与 github [github.com/zhwangsir/AIGCPannel](https://github.com/zhwangsir/AIGCPannel)，尖端 `378f5c7`（已双推，未强推）。只这一根融合仓。旧 slug `AICG-DownLoader` / `DashBox` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要删**。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
 > 文档基准日：2026-08-27。集群设备 / GPU / 挂载 / 凭据只看 [`../ToIV/AGENTS.md`](../ToIV/AGENTS.md)，本文件不复制。
 
-## 远程（已改名 DashBox 并双推）
+## 远程（已改名 AIGCPannel 并双推）
 
-旧 slug `AICG-DownLoader` / `AIGCPannel` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要当独立仓删**。旧 README / `STATE.json` / `DEVELOPMENT.md` 里「远程仍为 AICG-DownLoader」的句子已过时，以 git 与 [`../项目登记册.md`](../项目登记册.md) 为准。
+旧 slug `AICG-DownLoader` / `DashBox` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要当独立仓删**。旧 README / `STATE.json` / `DEVELOPMENT.md` 里「远程仍为 AICG-DownLoader」的句子已过时，以 git 与 [`../项目登记册.md`](../项目登记册.md) 为准。
 
 | 远程 | URL | 说明 |
 |------|-----|------|
-| `origin` | https://gitee.com/Winery_z/DashBox.git | Gitee，主远程 |
-| `github` | https://github.com/zhwangsir/DashBox.git | GitHub 备份 |
+| `origin` | https://gitee.com/Winery_z/AIGCPannel.git | Gitee，主远程 |
+| `github` | https://github.com/zhwangsir/AIGCPannel.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`5a19c8d`（`fix: config.py 默认端点与 ToIV/.env.example 对齐`）。Gitee/GitHub 已双推，未强推；叠在 docs `7aa28cc` 上
+- 当前 `main` 尖端：`378f5c7`（`feat: 引擎壳与仓名收成 AIGCPannel`）。Gitee/GitHub 已双推，未强推；叠在 docs `5cc9693` 上
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
-胶水层产品名 **AIGCPannel**。DashBox 是引擎模块。Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。安装 `DefaultDirName`/`AppId` 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。`Cargo.toml` 的 `package.name` 仍为 `comfy-downloader` 0.1.0；其 `homepage` / `repository` 字段仍写旧仓名，**以本表 git remote 为准**。
+胶水层产品名 **AIGCPannel**。`dashbox/` 是收尾引擎，不再当独立产品。Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。`Cargo.toml` `homepage`/`repository` 已指向 AIGCPannel。安装 `DefaultDirName`/`AppId` 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。上游 LICENSE/NOTICE 保留 ELv2，不要改成 MIT。
 
 
 ## config 默认（2026-08-28，`5a19c8d`）
@@ -30,7 +30,7 @@
 
 ## 启动
 
-产品启动 `./start-aigcpannel.sh`：短剧后端 `:8100` + DashBox 引擎 `:8080`/`:8780`。主界面 `:8080`。`start-dashbox.sh` 转调同一入口。
+产品启动 `./start-aigcpannel.sh`：短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。`start-dashbox.sh` 转调同一入口。活着的 `:8080` 镜像标题仍是旧的「DashBox 虾导」（源码已改，web 镜像在 rebuild）。
 
 脚本实际调用同目录 python 启动器。
 

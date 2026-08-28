@@ -1,8 +1,8 @@
-# DEVELOPMENT.md — DashBox
+# DEVELOPMENT.md — AIGCPannel
 
 > 合并自旧 PROJECT_INIT / docs / 根目录散文档。原文在 `ALLProject/.archive/docs-legacy-20260827/`。
 > 最后更新：2026-08-28
-> 身份：AIGCPannel 是产品；DashBox 是引擎模块。目录 `ALLProject/DashBox`（仓名不要改），远程 Gitee/GitHub 均名 DashBox，尖端 `5a19c8d`。上游 LICENSE/NOTICE/品牌不要覆盖、不要改成 MIT。NOTICE 仍历史写 AIGCPannel。
+> 身份：AIGCPannel 是产品；`dashbox/` 是收尾引擎。目录 `ALLProject/AIGCPannel`，远程 Gitee/GitHub 均名 AIGCPannel，尖端 `378f5c7`。上游 LICENSE/NOTICE 保留 ELv2，不要改成 MIT。NOTICE 仍历史写 AIGCPannel。
 >
 > **2026-08-27 融合第一刀**：`./start-dashbox.sh`（短剧 :8100 + DashBox :8080/:8780，主界面 :8080）；`start-aigcpannel.sh` 薄封装转调。根 NOTICE 声明 dashbox/ 为 ELv2。crate 仍 `comfy-downloader`。已删 platform/deploy 下 deepfilternet / hunyuanimage / latentsync / video-enhance / xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。`GET /api/panel/status`。未 commit/push。
 > **2026-08-27 model library/gateway (uncommitted):** registry errors if NAS unreadable; health required spark02/spark01/LB:8188/H3:8195/TTS:9200/ASR:9210; no studio04/01/02; LTX required=false. DashBox web :8080 and api :8780 listening; Colima disk 20G tight. NAS mounted at ~/NAS (not on boot); loras 101 checkpoints 24.
@@ -30,6 +30,9 @@
 
 
 **2026-08-28 `5a19c8d`**：无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 叠在 docs `7aa28cc` 上。Gitee/GitHub 已双推，未强推。LICENSE/品牌/ToIV 未动。
+
+
+**2026-08-28 `378f5c7`**：引擎壳与仓名收成 AIGCPannel。目录 `ALLProject/AIGCPannel`；origin `gitee.com/Winery_z/AIGCPannel`，github `github.com/zhwangsir/AIGCPannel`。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 均为跳转，不要删。`dashbox/` 不再当独立产品。crate 仍 `comfy-downloader`。LICENSE/NOTICE 未改。活着的 `:8080` 镜像标题仍是「DashBox 虾导」（源码已改，web 镜像在 rebuild）。Gitee/GitHub 已双推，未强推。ToIV 未动。
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 
