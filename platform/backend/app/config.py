@@ -281,6 +281,12 @@ class Settings(BaseSettings):
     app_settings_path: str = "data/app_settings.json"
 
     # ====================================================================
+    # 剧本生成：联网搜索默认关闭（DuckDuckGo/Wiki 每轮可额外数秒～数十秒）
+    # 请求级 ScriptRequest.web_search 或本开关任一为 True 才搜索
+    # ====================================================================
+    script_web_search_enabled: bool = False
+
+    # ====================================================================
     # 内置 RAG 提示词优化
     # ====================================================================
     rag_optimize_enabled: bool = True

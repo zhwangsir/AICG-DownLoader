@@ -112,7 +112,7 @@ class TestExecuteReferenceInjection:
             {"title": "合规", "characters": [], "scenes": _compliant_scenes()}
         )
 
-        request = ScriptRequest(premise="外卖员的最后一单", episodes=1, scenes_per_episode=6)
+        request = ScriptRequest(premise="外卖员的最后一单", episodes=1, scenes_per_episode=6, web_search=True)
         response = await agent.execute(request)
 
         assert response.success is True

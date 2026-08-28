@@ -111,13 +111,13 @@ class BaseAgent:
         stream: bool = True,
         disable_thinking: bool = False,
     ) -> str:
-        """调用 EXO 集群的 LLM（OpenAI 兼容 API）。
+        """调用 LLM（OpenAI 兼容 API，经网关路由到 spark/qwen）。
 
-        GLM-5.2 默认启用思考模式，reasoning_content 和 content 分离。
+        Qwen/spark 可能启用思考模式，推理链会烧掉大量时间和 token；
+        结构化 JSON 场景请传 disable_thinking=True（剧本生成默认关闭 thinking）。
         使用 streaming 模式避免长时间等待超时；若 content 为空则回退到 reasoning_content。
         当 response_format_json=True 时自动去除 markdown 代码块包裹。
-        disable_thinking=True 时通过 chat_template_kwargs 关闭 Nemotron 推理模式，
-        适用于结构化 JSON 输出场景（提示词重写、质检），避免推理链耗尽 token。
+        disable_thinking=True 时通过 chat_template_kwargs 关闭推理模式。
         """
         kwargs: dict[str, Any] = dict(
             model=model or settings.exo_model_glm52,

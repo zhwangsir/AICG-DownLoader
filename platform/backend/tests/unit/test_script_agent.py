@@ -571,3 +571,71 @@ class TestRepairLoop:
 
         assert response.success is True
         assert mock_call_llm.await_count == 1
+# appended by round-1 CODE: lock script speed defaults
+
+
+class TestScriptSpeedDefaults:
+    """默认关闭 thinking / web_search，避免一句话剧本被思考链和联网搜索拖到十几分钟。"""
+
+    async def test_call_llm_disables_thinking(self, agent, mock_call_llm):
+        mock_call_llm.return_value = json.dumps(
+            {"title": "合规", "characters": [], "scenes": _compliant_scenes()}
+        )
+        response = await agent.execute(
+            ScriptRequest(premise="x", episodes=1, scenes_per_episode=6)
+        )
+        assert response.success is True
+        assert mock_call_llm.await_count == 1
+        assert mock_call_llm.call_args.kwargs.get("disable_thinking") is True
+
+    async def test_repair_also_disables_thinking(self, agent, mock_call_llm):
+        bad = _compliant_scenes()
+        bad[0]["narrative_beat"] = "transition"
+        mock_call_llm.side_effect = [
+            json.dumps({"title": "原始", "characters": [], "scenes": bad}),
+            json.dumps({"scenes": _compliant_scenes()}),
+        ]
+        response = await agent.execute(
+            ScriptRequest(premise="x", episodes=1, scenes_per_episode=6)
+        )
+        assert response.success is True
+        assert mock_call_llm.await_count == 2
+        for call in mock_call_llm.call_args_list:
+            assert call.kwargs.get("disable_thinking") is True
+
+    async def test_web_search_off_by_default(self, agent, mock_call_llm, mock_web_search):
+        mock_call_llm.return_value = json.dumps(
+            {"title": "合规", "characters": [], "scenes": _compliant_scenes()}
+        )
+        await agent.execute(ScriptRequest(premise="x", episodes=1, scenes_per_episode=6))
+        mock_web_search.assert_not_called()
+
+    async def test_web_search_opt_in_via_request(self, agent, mock_call_llm, mock_web_search):
+        mock_web_search.return_value = "参考资料XYZ"
+        mock_call_llm.return_value = json.dumps(
+            {"title": "合规", "characters": [], "scenes": _compliant_scenes()}
+        )
+        await agent.execute(
+            ScriptRequest(premise="x", episodes=1, scenes_per_episode=6, web_search=True)
+        )
+        mock_web_search.assert_awaited()
+        user_msg = mock_call_llm.call_args_list[0].kwargs["messages"][1]["content"]
+        assert "参考资料XYZ" in user_msg
+
+    async def test_web_search_opt_in_via_settings(
+        self, agent, mock_call_llm, mock_web_search, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "script_web_search_enabled", True)
+        mock_call_llm.return_value = json.dumps(
+            {"title": "合规", "characters": [], "scenes": _compliant_scenes()}
+        )
+        await agent.execute(ScriptRequest(premise="x", episodes=1, scenes_per_episode=6))
+        mock_web_search.assert_awaited()
+
+    def test_script_request_web_search_defaults_false(self):
+        assert ScriptRequest(premise="x").web_search is False
+
+    def test_settings_web_search_defaults_false(self):
+        from app.config import Settings
+
+        assert Settings.model_fields["script_web_search_enabled"].default is False

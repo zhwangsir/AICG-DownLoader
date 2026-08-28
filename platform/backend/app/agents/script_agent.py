@@ -1,7 +1,8 @@
 """剧本 Agent — 一句话创意 → JSON 结构化剧本。
 
-对接 EXO 集群的 GLM-5.2（1M context，支持思考），输出符合 §4.8 规范的剧本 JSON。
-生成前联网搜索同题材参考资料，注入提示词提升质量。
+主 LLM 走 spark02 qwen3.6-uncensored（字段名 exo_model_glm52 仅为兼容，非 EXO GLM）。
+默认关闭 thinking（spark/qwen 思考链会烧掉数分钟），联网搜索默认关闭、按需开启。
+输出符合 §4.8 规范的剧本 JSON。
 """
 
 from __future__ import annotations
@@ -299,7 +300,7 @@ F. 变现模式结构模板（{monetization_mode}）：
 
 
 class ScriptAgent(BaseAgent):
-    """剧本 Agent：GLM-5.2 生成结构化剧本。"""
+    """剧本 Agent：spark/qwen 生成结构化剧本（默认关闭 thinking）。"""
 
     def __init__(self):
         super().__init__("script_agent")
@@ -307,11 +308,13 @@ class ScriptAgent(BaseAgent):
     async def execute(self, request: ScriptRequest) -> AgentResponse:
         start = time.time()
         try:
-            # AI 优化 step 1：联网搜索同题材参考资料
-            search_query = f"短剧 {request.genre} {request.premise[:30]} 剧情设计 角色塑造"
-            reference = await web_search(search_query, max_results=3)
-            if reference:
-                logger.info("剧本 Agent 搜索到参考资料: %d 字符", len(reference))
+            # AI 优化 step 1：联网搜索同题材参考资料（默认关闭，避免每次剧本多一轮外网）
+            reference = ""
+            if request.web_search or settings.script_web_search_enabled:
+                search_query = f"短剧 {request.genre} {request.premise[:30]} 剧情设计 角色塑造"
+                reference = await web_search(search_query, max_results=3)
+                if reference:
+                    logger.info("剧本 Agent 搜索到参考资料: %d 字符", len(reference))
 
             # M15.1 画风锚定：将用户画风解析为英文风格关键词，注入系统提示词，
             # 替代原硬编码 photorealistic（避免与角色定妆照/分镜关键帧画风脱节）
@@ -359,6 +362,7 @@ class ScriptAgent(BaseAgent):
                 temperature=0.85,
                 max_tokens=16000,
                 response_format_json=True,
+                disable_thinking=True,
             )
 
             script_data = self._parse_llm_json(content)
@@ -477,6 +481,7 @@ class ScriptAgent(BaseAgent):
                 temperature=0.3,
                 max_tokens=16000,
                 response_format_json=True,
+                disable_thinking=True,
             )
             data = self._parse_llm_json(content)
             if not isinstance(data, dict) or not isinstance(data.get("scenes"), list):

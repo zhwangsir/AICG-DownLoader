@@ -84,6 +84,10 @@ class ScriptRequest(BaseModel):
         "iaa",
         description="变现模式：iaa(免费剧/红果模式，每集末尾钩子驱动完播) / iap(付费剧，第8-12集设首充卡点)",
     )
+    web_search: bool = Field(
+        False,
+        description="是否联网搜索同题材参考资料（默认关闭；也可由 SCRIPT_WEB_SEARCH_ENABLED 全局打开）",
+    )
 
 
 class CharacterAsset(BaseModel):

@@ -43,6 +43,7 @@ def _patch_settings(monkeypatch):
     monkeypatch.setattr(settings, "ltx_comfyui_url", "http://localhost:9006")
     # RAG: 默认关闭提示词优化，避免单元测试触发 fastembed/LLM 调用；
     # 专门测试 RAG 的用例可局部 monkeypatch settings.rag_optimize_enabled = True
+    monkeypatch.setattr(settings, "script_web_search_enabled", False)
     monkeypatch.setattr(settings, "rag_optimize_enabled", False)
     # M18.2: 默认关闭三视图 VLM 质检，避免既有用例触发 VLM/图片下载调用；
     # 专门测试质检的用例可局部 monkeypatch settings.character_view_qc_enabled = True
