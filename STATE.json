@@ -7,8 +7,8 @@
     "by": "ToIV 开发对照仓",
     "swap_mains": false,
     "h3": "Hailuo 3.0 main",
-    "wan22": "empty/motion",
-    "r18": "intentional LTX-2.3 + 10Eros",
+    "wan22": "ToIV R18 NSFW, not AIGCPannel SFW empty-shot",
+    "r18": "LTX-2.3 + 10Eros stay ToIV R18",
     "vace": "Wan2.1-VACE edit/transition only",
     "image": "FLUX.2 + Qwen-Image / Z-Image",
     "copy_fix": "0f6e723",
@@ -16,15 +16,16 @@
       "Hunyuan video",
       "SkyReels"
     ],
-    "aigcpannel_changes_toiv": false
+    "aigcpannel_changes_toiv": false,
+    "aigc_sfw": "dialogue/lock=H3; empty/preview=LTX-2.5 when :8198 up"
   },
   "engine_map_2026_08_28": {
     "source": "AICG 开发 HF+Civitai 今晚调研；H3 冒烟与 Round1 已落",
     "start": "./start-aigcpannel.sh :8100 drama + :8080/:8780 engine",
     "video": {
-      "h3": "main path UP",
-      "ltx25": "globally off because :8198 down; code retained",
-      "wan22_i2v": "silent cluster fallback"
+      "h3": "AIGCPannel SFW dialogue/lock main",
+      "ltx25": "AIGCPannel SFW empty/preview; globally off until :8198 up; code retained",
+      "wan22_i2v": "ToIV R18, not AIGCPannel SFW silent fallback"
     },
     "round1": [
       "script thinking off",
@@ -49,7 +50,9 @@
     },
     "toiv_mapping": "asked ToIV 开发 to check against repo",
     "brand": "untouched",
-    "toiv_code": "untouched"
+    "toiv_code": "untouched",
+    "aigc_sfw": "H3 dialogue/lock + LTX-2.5 empty/preview",
+    "toiv_r18": "Wan2.2 and LTX-2.3+10Eros"
   },
   "h3_smoke_2026_08_28": {
     "commit": "none",
