@@ -2,7 +2,7 @@
 
 **AIGCPannel** 是短剧产品。`dashbox/` 是收尾引擎（`:8080`/`:8780`），不再当独立产品。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块。仓名/目录 `ALLProject/AIGCPannel`。旧 slug 只跳转不删。
 
-目录 `ALLProject/AIGCPannel`。远程 origin [gitee.com/Winery_z/AIGCPannel](https://gitee.com/Winery_z/AIGCPannel) 与 github [github.com/zhwangsir/AIGCPannel](https://github.com/zhwangsir/AIGCPannel)，尖端 `378f5c7`（已双推，未强推）。只这一根融合仓。旧 slug `AICG-DownLoader` / `DashBox` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要删**。
+目录 `ALLProject/AIGCPannel`。远程 origin [gitee.com/Winery_z/AIGCPannel](https://gitee.com/Winery_z/AIGCPannel) 与 github [github.com/zhwangsir/AIGCPannel](https://github.com/zhwangsir/AIGCPannel)，尖端 `bc85d48`（已双推，未强推）。只这一根融合仓。旧 slug `AICG-DownLoader` / `DashBox` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要删**。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -17,12 +17,17 @@
 | `origin` | https://gitee.com/Winery_z/AIGCPannel.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/AIGCPannel.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`378f5c7`（`feat: 引擎壳与仓名收成 AIGCPannel`）。Gitee/GitHub 已双推，未强推；叠在 docs `5cc9693` 上
+- 当前 `main` 尖端：`bc85d48`（`fix: 模型下载根使用第一个可读 NAS 路径`）。Gitee/GitHub 已双推，未强推；含 `0511598`，叠在 docs `85e0787` 上
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
 胶水层产品名 **AIGCPannel**。`dashbox/` 是收尾引擎，不再当独立产品。Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。`Cargo.toml` `homepage`/`repository` 已指向 AIGCPannel。安装 `DefaultDirName`/`AppId` 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。上游 LICENSE/NOTICE 保留 ELv2，不要改成 MIT。
 
+
+
+## 升级第一轮（2026-08-28，`bc85d48`）
+
+`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。 LICENSE/NOTICE/ToIV 未动。H3 出片下一刀。
 
 ## config 默认（2026-08-28，`5a19c8d`）
 

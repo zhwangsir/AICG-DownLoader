@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-28 0511598+bc85d48 dual-pushed (no force, on 85e0787): script thinking off by default; web_search optional (request/env, default off). model download root uses first readable/writable NAS path (skip unread /mnt/toiv-nas on Mac). GitHub fast-forwarded 85e0787 docs. LICENSE/NOTICE and ToIV untouched. H3 video next.
+
 - 2026-08-28 live web image dashbox-web:latest 11444d78e507 (title AIGCPannel — 通用 AIGC 视频引擎). e09bb3b548e8 superseded. canonical start ./start-aigcpannel.sh (start-dashbox.sh wraps). remotes Winery_z/AIGCPannel and zhwangsir/AIGCPannel, code tip 378f5c7. LICENSE/NOTICE and ToIV untouched.
 
 - 2026-08-28 web image rebuilt: :8080 title is AIGCPannel — 通用 AIGC 视频引擎; HTML no longer uses DashBox/虾导 as product name. no new code commit; tip still 378f5c7. LICENSE/NOTICE and ToIV untouched.

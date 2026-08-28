@@ -1,6 +1,6 @@
 # AGENTS.md — AIGCPannel
 
-> **最后更新**：2026-08-28（身份：AIGCPannel 是产品；dashbox/ 是收尾引擎；尖端 378f5c7）
+> **最后更新**：2026-08-28（身份：AIGCPannel 是产品；dashbox/ 是收尾引擎；尖端 bc85d48）
 > **集群真相源**：`../ToIV/AGENTS.md`（禁止把设备清单/凭据复制进本文件）
 > **文档五件套**：README.md / AGENTS.md / DEVELOPMENT.md / STATE.json / TEST_LOG.md
 
@@ -14,6 +14,7 @@
 - `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。
 - `./start-dashbox.sh`：转调同一入口。
 - `GET /api/panel/status`：product=AIGCPannel；查 downloader `config` / `models.json` 是否可读。
+- 升级第一轮 `0511598`/`bc85d48`：`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。
 - `5a19c8d`：无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 设备清单不复制。
 - DashBox `:8780` 反代 `/api/drama/*` → `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。
 - Studio `NSFWDramaStudioNode` 默认 `pipelineEngine=drama`：剧本/首帧 `/api/drama/script|storyboard/generate_async`；配音/出片/合成 `/api/drama/{voice|video|edit}/generate_async`；失败回退 R18；可切换。edit 可省略 `subtitle_url`（不下载空 SRT），空字幕不再回退 R18。`19a3141` 已双推。活 web 镜像 `dashbox-web:latest` `11444d78e507`。旧 ID `e09bb3b548e8` 已过时。CSP `img-src` 含 `http://192.168.71.127:8188`。
@@ -35,7 +36,7 @@
 
 1. 状态、端口、GPU、挂载、模型占用必须 SSH 真机验证，以 ToIV/AGENTS.md + 真机为准。
 2. 禁止跨项目改代码。ToIV 不动。
-3. 远程：origin https://gitee.com/Winery_z/AIGCPannel.git 与 github https://github.com/zhwangsir/AIGCPannel.git，尖端代码 `378f5c7`。双远程同步。旧 slug 只跳转不删。ToIV 不动。
+3. 远程：origin https://gitee.com/Winery_z/AIGCPannel.git 与 github https://github.com/zhwangsir/AIGCPannel.git，尖端代码 `bc85d48`。双远程同步。旧 slug 只跳转不删。ToIV 不动。
 4. AIGCPannel 是产品（主界面 `:8080`）；`dashbox/` 是收尾引擎，不再当独立产品。开发和测试归 AICG 开发。只禁止覆盖上游 LICENSE / NOTICE / DramaClaw 品牌文件，不要改成 MIT。
 5. 旧文档已归档到 `ALLProject/.archive/docs-legacy-20260827/`。
 

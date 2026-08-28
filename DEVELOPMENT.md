@@ -2,7 +2,7 @@
 
 > 合并自旧 PROJECT_INIT / docs / 根目录散文档。原文在 `ALLProject/.archive/docs-legacy-20260827/`。
 > 最后更新：2026-08-28
-> 身份：AIGCPannel 是产品；`dashbox/` 是收尾引擎。目录 `ALLProject/AIGCPannel`，远程 Gitee/GitHub 均名 AIGCPannel，尖端 `378f5c7`。上游 LICENSE/NOTICE 保留 ELv2，不要改成 MIT。NOTICE 仍历史写 AIGCPannel。
+> 身份：AIGCPannel 是产品；`dashbox/` 是收尾引擎。目录 `ALLProject/AIGCPannel`，远程 Gitee/GitHub 均名 AIGCPannel，尖端 `bc85d48`。上游 LICENSE/NOTICE 保留 ELv2，不要改成 MIT。NOTICE 仍历史写 AIGCPannel。
 >
 > **2026-08-27 融合第一刀**：`./start-dashbox.sh`（短剧 :8100 + DashBox :8080/:8780，主界面 :8080）；`start-aigcpannel.sh` 薄封装转调。根 NOTICE 声明 dashbox/ 为 ELv2。crate 仍 `comfy-downloader`。已删 platform/deploy 下 deepfilternet / hunyuanimage / latentsync / video-enhance / xdit-video，保留 comfyui-lb。左侧导航新增模型库、引擎。`GET /api/panel/status`。未 commit/push。
 > **2026-08-27 model library/gateway (uncommitted):** registry errors if NAS unreadable; health required spark02/spark01/LB:8188/H3:8195/TTS:9200/ASR:9210; no studio04/01/02; LTX required=false. DashBox web :8080 and api :8780 listening; Colima disk 20G tight. NAS mounted at ~/NAS (not on boot); loras 101 checkpoints 24.
@@ -33,6 +33,9 @@
 
 
 **2026-08-28 `378f5c7`**：引擎壳与仓名收成 AIGCPannel。目录 `ALLProject/AIGCPannel`；origin `gitee.com/Winery_z/AIGCPannel`，github `github.com/zhwangsir/AIGCPannel`。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 均为跳转，不要删。`dashbox/` 不再当独立产品。crate 仍 `comfy-downloader`。LICENSE/NOTICE 未改。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。Gitee/GitHub 已双推，未强推。ToIV 未动。
+
+
+**2026-08-28 `bc85d48`（含 `0511598`）**：`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。 叠在 docs `85e0787` 上。Gitee/GitHub 已双推，未强推。LICENSE/NOTICE/ToIV 未动。H3 出片下一刀。
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 

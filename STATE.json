@@ -2,7 +2,20 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-08-28",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 378f5c7。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 bc85d48。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "upgrade_round1_2026_08_28": {
+    "commits": [
+      "0511598",
+      "bc85d48"
+    ],
+    "script": "thinking off by default; web_search optional via request/env, default off",
+    "download_root": "first existing readable/writable NAS path; skip unread /mnt/toiv-nas on Mac",
+    "stacked_on": "85e0787",
+    "force": false,
+    "brand": "untouched",
+    "toiv": "untouched",
+    "next": "H3 video"
+  },
   "repo_rename_aigcpannel_2026_08_28": {
     "commit": "378f5c7",
     "subject": "feat: 引擎壳与仓名收成 AIGCPannel",
