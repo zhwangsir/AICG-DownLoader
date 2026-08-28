@@ -3,6 +3,17 @@
   "version": "0.34.0",
   "last_updated": "2026-08-28",
   "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 bc85d48。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "h3_smoke_2026_08_28": {
+    "commit": "none",
+    "head": "71d616f",
+    "task": "video-a54cf30392c7",
+    "elapsed": "~1.5min",
+    "output": "mp4 768x1344 3s",
+    "generate_async": true,
+    "static_video": ":8080 /static/video 410; local static on :8100",
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "upgrade_round1_2026_08_28": {
     "commits": [
       "0511598",
@@ -14,7 +25,7 @@
     "force": false,
     "brand": "untouched",
     "toiv": "untouched",
-    "next": "H3 video"
+    "next": "H3 generate_async smoked"
   },
   "repo_rename_aigcpannel_2026_08_28": {
     "commit": "378f5c7",

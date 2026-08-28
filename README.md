@@ -25,9 +25,14 @@
 
 
 
+
+## H3 出片冒烟（2026-08-28，无新代码）
+
+H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。 LICENSE/NOTICE/ToIV 未动。
+
 ## 升级第一轮（2026-08-28，`bc85d48`）
 
-`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。 LICENSE/NOTICE/ToIV 未动。H3 出片下一刀。
+`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。 LICENSE/NOTICE/ToIV 未动。H3 出片冒烟已跑通。
 
 ## config 默认（2026-08-28，`5a19c8d`）
 

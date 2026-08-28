@@ -6,7 +6,7 @@
 
 ## 本项目
 
-**AIGCPannel** 是短剧产品。`dashbox/` 是收尾引擎（`:8080`/`:8780`），不再当独立产品。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/AIGCPannel`。远程 origin Gitee `Winery_z/AIGCPannel` 与 github `zhwangsir/AIGCPannel`，尖端 `378f5c7`。不是三仓。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 是本仓 rename 跳转，禁止删。本地只有 `ALLProject/AIGCPannel`。
+**AIGCPannel** 是短剧产品。`dashbox/` 是收尾引擎（`:8080`/`:8780`），不再当独立产品。ToIV 才是聚合平台；本仓不要做成第二个 ToIV。短剧流水线（`platform/`）与下载器（`src/`）是模块。路径 `ALLProject/AIGCPannel`。远程 origin Gitee `Winery_z/AIGCPannel` 与 github `zhwangsir/AIGCPannel`，尖端 `bc85d48`。不是三仓。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 是本仓 rename 跳转，禁止删。本地只有 `ALLProject/AIGCPannel`。
 代码与测试归 AICG 开发；五件套归项目管家。禁止改 ToIV 业务代码。
 
 ## 启动
@@ -14,6 +14,7 @@
 - `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。
 - `./start-dashbox.sh`：转调同一入口。
 - `GET /api/panel/status`：product=AIGCPannel；查 downloader `config` / `models.json` 是否可读。
+- H3 出片冒烟（无新代码，HEAD `71d616f`）：H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。
 - 升级第一轮 `0511598`/`bc85d48`：`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。
 - `5a19c8d`：无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 设备清单不复制。
 - DashBox `:8780` 反代 `/api/drama/*` → `host.docker.internal:8100`。`:8080`/`:8780`/`:8100` `/api/drama/health` 均 200。

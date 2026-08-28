@@ -35,7 +35,10 @@
 **2026-08-28 `378f5c7`**：引擎壳与仓名收成 AIGCPannel。目录 `ALLProject/AIGCPannel`；origin `gitee.com/Winery_z/AIGCPannel`，github `github.com/zhwangsir/AIGCPannel`。旧 slug AICG-DownLoader / DashBox / LibTV / comfy-downloader 均为跳转，不要删。`dashbox/` 不再当独立产品。crate 仍 `comfy-downloader`。LICENSE/NOTICE 未改。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。Gitee/GitHub 已双推，未强推。ToIV 未动。
 
 
-**2026-08-28 `bc85d48`（含 `0511598`）**：`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。 叠在 docs `85e0787` 上。Gitee/GitHub 已双推，未强推。LICENSE/NOTICE/ToIV 未动。H3 出片下一刀。
+**2026-08-28 `bc85d48`（含 `0511598`）**：`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。 叠在 docs `85e0787` 上。Gitee/GitHub 已双推，未强推。LICENSE/NOTICE/ToIV 未动。H3 出片冒烟已跑通。
+
+
+**2026-08-28 H3 出片冒烟（无新代码）**：H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。 LICENSE/NOTICE/ToIV 未动。
 
 `platform/deploy/` 现仅保留 `comfyui-lb`。
 
