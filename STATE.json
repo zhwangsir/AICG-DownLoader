@@ -1609,7 +1609,7 @@
     "comfyui": {
       "endpoint": "http://192.168.71.127:8188",
       "rule": "统一 LB 入口 8188，禁止直连单卡 8189",
-      "backends": "3 后端轮询：本地 gpu0 (:8189) + pc01(:8188) + pc02(:8193)；专用独立实例（不入池）：H3 :8195 / LTX-2.5 :8198 / LongCat :8197 / 超分 fleet :8261-8263"
+      "backends": "3 后端轮询：本地 gpu0 (:8189) + pc01(:8188) + pc02(:8193)；专用独立实例（不入池）：H3 :8195 / LongCat :8197 / 超分 fleet :8261-8263。LTX-2.5 :8198 已彻底退役（2026-08-23 disable --now），不要当活引擎。"
     },
     "video_engines": {
       "h3": {
@@ -1618,7 +1618,8 @@
       },
       "ltx25": {
         "endpoint": "http://192.168.71.127:8198",
-        "role": "LTX-2.5 音画同出（空镜/动作/长场景/分镜预览），distilled 两阶段；2026-08-14 接入"
+        "status": "retired",
+        "role": "已彻底退役（2026-08-23 disable --now）；模型留盘可回滚；AIGCPannel 默认 ltx_enabled=false。不要再当活引擎。"
       },
       "longcat": {
         "endpoint": "http://192.168.71.127:8197",
@@ -1628,8 +1629,8 @@
     },
     "asr": {
       "endpoint": "http://192.168.71.127:9210",
-      "model": "faster-whisper large-v3 (AI-Omni ASR)",
-      "topology": "workstation GPU2（回退）；主用 studio02 whisper.cpp :9212",
+      "model": "faster-whisper large-v3",
+      "topology": "workstation GPU2 :9210。studio ASR / studio02 whisper.cpp :9212 已作废（2026-08-26 ToIV 对 Studio 零依赖）。",
       "role": "字幕 ASR；firered/whisper 为回退"
     },
     "tts": {

@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-28 infra aligned to ToIV SoT (no new code): LTX-2.5 :8198 marked retired in STATE.infrastructure; ASR primary is workstation :9210, studio ASR / studio02 :9212 obsolete. LICENSE/NOTICE and ToIV untouched.
+
 - 2026-08-28 H3 generate_async smoked (no new code, HEAD still 71d616f): task video-a54cf30392c7, ~1.5min, mp4 768x1344 3s. :8080 does not reverse-proxy /static/video (410); local static on :8100. LICENSE/NOTICE and ToIV untouched.
 
 - 2026-08-28 0511598+bc85d48 dual-pushed (no force, on 85e0787): script thinking off by default; web_search optional (request/env, default off). model download root uses first readable/writable NAS path (skip unread /mnt/toiv-nas on Mac). GitHub fast-forwarded 85e0787 docs. LICENSE/NOTICE and ToIV untouched. H3 video next.
