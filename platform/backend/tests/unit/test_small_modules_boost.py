@@ -452,6 +452,22 @@ class TestConfigBoost:
         assert cfg.torch_index == "cu130"
         assert s.downloader_config is cfg
 
+    def test_cluster_defaults_match_env_example(self):
+        """无 .env 时的类默认值须与 .env.example / ToIV 对齐，避免产品漂移。"""
+        from app.config import Settings
+
+        f = Settings.model_fields
+        assert f["ltx_enabled"].default is False
+        assert f["tts_backend"].default == "indextts"
+        assert f["visual_model_url"].default == "http://192.168.71.82:8000/v1"
+        assert f["visual_model_name"].default == "qwen3-vl-32b"
+        assert f["exo_base_url"].default == "http://192.168.71.84:8000/v1"
+        assert f["comfyui_image_hq"].default == "http://192.168.71.127:8188"
+        assert f["h3_comfyui_url"].default == "http://192.168.71.127:8195"
+        assert f["asr_backend"].default == "ai_omni"
+        assert f["ai_omni_asr_endpoint"].default == "http://192.168.71.127:9210"
+        assert f["indextts_endpoint"].default == "http://192.168.71.127:9200"
+
 
 # ===========================================================================
 # node_logger

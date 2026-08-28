@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # Omni-Captioner 音乐反推（不再是 LLM）。剧本/角色/分镜等所有交互 Agent
     # 统一经 BaseAgent.llm_client -> exo_base_url 调用 spark02 :8000。
 
-    # 主 LLM / 视觉质检统一入口：spark02 :8000 qwen3.6-uncensored
+    # 主 LLM：spark02 :8000 qwen3.6-uncensored（Qwen3.8-27B-Uncensored-FP8）
     # （字段名沿用 exo_* 仅为兼容旧代码；实际指向 spark02，非 EXO 集群）
     exo_base_url: str = "http://192.168.71.84:8000/v1"
     exo_api_key: str = "not-needed"
@@ -45,13 +45,13 @@ class Settings(BaseSettings):
     exo_model_kimi: str = "qwen3.6-uncensored"
 
     # ====================================================================
-    # 视觉质检模型
-    # 2026-08-05 修正：Nemotron vLLM（workstation GPU3）已退役，主 LLM 与视觉
-    # 质检统一切到 spark02 :8000（qwen3.6-35b-a3b-uncensored-heretic FP8，
-    # 实测支持 image_url 视觉输入）。
+    # 视觉质检模型（spark01 VLM，Qwen3-VL-32B-Instruct-FP8）
+    # 与 LLM 拆分：spark01 :8000 跑 Qwen3-VL-32B（别名 qwen3-vl-32b /
+    # molmo2-8b / omni-captioner）；spark02 只做文本 LLM。
+    # 与 .env.example / ToIV 对齐。无 .env 时也不得漂回 spark02。
     # ====================================================================
-    visual_model_url: str = "http://192.168.71.84:8000/v1"
-    visual_model_name: str = "qwen3.6-uncensored"
+    visual_model_url: str = "http://192.168.71.82:8000/v1"
+    visual_model_name: str = "qwen3-vl-32b"
     # M16.2 分镜拼贴检测：关键帧生成后校验出场角色外貌一致性，失真自动重试
     storyboard_appearance_check: bool = True
     # M18.2 三视图 VLM 质检：三视图生成后、角色卡入库前校验 front 合格
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     # workstation:9200, GPU0 (cuda:0), systemd 托管（2026-07-27 变更）
     # 备注: root 路径返回 404 正常, 需查实际 API 路径
     # ====================================================================
-    tts_backend: str = "cosyvoice"  # 'cosyvoice' (默认, 2026-08-16 A/B 质量相当+快1.8倍+6音色) / 'indextts' (回退) / 'edge'
+    tts_backend: str = "indextts"  # 'indextts'（ToIV 共用默认）/ 'cosyvoice'（备选）/ 'edge'（回退）
     # IndexTTS-2 服务（workstation:9200, ToIV 共用）
     # 2026-07-27 修正：真实契约为 POST /tts (multipart) 返回 WAV，非 OpenAI /v1/audio/speech
     indextts_endpoint: str = "http://192.168.71.127:9200"
@@ -235,12 +235,11 @@ class Settings(BaseSettings):
     image_backend: str = "sdxl"
 
     # ====================================================================
-    # LTX-2.5 视频（workstation GPU0 专用 ComfyUI 实例 :8198，音画同出）
-    # 2026-08 升级：替换旧 LTX-2B（pc01 :8700）预览路径。与 H3 形成路由——
-    # 对白/角色一致性镜头走 H3，空镜/动作/长场景/快速分镜预览走 LTX-2.5。
-    # 权重：nvfp4 蒸馏 transformer + gemma4-12b-with-proj int8 + 双 VAE bf16。
+    # LTX-2.5 视频（已退役；comfyui-ltx25 inactive，保留 URL 但不启用）
+    # 2026-08-23 ToIV 彻底 disable；H3 为唯一主力视频引擎。
+    # 与 .env.example 对齐：LTX_ENABLED=false，无 .env 时不得漂回 True。
     # ====================================================================
-    ltx_enabled: bool = True
+    ltx_enabled: bool = False
     ltx_comfyui_url: str = "http://192.168.71.127:8198"
     ltx_result_timeout: float = 600.0  # distilled 8 步远快于 H3 33B
 
