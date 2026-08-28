@@ -6,18 +6,24 @@
   "toiv_repo_check_2026_08_28": {
     "by": "ToIV 开发对照仓",
     "swap_mains": false,
-    "h3": "Hailuo 3.0 main",
-    "wan22": "ToIV R18 NSFW, not AIGCPannel SFW empty-shot",
-    "r18": "LTX-2.3 + 10Eros stay ToIV R18",
-    "vace": "Wan2.1-VACE edit/transition only",
-    "image": "FLUX.2 + Qwen-Image / Z-Image",
+    "h3": "Hailuo 3.0 main :8195",
+    "wan22": "ToIV silent/motion/R18 I2V; not AIGCPannel SFW empty-shot",
+    "r18": "LTX-2.3 + 10Eros v14 stay ToIV R18; R18 does not follow LTX-2.5",
+    "vace": "Wan2.1-VACE-14B edit/transition/keyframe chain (product gen, not a mistaken 2.1 main)",
+    "image": "default flux2_dev_fp8mixed; optional qwen_image / z_image; qwen-image-edit; R18 stills URPM",
     "copy_fix": "0f6e723",
     "not_mounted": [
-      "Hunyuan video",
+      "Hunyuan video 1.0",
       "SkyReels"
     ],
     "aigcpannel_changes_toiv": false,
-    "aigc_sfw": "dialogue/lock=H3; empty/preview=LTX-2.5 when :8198 up"
+    "aigc_sfw": "dialogue/lock=H3; empty/preview=LTX-2.5 when :8198 up",
+    "hunyuan3d": true,
+    "longcat": ":8197",
+    "toiv_ltx25_sfw": "retired 2026-08-23; unpushed Phase 4 ltx25-multishot not default",
+    "aigcpannel_image": "still SDXL+IPAdapter; chase only if user names it",
+    "toiv_push": false,
+    "h3_aligned": true
   },
   "engine_map_2026_08_28": {
     "source": "AICG 开发 HF+Civitai 今晚调研；H3 冒烟与 Round1 已落",
@@ -48,7 +54,7 @@
         "Hunyuan 1.5"
       ]
     },
-    "toiv_mapping": "asked ToIV 开发 to check against repo",
+    "toiv_mapping": "ToIV 开发已对照：H3 :8195; R18 LTX-2.3+10Eros v14; Wan2.2 silent/motion/R18 I2V; VACE-14B edit chain; LongCat :8197; image flux2_dev_fp8mixed + qwen/z-image; ToIV SFW LTX-2.5 retired 2026-08-23",
     "brand": "untouched",
     "toiv_code": "untouched",
     "aigc_sfw": "H3 dialogue/lock + LTX-2.5 empty/preview",

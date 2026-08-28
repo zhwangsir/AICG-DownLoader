@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-28 ToIV repo-check detail (no ToIV code, no ToIV push): H3 :8195 Hailuo 3.0 main; R18 keeps LTX-2.3+10Eros v14 (not LTX-2.5). ToIV SFW LTX-2.5 retired 2026-08-23; unpushed Phase 4 ltx25-multishot not default. Wan2.2 = silent/motion/R18 I2V; Wan2.1-VACE-14B = edit/transition/keyframe chain. LongCat :8197. Image default flux2_dev_fp8mixed; optional qwen_image/z_image; qwen-image-edit; R18 stills URPM. 3D=Hunyuan3D; no Hunyuan video 1.0. AIGCPannel still SDXL+IPAdapter (chase only if user names it). H3 main aligned. AIGCPannel SFW口径 unchanged. LICENSE/NOTICE untouched.
+
 - 2026-08-28 wording: AIGCPannel SFW dialogue/lock=H3; empty/preview=LTX-2.5 (on when :8198 up). Wan2.2 and LTX-2.3+10Eros stay ToIV R18 (NSFW value, not SFW empty-shot default). AIGCPannel does not change ToIV. LICENSE/NOTICE untouched.
 
 - 2026-08-28 evening engine map (corrected): AIGCPannel SFW H3=Hailuo 3.0 dialogue/lock; empty/preview=LTX-2.5 (enable when :8198 up). Wan2.2 / LTX-2.3+10Eros are ToIV R18, not AIGCPannel SFW silent fallback. Round1 landed. LICENSE/NOTICE and ToIV code untouched.

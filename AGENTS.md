@@ -15,6 +15,7 @@
 - `./start-dashbox.sh`：转调同一入口。
 - `GET /api/panel/status`：product=AIGCPannel；查 downloader `config` / `models.json` 是否可读。
 - 引擎对照（2026-08-28 晚）：用户已定口径：AIGCPannel **SFW** 对白/锁人=MiniMax **H3**（海螺 3.0）；空镜/预览=**LTX-2.5**（`:8198` 起来再开，代码保留）。**Wan2.2** 与 **LTX-2.3+10Eros** 留 ToIV **R18**，价值主要在 NSFW，不是短剧 SFW 空镜/无声 fallback。ToIV 不换主路；AIGCPannel 不改 ToIV。Round 1 已落：剧本加速、NAS 可读下载根、Colima prune、H3 一镜冒烟。
+- ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 - H3 出片冒烟（无新代码，HEAD `71d616f`）：H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。
 - 升级第一轮 `0511598`/`bc85d48`：`0511598`：剧本默认关闭 thinking，`web_search` 改为请求/环境开关且默认关（避免 spark/qwen 思考链把一句话出剧本拖到十几分钟）。`bc85d48`：模型下载根改用第一个存在且可读/可写的 NAS 路径（Mac 上 `nas_model_roots` 第一项常是不可读的 `/mnt/toiv-nas`）。
 - `5a19c8d`：无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 设备清单不复制。
