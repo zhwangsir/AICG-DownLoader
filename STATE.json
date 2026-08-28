@@ -2,7 +2,22 @@
   "project": "DashBox",
   "version": "0.34.0",
   "last_updated": "2026-08-28",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。DashBox 是引擎模块 :8080/:8780。目录 ALLProject/DashBox（仓名不要改）；远程 Gitee/GitHub 均名 DashBox，尖端 46b1994。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。DashBox 是引擎模块 :8080/:8780。目录 ALLProject/DashBox（仓名不要改）；远程 Gitee/GitHub 均名 DashBox，尖端 5a19c8d。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "config_defaults_2026_08_28": {
+    "commit": "5a19c8d",
+    "subject": "fix: config.py 默认端点与 ToIV/.env.example 对齐",
+    "no_env_defaults": {
+      "ltx_enabled": false,
+      "tts_backend": "indextts",
+      "llm": "spark02 qwen3.6-uncensored",
+      "vlm": "spark01 qwen3-vl-32b",
+      "source": "ToIV/.env.example"
+    },
+    "stacked_on": "7aa28cc",
+    "force": false,
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "product_aigcpannel_2026_08_28": {
     "commit": "46b1994",
     "subject": "feat: 产品身份收成 AIGCPannel，DashBox 作引擎模块",

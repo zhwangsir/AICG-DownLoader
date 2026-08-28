@@ -2,7 +2,7 @@
 
 **AIGCPannel** 是短剧产品。DashBox 是引擎模块（`:8080`/`:8780`）。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块。仓名/目录仍 `ALLProject/DashBox`，不要改名、不要删旧 slug。
 
-目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `46b1994`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
+目录 `ALLProject/DashBox`。远程 origin [gitee.com/Winery_z/DashBox](https://gitee.com/Winery_z/DashBox) 与 github [github.com/zhwangsir/DashBox](https://github.com/zhwangsir/DashBox)，尖端 `5a19c8d`（已双推，未强推）。只这一根融合仓。LibTV / comfy-downloader / AIGCPannel / AICG-DownLoader 不是独立仓；GitHub/Gitee 旧 slug 是本仓 rename 跳转，删除会毁掉融合仓。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -17,11 +17,16 @@
 | `origin` | https://gitee.com/Winery_z/DashBox.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/DashBox.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`46b1994`（`feat: 产品身份收成 AIGCPannel，DashBox 作引擎模块`）。Gitee/GitHub 已双推，未强推；含 docs `923b940`
+- 当前 `main` 尖端：`5a19c8d`（`fix: config.py 默认端点与 ToIV/.env.example 对齐`）。Gitee/GitHub 已双推，未强推；叠在 docs `7aa28cc` 上
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
 胶水层产品名 **AIGCPannel**。DashBox 是引擎模块。Crate 名与 OS 配置目录仍是 **`comfy-downloader`**（保住已有 `models.json` 路径）。安装 `DefaultDirName`/`AppId` 为升级兼容未改。NOTICE 仍历史写 AIGCPannel。`Cargo.toml` 的 `package.name` 仍为 `comfy-downloader` 0.1.0；其 `homepage` / `repository` 字段仍写旧仓名，**以本表 git remote 为准**。
+
+
+## config 默认（2026-08-28，`5a19c8d`）
+
+无 `.env` 时默认 LTX off（`ltx_enabled=false`）、TTS=`indextts`、LLM=spark02 `qwen3.6-uncensored`、VLM=spark01 `qwen3-vl-32b`，与 `ToIV/.env.example` 一致。 集群设备/IP 只看 ToIV/AGENTS.md。LICENSE/NOTICE/品牌未动。
 
 ## 启动
 

@@ -1,5 +1,7 @@
 # TEST_LOG.md — DashBox
 
+- 2026-08-28 5a19c8d dual-pushed (no force, on 7aa28cc): no-.env defaults LTX off, TTS=IndexTTS, LLM spark02 qwen3.6-uncensored, VLM spark01 qwen3-vl-32b, aligned with ToIV/.env.example. LICENSE/NOTICE/brand and ToIV untouched.
+
 - 2026-08-28 46b1994 dual-pushed (no force): product is AIGCPannel; DashBox is engine module :8080/:8780; canonical start ./start-aigcpannel.sh (start-dashbox.sh wraps same). crate/OS still comfy-downloader. repo/dir/old slugs remain DashBox, do not rename or delete. panel product=AIGCPannel. health :8080 and :8780/:8100 /api/drama/health 200. includes docs 923b940. LICENSE/NOTICE/brand and ToIV untouched.
 
 - 2026-08-28 4185c30 dual-pushed (no force): GUI/packaging display name is DashBox 模型库; crate/OS config dir still comfy-downloader; installer DefaultDirName/AppId unchanged for upgrade. NOTICE still historically AIGCPannel. old slugs AICG-DownLoader/AIGCPannel are redirects, do not delete. health :8080 and :8780/:8100 /api/drama/health 200. docs 2117d92 and 2829ff8 went up with it. LICENSE/NOTICE/brand and ToIV untouched.
