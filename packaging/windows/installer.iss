@@ -19,7 +19,7 @@
   #define AppVersion "0.0.0"
 #endif
 
-#define AppName "DashBox 模型库"
+#define AppName "AIGCPannel 模型库"
 #define AppExeName "comfy-downloader.exe"
 #define AppPublisher "Winery (WangZhenYu)"
 #define AppURL "https://github.com/zhwangsir/DashBox"
@@ -37,7 +37,7 @@ AppCopyright=Copyright © 2026 WangZhenYu (Winery)
 
 ; 便携工具：每用户安装到 LocalAppData，免管理员。
 DefaultDirName={localappdata}\AICG-DownLoader
-DefaultGroupName=DashBox 模型库
+DefaultGroupName=AIGCPannel 模型库
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog

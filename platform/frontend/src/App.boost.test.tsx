@@ -162,7 +162,7 @@ const sampleScript: ScriptData = {
 };
 
 const getTopbar = () => {
-  const title = screen.getByText("DashBox");
+  const title = screen.getByText("AIGCPannel");
   return title.closest(".topbar") as HTMLElement;
 };
 const openFlowMenu = () => {

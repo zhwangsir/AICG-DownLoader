@@ -5,8 +5,8 @@ fn main() {
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
-        res.set("ProductName", "DashBox 模型库");
-        res.set("FileDescription", "DashBox 模型库 — by Winery (WangZhenYu)");
+        res.set("ProductName", "AIGCPannel 模型库");
+        res.set("FileDescription", "AIGCPannel 模型库 — by Winery (WangZhenYu)");
         res.set("CompanyName", "Winery (WangZhenYu)");
         res.set("LegalCopyright", "Copyright (C) 2026 WangZhenYu (Winery)");
         let _ = res.compile();

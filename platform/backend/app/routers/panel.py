@@ -1,4 +1,4 @@
-"""Fused-panel status: backend + downloader config/models.json + DashBox URLs.
+"""Fused-panel status: backend + downloader config/models.json + DashBox engine URLs.
 
 Does not spawn the Rust desktop helper. Launch/status/link only.
 """
@@ -105,7 +105,7 @@ async def panel_status() -> dict:
     nas_roots = describe_roots()
     return {
         "backend": "ok",
-        "product": "DashBox",
+        "product": "AIGCPannel",
         "downloader_config_path": str(cfg),
         "downloader_config_readable": _readable(cfg),
         "models_json_path": str(models),
@@ -114,13 +114,13 @@ async def panel_status() -> dict:
         "nas_model_roots_error": roots_error_message(nas_roots),
         "drama_backend": {
             "api": DRAMA_API,
-            "note": "platform/ FastAPI short-drama module. Main UI is DashBox :8080.",
+            "note": "platform/ FastAPI short-drama workstation module.",
         },
         "dashbox": {
             "web": DASHBOX_WEB,
             "api": DASHBOX_API,
             "web_listening": bool(web_listening),
             "api_listening": bool(api_listening),
-            "note": "DashBox CE (DramaClaw/SuperTale upstream, ELv2). Main UI. ./start-dashbox.sh. Not rebranded.",
+            "note": "DashBox finishing engine (DramaClaw/SuperTale upstream, ELv2). Web :8080 / API :8780. Canonical start: ./start-aigcpannel.sh. Not rebranded.",
         },
     }

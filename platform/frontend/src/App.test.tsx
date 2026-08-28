@@ -5,7 +5,7 @@ import type { ScriptData } from "./api/client";
 
 // 限定查询到 topbar，避免与 Canvas 节点面板的同名按钮冲突
 const getTopbar = () => {
-  const title = screen.getByText("DashBox");
+  const title = screen.getByText("AIGCPannel");
   return title.closest(".topbar") as HTMLElement;
 };
 /** 展开"流程"下拉菜单并返回菜单容器（顶栏按钮已收纳进下拉） */
@@ -31,7 +31,7 @@ describe("App", () => {
 
   it("renders topbar and initial status", () => {
     render(<App />);
-    expect(screen.getByText("DashBox")).toBeInTheDocument();
+    expect(screen.getByText("AIGCPannel")).toBeInTheDocument();
     expect(screen.getByText("就绪")).toBeInTheDocument();
   });
 

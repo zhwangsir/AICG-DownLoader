@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
     dc = settings.downloader_config
     lines = [
         "=" * 60,
-        "DashBox 短剧后端启动 (platform/ module)",
+        "AIGCPannel 短剧后端启动 (platform/ module)",
         f"  EXO LLM    : {settings.exo_base_url} ({settings.exo_model_glm52})",
         f"  ComfyUI HQ : {settings.comfyui_image_hq}",
         f"  ComfyUI Fast: {settings.comfyui_image_fast}",
@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="DashBox",
+    title="AIGCPannel",
     description="剧本/角色/分镜/视频/配音/字幕 Agent 全流程",
     version="0.4.0",
     lifespan=lifespan,
@@ -131,7 +131,7 @@ app.include_router(panel.router)
 @app.get("/")
 async def root() -> dict:
     return {
-        "name": "DashBox",
+        "name": "AIGCPannel",
         "version": "0.4.0",
         "milestone": "M23 — 下线服务死代码激进清理",
         "docs": "/docs",

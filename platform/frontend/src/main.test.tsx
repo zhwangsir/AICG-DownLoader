@@ -11,7 +11,7 @@ describe("main.tsx 入口", () => {
     document.body.appendChild(rootEl);
     await import("./main");
     await waitFor(() =>
-      expect(screen.getByText("DashBox")).toBeInTheDocument()
+      expect(screen.getByText("AIGCPannel")).toBeInTheDocument()
     );
     // 渲染确实发生在注入的 #root 内
     expect(rootEl.querySelector(".app-container")).toBeInTheDocument();

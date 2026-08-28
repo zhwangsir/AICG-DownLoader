@@ -9,9 +9,9 @@
 <dict>
     <!-- 在 Finder / 程序坞中显示的应用名 -->
     <key>CFBundleName</key>
-    <string>DashBox 模型库</string>
+    <string>AIGCPannel 模型库</string>
     <key>CFBundleDisplayName</key>
-    <string>DashBox 模型库</string>
+    <string>AIGCPannel 模型库</string>
 
     <!-- Contents/MacOS 下的可执行文件名，必须与拷入的二进制同名 -->
     <key>CFBundleExecutable</key>

@@ -173,7 +173,7 @@ export default function App() {
           </div>
           <div className="topbar-title-group">
             <span className="topbar-kicker">Atelier</span>
-            <span className="topbar-title">DashBox</span>
+            <span className="topbar-title">AIGCPannel</span>
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 # AI 短剧一条龙工作台
 
-> DashBox 短剧模块（platform/ FastAPI + 遗留 UI）。用户主界面是 DashBox :8080。
+> AIGCPannel 短剧工作台模块（platform/ FastAPI + 遗留 UI）。产品入口 `./start-aigcpannel.sh`；DashBox 是成片引擎（:8080）。
 
 ## 能力概览
 
@@ -71,15 +71,15 @@ platform/
 
 ## 快速启动
 
-仓库根目录融合启动（DashBox 是产品）：
+仓库根目录融合启动（AIGCPannel 是产品）：
 
 ```bash
-./start-dashbox.sh          # 短剧后端 :8100 + DashBox web :8080（compose 已在则不重启）
-./start-dashbox.sh --legacy-ui   # 额外拉起遗留工作台 :3501
-./start-dashbox.sh --dry-run     # 只打印计划
+./start-aigcpannel.sh          # 短剧后端 :8100 + DashBox 引擎 :8080（compose 已在则不重启）
+./start-aigcpannel.sh --legacy-ui   # 额外拉起遗留工作台 :3501
+./start-aigcpannel.sh --dry-run     # 只打印计划
 ```
 
-`./start-aigcpannel.sh` 是薄封装，转调 `start-dashbox`。引擎-only：`./start-engine.sh --up`。
+`./start-dashbox.sh` 是别名，转调 `start-aigcpannel`。引擎-only：`./start-engine.sh --up`。
 
 ### 后端
 
@@ -100,11 +100,11 @@ pnpm run test              # 运行 vitest 测试
 pnpm run dev               # Web 开发模式（默认 5173；一键脚本用 :3501）
 ```
 
-## DashBox 融合面板
+## AIGCPannel 融合面板
 
-1. **启动**：根目录 `./start-dashbox.sh` 拉起短剧后端 `:8100` 与 DashBox 主界面 `:8080`（已在听则不重启 compose）。遗留 UI `:3501` 默认关，`--legacy-ui` 才开。
+1. **启动**：根目录 `./start-aigcpannel.sh` 拉起短剧后端 `:8100` 与 DashBox 引擎 `:8080`（已在听则不重启 compose）。遗留 UI `:3501` 默认关，`--legacy-ui` 才开。
 2. **模型库**：左侧「模型库」走 `GET /api/models/*` 与 `GET /api/drama/models/registry`（融合 `models.json` + `lora_manifest`）。
-3. **DashBox**：左侧导航指向主界面 `:8080` / API `:8780`。上游 DramaClaw/SuperTale 为第三方 Elastic License 2.0，不重品牌、不抓取其页面。
+3. **DashBox 引擎**：左侧导航指向成片引擎 `:8080` / API `:8780`。上游 DramaClaw/SuperTale 为第三方 Elastic License 2.0，不重品牌、不抓取其页面。
 4. **DOWNLOADER_***：`DOWNLOADER_CONFIG_PATH`（默认仓库根 `config.json`）、`DOWNLOADER_MODELS_JSON`（可选覆盖已下载清单）。crate/OS 配置目录仍为 `comfy-downloader`。
 5. **静态资源**：后端挂载 `/static/audio`、`/static/subtitle`、`/static/video`。
-6. **状态**：`GET /api/panel/status` 的 `product` 为 `DashBox`，并带 DashBox 端口 `web_listening` / `api_listening`。
+6. **状态**：`GET /api/panel/status` 的 `product` 为 `AIGCPannel`，并带 DashBox 引擎端口 `web_listening` / `api_listening`。

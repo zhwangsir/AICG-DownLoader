@@ -20,7 +20,7 @@ function ListenBadge({ up }: { up: boolean | undefined }) {
 }
 
 /**
- * Bundled DashBox / DramaClaw engine — launch/status/link only.
+ * Bundled DashBox finishing engine (DramaClaw upstream) — launch/status/link only.
  * Does not scrape or rebrand the engine UI.
  */
 export default function EnginePanel() {
@@ -54,8 +54,8 @@ export default function EnginePanel() {
   return (
     <div className="engine-panel">
       <p className="engine-panel-lead">
-        <strong>DashBox</strong> 是本产品主界面（Web :8080 / API :8780）。短剧 pipeline 在 :8100。
-        上游 <strong>DramaClaw / DashBox</strong> 引擎为第三方 Elastic License 2.0，不抓取其页面、不改其品牌文件。
+        <strong>DashBox 引擎</strong>（Web :8080 / API :8780）是成片引擎模块。短剧 pipeline 在 :8100。
+        上游 <strong>DramaClaw / DashBox</strong> 为第三方 Elastic License 2.0，不抓取其页面、不改其品牌文件。
       </p>
 
       <div className="engine-panel-toolbar">
@@ -92,8 +92,8 @@ export default function EnginePanel() {
       </div>
 
       <p className="engine-panel-hint">
-        启动：仓库根目录 <code>./start-dashbox.sh</code>
-        （DashBox :8080 + 短剧后端 :8100；引擎-only 仍可用 <code>./start-engine.sh --up</code>）。
+        启动：仓库根目录 <code>./start-aigcpannel.sh</code>
+        （AIGCPannel：短剧后端 :8100 + DashBox 引擎 :8080；引擎-only 仍可用 <code>./start-engine.sh --up</code>）。
       </p>
 
       {loading && (

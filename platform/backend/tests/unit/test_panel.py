@@ -44,7 +44,7 @@ def test_panel_status_ok(client, tmp_path, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["backend"] == "ok"
-    assert body["product"] == "DashBox"
+    assert body["product"] == "AIGCPannel"
     assert body["downloader_config_readable"] is True
     assert body["models_json_readable"] is True
     assert body["dashbox"]["web"] == "http://127.0.0.1:8080"
