@@ -3,6 +3,21 @@
   "version": "0.34.0",
   "last_updated": "2026-08-28",
   "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 bc85d48。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "toiv_repo_check_2026_08_28": {
+    "by": "ToIV 开发对照仓",
+    "swap_mains": false,
+    "h3": "Hailuo 3.0 main",
+    "wan22": "empty/motion",
+    "r18": "intentional LTX-2.3 + 10Eros",
+    "vace": "Wan2.1-VACE edit/transition only",
+    "image": "FLUX.2 + Qwen-Image / Z-Image",
+    "copy_fix": "0f6e723",
+    "not_mounted": [
+      "Hunyuan video",
+      "SkyReels"
+    ],
+    "aigcpannel_changes_toiv": false
+  },
   "engine_map_2026_08_28": {
     "source": "AICG 开发 HF+Civitai 今晚调研；H3 冒烟与 Round1 已落",
     "start": "./start-aigcpannel.sh :8100 drama + :8080/:8780 engine",

@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-28 ToIV 开发 repo check back: do not swap ToIV video/image mains. H3=Hailuo 3.0; Wan2.2 empty/motion; R18 LTX-2.3+10Eros on purpose; VACE edit/transition only; image FLUX.2+Qwen/Z-Image. Copy was stale (0f6e723). Hunyuan/SkyReels not mounted. AIGCPannel does not change ToIV. LICENSE/NOTICE untouched.
+
 - 2026-08-28 evening engine map (AICG HF+Civitai survey, no new code): H3 main UP; LTX-2.5 globally off (:8198 down, code kept); Wan 2.2 I2V silent cluster fallback. Open-source: dialogue/lock=MiniMax H3 (Hailuo 3.0 not 2.3); preview/empty=LTX-2.5 not 2.3 (Civitai LoRA still 2.3-heavy); silent I2V=Wan 2.2 Apache ~4.67M Comfy dl. Keyframes to watch: Z-Image-Turbo, FLUX.2, Qwen-Image-Edit-2511. Sulphur-2=LTX NSFW finetune. SkyReels V3 / Hunyuan 1.5 low priority. Round1 landed: script speed, NAS readable root, Colima prune, H3 one-shot smoke. ToIV mapping asked of ToIV 开发. LICENSE/NOTICE and ToIV code untouched.
 
 - 2026-08-28 infra aligned to ToIV SoT (no new code): LTX-2.5 :8198 marked retired in STATE.infrastructure; ASR primary is workstation :9210, studio ASR / studio02 :9212 obsolete. LICENSE/NOTICE and ToIV untouched.
