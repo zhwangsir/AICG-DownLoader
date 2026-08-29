@@ -41,6 +41,8 @@
 **2026-08-28 H3 出片冒烟（无新代码）**：H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。 LICENSE/NOTICE/ToIV 未动。
 
 
+**2026-08-29 `7c75196`**：`7c75196` 已双推：引擎 Settings 钉到集群。custom 网关 `configured=true`，base `http://host.docker.internal:8790/v1`；LLM spark02 `.84:8000`；VLM spark01 `.82:8000`；图 ComfyUI `.127:8188` SDXL；视频 H3 `.127:8195`；TTS IndexTTS `.127:9200`；媒体 `relay=local_http`。LTX-2.5 仍配置但 `:8198` DOWN。官方 relayclaw 频道留着但 custom 模式不用。LICENSE/NOTICE/ToIV 未动。
+
 **2026-08-28 晚 引擎对照（AICG 调研，无新代码）**：用户已定口径：AIGCPannel **SFW** 对白/锁人=MiniMax **H3**（海螺 3.0）；空镜/预览=**LTX-2.5**（`:8198` 起来再开，代码保留）。**Wan2.2** 与 **LTX-2.3+10Eros** 留 ToIV **R18**，价值主要在 NSFW，不是短剧 SFW 空镜/无声 fallback。ToIV 不换主路；AIGCPannel 不改 ToIV。Round 1 已落：剧本加速、NAS 可读下载根、Colima prune、H3 一镜冒烟。 LICENSE/NOTICE/ToIV 未动。
 
 **2026-08-28 晚 ToIV 对照细项（无新代码、不推 ToIV）**：ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。

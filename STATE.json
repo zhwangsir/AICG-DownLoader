@@ -1,8 +1,24 @@
 {
   "project": "AIGCPannel",
   "version": "0.34.0",
-  "last_updated": "2026-08-28",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 bc85d48。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "last_updated": "2026-08-29",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 7c75196。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "engine_settings_pin_7c75196": {
+    "commit": "7c75196",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "custom_gateway": "configured=true; base http://host.docker.internal:8790/v1",
+    "llm": "spark02 .84:8000",
+    "vlm": "spark01 .82:8000",
+    "image": "ComfyUI .127:8188 SDXL",
+    "video": "H3 .127:8195",
+    "tts": "IndexTTS .127:9200",
+    "media": "relay=local_http",
+    "ltx25": "still configured; :8198 DOWN",
+    "relayclaw": "channel kept; unused in custom mode",
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "toiv_repo_check_2026_08_28": {
     "by": "ToIV 开发对照仓",
     "swap_mains": false,

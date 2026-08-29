@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-29 7c75196 dual-pushed: engine Settings pinned to cluster. custom gateway configured=true, base http://host.docker.internal:8790/v1; LLM spark02 .84:8000; VLM spark01 .82:8000; image ComfyUI .127:8188 SDXL; video H3 .127:8195; TTS IndexTTS .127:9200; media relay=local_http. LTX-2.5 still configured but :8198 DOWN. Official relayclaw channel kept but unused in custom mode. LICENSE/NOTICE/ToIV untouched.
+
 - 2026-08-28 ToIV repo-check detail (no ToIV code, no ToIV push): H3 :8195 Hailuo 3.0 main; R18 keeps LTX-2.3+10Eros v14 (not LTX-2.5). ToIV SFW LTX-2.5 retired 2026-08-23; unpushed Phase 4 ltx25-multishot not default. Wan2.2 = silent/motion/R18 I2V; Wan2.1-VACE-14B = edit/transition/keyframe chain. LongCat :8197. Image default flux2_dev_fp8mixed; optional qwen_image/z_image; qwen-image-edit; R18 stills URPM. 3D=Hunyuan3D; no Hunyuan video 1.0. AIGCPannel still SDXL+IPAdapter (chase only if user names it). H3 main aligned. AIGCPannel SFW口径 unchanged. LICENSE/NOTICE untouched.
 
 - 2026-08-28 wording: AIGCPannel SFW dialogue/lock=H3; empty/preview=LTX-2.5 (on when :8198 up). Wan2.2 and LTX-2.3+10Eros stay ToIV R18 (NSFW value, not SFW empty-shot default). AIGCPannel does not change ToIV. LICENSE/NOTICE untouched.
