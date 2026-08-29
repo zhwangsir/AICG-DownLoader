@@ -54,6 +54,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 # ---------------------------------------------------------------------------
 
 LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://192.168.71.84:8000/v1").rstrip("/")
+VLM_BASE_URL = os.getenv("LOCAL_VLM_BASE_URL", "http://192.168.71.82:8000/v1").rstrip("/")
+VLM_MODEL_NAME = os.getenv("LOCAL_VLM_MODEL", "qwen3-vl-32b")
+VLM_LOGICAL_MODELS = {
+    "DC-freezone-vision-LLM",
+    "DC-style-analyzer-LLM",
+    "DC-video-identity-detector-LLM",
+    "DC-video-prompt-optimizer-LLM",
+}
 EMBEDDING_BASE_URL = os.getenv("LOCAL_EMBEDDING_BASE_URL", "http://192.168.71.127:9302/v1").rstrip("/")
 COMFYUI_LB_URL = os.getenv("LOCAL_COMFYUI_LB_URL", "http://192.168.71.127:8188").rstrip("/")
 # LB 三后端直连清单（2026-08-17 固化）：参考图上传必须覆盖全部后端——LB /upload
@@ -61,15 +69,15 @@ COMFYUI_LB_URL = os.getenv("LOCAL_COMFYUI_LB_URL", "http://192.168.71.127:8188")
 # 另一后端找不到文件（Invalid image file → 502，画布 R18 节点实测复现）。
 COMFYUI_LB_BACKEND_URLS = os.getenv(
     "LOCAL_COMFYUI_LB_BACKEND_URLS",
-    "http://192.168.71.127:8189,http://192.168.71.115:8188,http://192.168.71.114:8193",
+    "http://192.168.71.127:8189,http://192.168.71.116:8188,http://192.168.71.114:8193",
 )
 H3_BASE_URL = os.getenv("LOCAL_H3_BASE_URL", "http://192.168.71.127:8195").rstrip("/")
 LTX_BASE_URL = os.getenv("LOCAL_LTX_BASE_URL", "http://192.168.71.127:8198").rstrip("/")
 # Krea2 专用实例（workstation GPU0 ComfyUI :8189 直连，不经 LB——TE 只在本地）
 KREA2_BASE_URL = os.getenv("LOCAL_KREA2_BASE_URL", "http://192.168.71.127:8189").rstrip("/")
 TTS_BASE_URL = os.getenv("LOCAL_TTS_BASE_URL", "http://192.168.71.127:9200").rstrip("/")
-VIDEO_BACKEND_FORCE = os.getenv("VIDEO_BACKEND", "").strip().lower()  # "h3" / "ltx" 强制指定
-GATEWAY_HOST = os.getenv("LOCAL_GATEWAY_HOST", "127.0.0.1")
+VIDEO_BACKEND_FORCE = os.getenv("LOCAL_VIDEO_BACKEND", "").strip().lower()  # "h3" / "ltx" 强制指定；不读 DashBox VIDEO_BACKEND
+GATEWAY_HOST = os.getenv("LOCAL_GATEWAY_HOST", "0.0.0.0")
 GATEWAY_PORT = int(os.getenv("LOCAL_GATEWAY_PORT", "8790"))
 PUBLIC_BASE_URL = os.getenv("LOCAL_GATEWAY_PUBLIC_BASE", f"http://{GATEWAY_HOST}:{GATEWAY_PORT}").rstrip("/")
 
@@ -91,13 +99,13 @@ LOGICAL_MODELS = [
     "DC-cognee-LLM",
     "DC-cognee-embedding",
     "DC-freezone-vision-LLM",
+    "local-sdxl",
     "LingShan-G2",
     "LingShan-NB-2",
     "NanoBanana",
-    "seedance-1.0-pro-fast",
-    "seedance-2.0",
-    "happyhorse-1.0",
     "MiniMax-H3",
+    "LTX-2.5",
+    "happyhorse-1.0",
     "index-tts-2",
 ]
 
@@ -741,8 +749,9 @@ async def chat_completions(request: Request) -> Response:
     except Exception:
         return _error_response("invalid JSON body", 400, "invalid_request_error")
     model = str(body.get("model") or "")
-    body["model"] = CHAT_MODEL_NAME  # 任何入站模型名统一映射到本地真实模型
-    url = f"{LLM_BASE_URL}/chat/completions"
+    use_vlm = model in VLM_LOGICAL_MODELS or "vision" in model.lower()
+    body["model"] = VLM_MODEL_NAME if use_vlm else CHAT_MODEL_NAME
+    url = f"{(VLM_BASE_URL if use_vlm else LLM_BASE_URL)}/chat/completions"
 
     if body.get("stream"):
         _log("chat", model, start, "streaming")
@@ -955,13 +964,17 @@ async def _verify_ltx_nodes(client: httpx.AsyncClient) -> str:
 
 
 def _select_video_backend(body: dict[str, Any]) -> str:
-    """路由：VIDEO_BACKEND 强制 > happyhorse/minimax-h3 模型名 > 时长>15s > generate_audio → H3，否则 LTX。"""
+    """路由：VIDEO_BACKEND 强制 > H3 模型名 > LTX 模型名 > 时长>15s / audio → H3，否则 LTX。"""
     if VIDEO_BACKEND_FORCE in ("h3", "ltx"):
         return VIDEO_BACKEND_FORCE
     model = str(body.get("model") or "").lower()
     duration = float(body.get("duration") or 5)
     generate_audio = bool(body.get("generate_audio"))
-    if "happyhorse" in model or "minimax-h3" in model or duration > 15 or generate_audio:
+    if "ltx" in model:
+        return "ltx"
+    if "happyhorse" in model or "minimax-h3" in model or "minimax_h3" in model:
+        return "h3"
+    if duration > 15 or generate_audio:
         return "h3"
     return "ltx"
 

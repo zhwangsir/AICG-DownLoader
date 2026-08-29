@@ -32,8 +32,10 @@ FRONTEND_PORT = os.environ.get("FRONTEND_PORT", "3501")
 DRAMA_API_BASE = os.environ.get("DRAMA_API_BASE", "http://127.0.0.1:%s" % BACKEND_PORT)
 ST_WEB_PORT = os.environ.get("ST_WEB_PORT", "8080")
 ST_API_PORT = os.environ.get("ST_API_PORT", "8780")
+ST_GATEWAY_PORT = os.environ.get("LOCAL_GATEWAY_PORT", "8790")
 DASHBOX_WEB = "http://127.0.0.1:%s" % ST_WEB_PORT
 DASHBOX_API = "http://127.0.0.1:%s" % ST_API_PORT
+DASHBOX_GATEWAY = "http://127.0.0.1:%s" % ST_GATEWAY_PORT
 
 BANNER = "[AIGCPannel]"
 
@@ -88,10 +90,52 @@ def engine_up_cmd() -> list[str]:
     return [dc, "com" + "pose", "up", "-d"]
 
 
+def gateway_cmd() -> list[str]:
+    venv_py = DASHBOX / ".venv" / "bin" / "python"
+    if venv_py.exists():
+        return [str(venv_py), "-m", "local_gateway.main"]
+    return [sys.executable, "-m", "local_gateway.main"]
+
+
+def gateway_env() -> dict:
+    env = os.environ.copy()
+    env["LOCAL_GATEWAY_HOST"] = "0.0.0.0"
+    env["LOCAL_GATEWAY_PORT"] = ST_GATEWAY_PORT
+    env["LOCAL_GATEWAY_PUBLIC_BASE"] = "http://127.0.0.1:%s" % ST_GATEWAY_PORT
+    env["LOCAL_LLM_BASE_URL"] = env.get("LOCAL_LLM_BASE_URL", "http://192.168.71.84:8000/v1")
+    env["LOCAL_VLM_BASE_URL"] = env.get("LOCAL_VLM_BASE_URL", "http://192.168.71.82:8000/v1")
+    env["LOCAL_VLM_MODEL"] = env.get("LOCAL_VLM_MODEL", "qwen3-vl-32b")
+    env["LOCAL_CHAT_MODEL"] = env.get("LOCAL_CHAT_MODEL", "qwen3.6-uncensored")
+    env["LOCAL_COMFYUI_LB_URL"] = env.get("LOCAL_COMFYUI_LB_URL", "http://192.168.71.127:8188")
+    env["LOCAL_COMFYUI_LB_BACKEND_URLS"] = env.get(
+        "LOCAL_COMFYUI_LB_BACKEND_URLS",
+        "http://192.168.71.127:8189,http://192.168.71.116:8188,http://192.168.71.114:8193",
+    )
+    env["LOCAL_H3_BASE_URL"] = env.get("LOCAL_H3_BASE_URL", "http://192.168.71.127:8195")
+    env["LOCAL_LTX_BASE_URL"] = env.get("LOCAL_LTX_BASE_URL", "http://192.168.71.127:8198")
+    env["LOCAL_TTS_BASE_URL"] = env.get("LOCAL_TTS_BASE_URL", "http://192.168.71.127:9200")
+    # Adapter routes by model name (H3 vs LTX). Do not inherit VIDEO_BACKEND=h3 as a force.
+    env.pop("VIDEO_BACKEND", None)
+    return env
+
+
+def pin_engine_settings() -> None:
+    """Write custom gateway settings into the running dashbox-api volume."""
+    dc = shutil.which("docker")
+    if not dc:
+        return
+    script = DASHBOX / "scripts" / "localize_gateway.py"
+    if not script.is_file():
+        return
+    subprocess.call([dc, "cp", str(script), "dashbox-api-1:/tmp/localize_gateway.py"])
+    subprocess.call([dc, "exec", "dashbox-api-1", "python", "/tmp/localize_gateway.py"])
+
+
 def print_plan(args: argparse.Namespace, *, web_up: bool, api_up: bool, backend_up: bool, legacy_up: bool) -> None:
     print("%s AIGCPannel is the product. DashBox is the finishing engine on :8080." % BANNER)
     print("%s engine web  %s  %s" % (BANNER, DASHBOX_WEB, "UP" if web_up else "down"))
     print("%s engine API  %s  %s" % (BANNER, DASHBOX_API, "UP" if api_up else "down"))
+    print("%s adapter     %s  %s" % (BANNER, DASHBOX_GATEWAY, "UP" if tcp_open("127.0.0.1", int(ST_GATEWAY_PORT)) else "down"))
     print("%s drama API   %s  %s" % (BANNER, DRAMA_API_BASE, "UP" if backend_up else "down"))
     print("%s drama proxy %s/api/drama/* -> %s/api/drama/*" % (BANNER, DASHBOX_API, DRAMA_API_BASE))
     print("%s bind        127.0.0.1 (not [::1])  BACKEND_HOST=%s" % (BANNER, BACKEND_HOST))
@@ -158,6 +202,7 @@ def main(argv: list[str] | None = None) -> None:
     api_up = tcp_open("127.0.0.1", int(ST_API_PORT))
     backend_up = tcp_open("127.0.0.1", int(BACKEND_PORT))
     legacy_up = tcp_open("127.0.0.1", int(FRONTEND_PORT))
+    gateway_listening = tcp_open("127.0.0.1", int(ST_GATEWAY_PORT))
     print_plan(args, web_up=web_up, api_up=api_up, backend_up=backend_up, legacy_up=legacy_up)
 
     if args.dry_run:
@@ -166,6 +211,13 @@ def main(argv: list[str] | None = None) -> None:
     spawn = getattr(subprocess, "Po" "pen")
     kids = []
     spawn_cleanup(kids)
+
+    if gateway_listening:
+        print("%s local_gateway already on :%s" % (BANNER, ST_GATEWAY_PORT))
+    else:
+        print("%s starting local_gateway adapter  %s" % (BANNER, DASHBOX_GATEWAY))
+        (DASHBOX / "local_gateway" / "static" / "relay").mkdir(parents=True, exist_ok=True)
+        kids.append(spawn(gateway_cmd(), cwd=str(DASHBOX), env=gateway_env()))
 
     if backend_up:
         print("%s drama backend already on :%s; not spawning a second uvicorn" % (BANNER, BACKEND_PORT))
@@ -195,6 +247,10 @@ def main(argv: list[str] | None = None) -> None:
             if rc != 0:
                 die("error: docker compose up -d exited %s" % rc)
             print("%s engine %s  api %s" % (BANNER, DASHBOX_WEB, DASHBOX_API))
+
+    if tcp_open("127.0.0.1", int(ST_API_PORT)):
+        print("%s pinning engine Settings to cluster via dashbox-api" % BANNER)
+        pin_engine_settings()
 
     if not kids:
         print("%s nothing spawned; stack already up. Ctrl-C exits this launcher only." % BANNER)

@@ -999,7 +999,7 @@ def get_effective_media_relay_config(
     return EffectiveMediaRelayConfig(
         source="environment",
         provider=str(
-            env_provider or os.environ.get("MEDIA_RELAY_PROVIDER", "aliyun_oss")
+            env_provider or os.environ.get("MEDIA_RELAY_PROVIDER", "local_http")
         )
         .strip()
         .lower(),

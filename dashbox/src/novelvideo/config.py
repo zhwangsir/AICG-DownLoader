@@ -548,7 +548,7 @@ def get_style_preset(
 # LLM 临时媒体中转（给 newAPI/视觉模型拉取本地参考图）
 # =============================================================================
 
-MEDIA_RELAY_PROVIDER = os.environ.get("MEDIA_RELAY_PROVIDER", "aliyun_oss").strip().lower()
+MEDIA_RELAY_PROVIDER = os.environ.get("MEDIA_RELAY_PROVIDER", "local_http").strip().lower()
 MEDIA_RELAY_TTL_SECONDS = int(os.environ.get("MEDIA_RELAY_TTL_SECONDS", "1800"))
 
 OSS_RELAY_ENDPOINT = os.environ.get("OSS_RELAY_ENDPOINT", "oss-cn-chengdu.aliyuncs.com")
@@ -712,11 +712,11 @@ def _csv_env(name: str, default: str) -> list[str]:
 # newAPI 视频网关。VIDEO_BACKEND 使用 newapi_<model> 时会通过 NEWAPI_BASE_URL 调用。
 NEWAPI_VIDEO_MODELS = _csv_env(
     "NEWAPI_VIDEO_MODELS",
-    "seedance-1.0-pro-fast,seedance-1.5-pro,seedance-2.0,seedance-2.0-fast,seedance-2.0-value,seedance-2.0-fast-value,happyhorse-1.0,seedance-2.0-mini",
+    "MiniMax-H3,LTX-2.5,happyhorse-1.0",
 )
 DEFAULT_VIDEO_MODEL = os.environ.get(
     "DEFAULT_VIDEO_MODEL",
-    os.environ.get("NEWAPI_VIDEO_MODEL", NEWAPI_VIDEO_MODELS[0]),
+    os.environ.get("NEWAPI_VIDEO_MODEL", "MiniMax-H3"),
 ).strip()
 NEWAPI_VIDEO_MODEL = os.environ.get("NEWAPI_VIDEO_MODEL", DEFAULT_VIDEO_MODEL).strip()
 NEWAPI_VIDEO_RESOLUTION = os.environ.get("NEWAPI_VIDEO_RESOLUTION", "720p")
@@ -726,12 +726,11 @@ NEWAPI_VIDEO_AUDIO_MODELS = _csv_env(
 )
 NEWAPI_VIDEO_DURATION_BOUNDS = os.environ.get(
     "NEWAPI_VIDEO_DURATION_BOUNDS",
-    "seedance-1.0-pro-fast:2-12,seedance-1.5-pro:4-12,seedance-2.0:4-15,seedance-2.0-fast:4-15,seedance-2.0-value:4-15,seedance-2.0-fast-value:4-15,happyhorse-1.0:3-15,seedance-2.0-mini:4-15",
+    "MiniMax-H3:4-15,LTX-2.5:4-15,happyhorse-1.0:3-15",
 ).strip()
 
-# 视频生成后端: newapi_seedance-1.0-pro-fast (默认), newapi_seedance-2.0-fast,
-# comfyui, seedance_fast, seedance_pro, seedance_pro_silent, grok_720
-VIDEO_BACKEND = os.environ.get("VIDEO_BACKEND", f"newapi_{DEFAULT_VIDEO_MODEL}")
+# 视频生成后端: h3 (AIGCPannel SFW 对白/角色, 经 local_gateway → MiniMax-H3 :8195)
+VIDEO_BACKEND = os.environ.get("VIDEO_BACKEND", "h3")
 
 # Seedance 模型（火山方舟）
 SEEDANCE_FAST_MODEL = os.environ.get("SEEDANCE_FAST_MODEL", "doubao-seedance-1-0-pro-fast-251015")

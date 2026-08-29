@@ -45,3 +45,15 @@ def test_minimax_h3_registered_in_logical_models():
     import local_gateway.main as gw
 
     assert "MiniMax-H3" in gw.LOGICAL_MODELS
+
+
+def test_ltx25_model_routes_to_ltx():
+    assert _select_video_backend({"model": "LTX-2.5", "duration": 5}) == "ltx"
+    assert _select_video_backend({"model": "ltx-2.5", "duration": 20}) == "ltx"
+
+
+def test_ltx25_registered_in_logical_models():
+    import local_gateway.main as gw
+
+    assert "LTX-2.5" in gw.LOGICAL_MODELS
+    assert "local-sdxl" in gw.LOGICAL_MODELS

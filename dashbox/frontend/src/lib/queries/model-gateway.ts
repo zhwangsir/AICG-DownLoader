@@ -234,7 +234,7 @@ export interface SaveEmbeddingModelInput {
 }
 
 export interface SaveMediaRelayConfigInput {
-  provider: "aliyun_oss" | "cloudinary";
+  provider: "aliyun_oss" | "cloudinary" | "local_http";
   ttlSeconds: number;
   endpoint?: string;
   bucket?: string;

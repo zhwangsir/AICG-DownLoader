@@ -3593,6 +3593,8 @@ class ComfyUIVideoGenerator(VideoGeneratorBase):
 
 NEWAPI_VIDEO_BACKEND_PREFIX = "newapi_"
 NEWAPI_VIDEO_DISPLAY_LABELS = {
+    "MiniMax-H3": "MiniMax H3",
+    "LTX-2.5": "LTX-2.5",
     "seedance-1.0-pro-fast": "Seedance1.0 Pro Fast",
     "seedance-1.5-pro": "Seedance1.5 Pro",
     "seedance-2.0": "Seedance2.0",
@@ -3611,6 +3613,10 @@ NEWAPI_MAINLINE_SEEDANCE2_MODELS = (
 NEWAPI_DISABLED_VIDEO_MODELS = {"grok-video-channel"}
 
 
+_H3_VIDEO_ALIASES = {"h3", "minimax-h3", "minimax_h3", "minimax-h3-local"}
+_LTX_VIDEO_ALIASES = {"ltx", "ltx-2.5", "ltx2.5", "ltx_2.5", "ltx-2.5-local"}
+
+
 def parse_newapi_video_backend(backend: str | None) -> str | None:
     value = str(backend or "").strip()
     lowered = value.lower()
@@ -3618,9 +3624,15 @@ def parse_newapi_video_backend(backend: str | None) -> str | None:
         from novelvideo.config import NEWAPI_VIDEO_MODEL
 
         return NEWAPI_VIDEO_MODEL
+    if lowered in _H3_VIDEO_ALIASES:
+        return "MiniMax-H3"
+    if lowered in _LTX_VIDEO_ALIASES:
+        return "LTX-2.5"
     if lowered.startswith(NEWAPI_VIDEO_BACKEND_PREFIX):
         model = value[len(NEWAPI_VIDEO_BACKEND_PREFIX) :].strip()
         return model or None
+    if value in {"MiniMax-H3", "LTX-2.5"}:
+        return value
     return None
 
 

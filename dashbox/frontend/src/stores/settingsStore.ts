@@ -21,7 +21,7 @@ export type CanvasEdgeRoutingMode = 'spline' | 'orthogonal' | 'smartOrthogonal';
 export type ProviderApiKeys = Record<string, string>;
 export const DEFAULT_GRSAI_NANO_BANANA_PRO_MODEL = 'nano-banana-pro';
 
-export type MediaStorageProvider = 'aliyun_oss' | 'cloudinary';
+export type MediaStorageProvider = 'aliyun_oss' | 'cloudinary' | 'local_http';
 
 export type FeatureModelProvider = string;
 
@@ -169,7 +169,7 @@ export interface MediaStorageSettings {
 }
 
 export const DEFAULT_MEDIA_STORAGE_SETTINGS: MediaStorageSettings = {
-  provider: 'aliyun_oss',
+  provider: 'local_http',
   fullyManagedUpload: false,
   cloudinary: {
     cloudName: '',

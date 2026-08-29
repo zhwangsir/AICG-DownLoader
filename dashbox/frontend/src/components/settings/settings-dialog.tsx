@@ -97,6 +97,7 @@ interface SettingsDialogProps {
 }
 
 const MEDIA_STORAGE_PROVIDERS: MediaStorageProvider[] = [
+  "local_http",
   "aliyun_oss",
   "cloudinary",
 ];
@@ -5314,7 +5315,8 @@ function MediaStorageSection() {
     if (!mediaRelay) return;
     if (
       mediaRelay.provider === "aliyun_oss" ||
-      mediaRelay.provider === "cloudinary"
+      mediaRelay.provider === "cloudinary" ||
+      mediaRelay.provider === "local_http"
     ) {
       setProvider(mediaRelay.provider as MediaStorageProvider);
     }
@@ -5360,7 +5362,12 @@ function MediaStorageSection() {
     }
     try {
       const res = await saveMediaRelay.mutateAsync(
-        provider === "cloudinary"
+        provider === "local_http"
+          ? {
+              provider: "local_http",
+              ttlSeconds: Math.trunc(ttl),
+            }
+          : provider === "cloudinary"
           ? {
               provider: "cloudinary",
               ttlSeconds: Math.trunc(ttl),
@@ -5392,13 +5399,15 @@ function MediaStorageSection() {
       }
       if (provider === "cloudinary") {
         updateCloudinary({ apiKey: "", apiSecret: "" });
-      } else {
+      } else if (provider === "aliyun_oss") {
         updateAliyunOss({ accessKeyId: "", accessKeySecret: "" });
       }
       toast.success(
-        provider === "cloudinary"
-          ? t("settings.mediaStorage.cloudinarySaveSuccess")
-          : t("settings.mediaStorage.saveSuccess"),
+        provider === "local_http"
+          ? t("settings.mediaStorage.localHttpSaveSuccess")
+          : provider === "cloudinary"
+            ? t("settings.mediaStorage.cloudinarySaveSuccess")
+            : t("settings.mediaStorage.saveSuccess"),
       );
     } catch (error) {
       toast.error(
@@ -5430,9 +5439,11 @@ function MediaStorageSection() {
         ) : null}
         <span className="ml-1 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
           {t("settings.mediaStorage.currentPlan")}:{" "}
-          {configuredProvider === "cloudinary"
-            ? t("settings.mediaStorage.providerCloudinary")
-            : t("settings.mediaStorage.providerAliyunOss")}
+          {configuredProvider === "local_http"
+            ? t("settings.mediaStorage.providerLocalHttp")
+            : configuredProvider === "cloudinary"
+              ? t("settings.mediaStorage.providerCloudinary")
+              : t("settings.mediaStorage.providerAliyunOss")}
         </span>
       </div>
 
@@ -5478,9 +5489,11 @@ function MediaStorageSection() {
           <TabsList>
             {MEDIA_STORAGE_PROVIDERS.map((p) => (
               <TabsTrigger key={p} value={p}>
-                {p === "aliyun_oss"
-                  ? t("settings.mediaStorage.providerAliyunOss")
-                  : t("settings.mediaStorage.providerCloudinary")}
+                {p === "local_http"
+                  ? t("settings.mediaStorage.providerLocalHttp")
+                  : p === "aliyun_oss"
+                    ? t("settings.mediaStorage.providerAliyunOss")
+                    : t("settings.mediaStorage.providerCloudinary")}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -5488,7 +5501,11 @@ function MediaStorageSection() {
       </div>
 
       <div className="mt-4 space-y-2.5">
-        {provider === "cloudinary" ? (
+        {provider === "local_http" ? (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {t("settings.mediaStorage.localHttpHint")}
+          </p>
+        ) : provider === "cloudinary" ? (
           <CloudinaryFields
             config={cloudinary}
             onChange={updateCloudinary}
@@ -5510,7 +5527,9 @@ function MediaStorageSection() {
       <div className="mt-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            {provider === "cloudinary" ? (
+            {provider === "local_http" ? (
+              t("settings.mediaStorage.localHttpFieldsHint")
+            ) : provider === "cloudinary" ? (
               <>
                 {t("settings.mediaStorage.cloudinaryFieldsHint")}{" "}
                 <a
@@ -5537,9 +5556,11 @@ function MediaStorageSection() {
           {saveMediaRelay.isPending ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : null}
-          {provider === "cloudinary"
-            ? t("settings.mediaStorage.saveCloudinary")
-            : t("settings.mediaStorage.save")}
+          {provider === "local_http"
+            ? t("settings.mediaStorage.saveLocalHttp")
+            : provider === "cloudinary"
+              ? t("settings.mediaStorage.saveCloudinary")
+              : t("settings.mediaStorage.save")}
         </Button>
       </div>
     </section>

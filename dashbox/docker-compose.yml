@@ -39,6 +39,12 @@ services:
       # Platform short-drama FastAPI on the Mac host (:8100).
       # 127.0.0.1 inside this container is not the host.
       ST_DRAMA_API_URL: ${ST_DRAMA_API_URL:-http://host.docker.internal:8100}
+      MEDIA_RELAY_PROVIDER: ${MEDIA_RELAY_PROVIDER:-local_http}
+      LOCAL_RELAY_DIR: /data/relay
+      LOCAL_RELAY_PUBLIC_BASE_URL: ${LOCAL_RELAY_PUBLIC_BASE_URL:-http://host.docker.internal:8790/static/relay}
+      VIDEO_BACKEND: ${VIDEO_BACKEND:-h3}
+      DEFAULT_VIDEO_MODEL: ${DEFAULT_VIDEO_MODEL:-MiniMax-H3}
+      NEWAPI_VIDEO_MODEL: ${NEWAPI_VIDEO_MODEL:-MiniMax-H3}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # 宿主发布端口可配，便于一机多套（每套换 ST_API_PORT + 换 -p 项目名）。
@@ -47,6 +53,7 @@ services:
       - "${ST_API_PORT:-8780}:8780"
     volumes:
       - ce-data:/data
+      - ./local_gateway/static/relay:/data/relay
 
   # SPA served by nginx, reverse-proxying /api + /static to the api service.
   # The Dockerfile's BACKEND_HOST/PORT defaults target the EE/Helm deploy; here

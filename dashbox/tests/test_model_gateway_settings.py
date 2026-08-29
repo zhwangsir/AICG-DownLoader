@@ -3556,8 +3556,10 @@ async def test_filter_video_backend_options_by_gateway(monkeypatch, tmp_path):
     from novelvideo.api.routes import generation
 
     options = generation._api_video_backend_options()
-    assert "newapi_seedance-2.0" in {item.value for item in options}
-    assert "newapi_seedance-1.5-pro" in {item.value for item in options}
+    values = {item.value for item in options}
+    assert "newapi_MiniMax-H3" in values
+    assert "newapi_LTX-2.5" in values
+    assert "newapi_seedance-2.0" in values
 
     async def fake_registered(*, force_refresh: bool = False):
         return {"seedance-2.0", "MiniMax-H3"}
@@ -3566,8 +3568,10 @@ async def test_filter_video_backend_options_by_gateway(monkeypatch, tmp_path):
         model_gateway_settings, "get_gateway_registered_models", fake_registered
     )
     kept = await generation._filter_video_backend_options_by_gateway(options)
-    # 网关只注册了 seedance-2.0 → 其余 Seedance 变体全部隐藏
-    assert {item.value for item in kept} == {"newapi_seedance-2.0"}
+    assert {item.value for item in kept} == {
+        "newapi_seedance-2.0",
+        "newapi_MiniMax-H3",
+    }
 
     # comfyui provider 的本地映射不经网关注册表，始终保留
     save_newapi_media_model_mappings(
@@ -3586,6 +3590,7 @@ async def test_filter_video_backend_options_by_gateway(monkeypatch, tmp_path):
     )
     assert {item.value for item in kept_with_comfyui} == {
         "newapi_seedance-2.0",
+        "newapi_MiniMax-H3",
         "newapi_wan-i2v",
     }
 
