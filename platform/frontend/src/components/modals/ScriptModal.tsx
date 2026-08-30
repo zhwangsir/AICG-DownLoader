@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   generateScript,
+  getPipelineTemplates,
+  PipelineTemplateItem,
   ScriptData,
   CharacterData,
   SceneData,
@@ -54,6 +56,29 @@ export function ScriptModal({
   const [scenesPerEpisode, setScenesPerEpisode] = useState(5);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // M25.3 模板起手：模板库下拉选择，选中后将模板内容预填到创意输入框（用户可修改后再生成）
+  const [templates, setTemplates] = useState<PipelineTemplateItem[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    getPipelineTemplates()
+      .then((resp) => {
+        if (!cancelled) setTemplates(resp.templates);
+      })
+      .catch(() => {
+        // 模板库加载失败不阻塞剧本生成主流程，静默降级为无模板可选
+        if (!cancelled) setTemplates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const handleTemplateSelect = (id: string) => {
+    setTemplateId(id);
+    const tpl = templates.find((t) => t.id === id);
+    if (tpl) setPremise(`${tpl.title}：${tpl.content}`);
+  };
 
   // 编辑模式
   const [editTitle, setEditTitle] = useState(scriptData?.title || "");
@@ -280,6 +305,23 @@ export function ScriptModal({
           </>
         ) : (
           <>
+            {templates.length > 0 && (
+              <div className="modal-field">
+                <label className="modal-label">模板起手（可选）</label>
+                <select
+                  className="modal-input"
+                  value={templateId}
+                  onChange={(e) => handleTemplateSelect(e.target.value)}
+                >
+                  <option value="">不使用模板，直接输入创意</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}（{t.tags.join("/")}）
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="modal-field">
               <label className="modal-label">一句话创意</label>
               <input

@@ -31,6 +31,8 @@ from app.models.schemas import (
     EditRequest,
     MentionResolveRequest,
     PipelineRunRequest,
+    PipelineTemplateItem,
+    PipelineTemplateListResponse,
     QualityCheckRequest,
     QualityVisualRequest,
     RAGOptimizeRequest,
@@ -275,6 +277,35 @@ async def rag_styles() -> list[dict[str, Any]]:
         logger = logging.getLogger(__name__)
         logger.warning("RAG 风格列表失败: %s", e)
         raise HTTPException(status_code=500, detail=f"RAG 风格列表失败: {e}") from e
+
+
+@router.get("/pipeline/templates", response_model=PipelineTemplateListResponse)
+async def pipeline_templates(category: str | None = None) -> PipelineTemplateListResponse:
+    """M25.3 模板库：返回 genre_tropes 知识库的类型片叙事镜头模板。
+
+    供 ScriptModal「模板起手」选择模板后预填创意输入框。
+    category 为空时默认返回 genre_trope 类别；KB 缺失/加载失败时兜底返回空列表（不报错）。
+    """
+    try:
+        raw_templates = rag_service.get_templates(category=category)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("模板库读取失败（KB 缺失兜底为空列表）: %s", e)
+        raw_templates = []
+
+    items = [
+        PipelineTemplateItem(
+            id=t.get("id", ""),
+            title=t.get("title", ""),
+            category=t.get("category", "genre_trope"),
+            tags=t.get("tags", []),
+            summary=(t.get("content", "")[:200] + ("…" if len(t.get("content", "")) > 200 else "")),
+            content=t.get("content", ""),
+        )
+        for t in raw_templates
+    ]
+    categories = sorted({t.get("category", "genre_trope") for t in raw_templates})
+    return PipelineTemplateListResponse(templates=items, total=len(items), categories=categories)
 
 
 @router.get("/models/registry")

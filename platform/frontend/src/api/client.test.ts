@@ -14,6 +14,7 @@ import {
   checkQuality,
   checkVisualQuality,
   getModelRegistry,
+  getPipelineTemplates,
   pollVideoTask,
   runPipeline,
   cancelPipeline,
@@ -495,5 +496,58 @@ describe("模型注册表 API（下载器 ↔ 工作台打通）", () => {
     expect(resp.loras[0].trigger_words).toEqual(["guofeng"]);
     expect(resp.stats).toEqual({ total: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("M25.3 模板库 API（getPipelineTemplates）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("默认无参数 GET /pipeline/templates", async () => {
+    const body = {
+      templates: [
+        {
+          id: "trope_boss_romance_confrontation",
+          title: "霸总对峙/壁咚",
+          category: "genre_trope",
+          tags: ["霸总", "对峙"],
+          summary: "CEO romance confrontation...",
+          content: "CEO romance confrontation: ...",
+        },
+      ],
+      total: 1,
+      categories: ["genre_trope"],
+    };
+    const fetchMock = vi.fn(async (url: string, opts?: RequestInit) => {
+      expect(url).toBe("/api/drama/pipeline/templates");
+      expect(opts?.method ?? "GET").toBe("GET");
+      return mockJsonResponse(body);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const resp = await getPipelineTemplates();
+    expect(resp.total).toBe(1);
+    expect(resp.categories).toEqual(["genre_trope"]);
+    expect(resp.templates[0].id).toBe("trope_boss_romance_confrontation");
+    expect(resp.templates[0].tags).toEqual(["霸总", "对峙"]);
+  });
+
+  it("category 参数拼接到 query string", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("/api/drama/pipeline/templates?category=genre_trope");
+      return mockJsonResponse({ templates: [], total: 0, categories: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const resp = await getPipelineTemplates({ category: "genre_trope" });
+    expect(resp.templates).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("非 2xx 响应抛出「加载模板库失败」错误", async () => {
+    const fetchMock = vi.fn(async () =>
+      mockJsonResponse({ detail: "KB 不可读" }, 500)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getPipelineTemplates()).rejects.toThrow("KB 不可读");
   });
 });

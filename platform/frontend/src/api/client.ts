@@ -1060,3 +1060,40 @@ export async function getPanelStatus(): Promise<PanelStatus> {
   if (!resp.ok) throw await extractError(resp, "读取面板状态失败");
   return resp.json();
 }
+
+/* ------------------------------------------------------------------ */
+/* M25.3 画布工作流模板库（/pipeline/templates）                        */
+/* ------------------------------------------------------------------ */
+
+/** 类型片叙事镜头模板条目（GET /pipeline/templates 的 templates 元素） */
+export interface PipelineTemplateItem {
+  id: string;
+  title: string;
+  category: string;
+  tags: string[];
+  summary: string;
+  content: string;
+}
+
+/** 模板库列表响应 */
+export interface PipelineTemplateListResponse {
+  templates: PipelineTemplateItem[];
+  total: number;
+  categories: string[];
+}
+
+/** 获取模板库列表：可选 category 过滤（默认 genre_trope） */
+export async function getPipelineTemplates(params?: {
+  category?: string;
+}): Promise<PipelineTemplateListResponse> {
+  const sp = new URLSearchParams();
+  if (params?.category) sp.set("category", params.category);
+  const qs = sp.toString();
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/pipeline/templates${qs ? `?${qs}` : ""}`,
+    {},
+    API_TIMEOUTS.taskCreate
+  );
+  if (!resp.ok) throw await extractError(resp, "加载模板库失败");
+  return resp.json();
+}

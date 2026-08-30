@@ -1542,9 +1542,9 @@
         {
           "id": "M25.3",
           "name": "画布工作流模板库",
-          "status": "pending",
+          "status": "completed",
           "priority": "P1",
-          "notes": "genre_tropes → GET /pipeline/templates + ScriptModal 模板起手"
+          "notes": "GET /api/drama/pipeline/templates（genre_tropes KB，category 过滤 + KB 缺失兜底空列表）+ ScriptModal 模板起手选择器（选中预填创意框，可改再生成）；后端 test_pipeline_templates 10 用例、前端 +9 vitest（578 passed）、tsc 0、build 948ms；后端基线 10 个既有环境失败（NAS 挂载/嵌入模型外网）与本次无关"
         },
         {
           "id": "M25.4",

@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-08-30 M25.3 画布工作流模板库落地：GET /api/drama/pipeline/templates（genre_tropes KB，category 过滤，KB 异常兜底 200 空列表）；ScriptModal 新建模式「模板起手」选择器预填创意框。测试：后端 test_pipeline_templates 10/10；前端 vitest 578 passed（569→578）；tsc 0；build 948ms。后端基线 10 个既有失败为 NAS 挂载/嵌入模型外网下载环境问题（git stash 基线复现，与改动无关）。同日 .gitignore 补齐产物目录（.coverage / frontend coverage / test_artifacts / platform output+reports / tts-samples / dashbox/works），268MB 报告产物不入库。LICENSE/NOTICE/ToIV 未动。
+
 - 2026-08-29 7c75196 dual-pushed: engine Settings pinned to cluster. custom gateway configured=true, base http://host.docker.internal:8790/v1; LLM spark02 .84:8000; VLM spark01 .82:8000; image ComfyUI .127:8188 SDXL; video H3 .127:8195; TTS IndexTTS .127:9200; media relay=local_http. LTX-2.5 still configured but :8198 DOWN. Official relayclaw channel kept but unused in custom mode. LICENSE/NOTICE/ToIV untouched.
 
 - 2026-08-28 ToIV repo-check detail (no ToIV code, no ToIV push): H3 :8195 Hailuo 3.0 main; R18 keeps LTX-2.3+10Eros v14 (not LTX-2.5). ToIV SFW LTX-2.5 retired 2026-08-23; unpushed Phase 4 ltx25-multishot not default. Wan2.2 = silent/motion/R18 I2V; Wan2.1-VACE-14B = edit/transition/keyframe chain. LongCat :8197. Image default flux2_dev_fp8mixed; optional qwen_image/z_image; qwen-image-edit; R18 stills URPM. 3D=Hunyuan3D; no Hunyuan video 1.0. AIGCPannel still SDXL+IPAdapter (chase only if user names it). H3 main aligned. AIGCPannel SFW口径 unchanged. LICENSE/NOTICE untouched.

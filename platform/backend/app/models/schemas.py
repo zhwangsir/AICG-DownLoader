@@ -692,6 +692,25 @@ class AgentResponse(BaseModel):
     elapsed_seconds: float = 0.0
 
 
+class PipelineTemplateItem(BaseModel):
+    """类型片叙事镜头模板（M25.3 模板起手，genre_tropes 知识库条目）。"""
+
+    id: str = Field(..., description="模板唯一标识（知识库条目 id）")
+    title: str = Field("", description="模板标题（如「霸总对峙/壁咚」）")
+    category: str = Field("genre_trope", description="模板类别，默认 genre_trope")
+    tags: list[str] = Field(default_factory=list, description="标签列表")
+    summary: str = Field("", description="模板内容摘要（截断 200 字符）")
+    content: str = Field("", description="模板完整内容（预填创意输入框用）")
+
+
+class PipelineTemplateListResponse(BaseModel):
+    """模板库列表响应（GET /pipeline/templates）。"""
+
+    templates: list[PipelineTemplateItem] = Field(default_factory=list)
+    total: int = Field(0, description="返回模板总数")
+    categories: list[str] = Field(default_factory=list, description="全部可用类别（供前端筛选）")
+
+
 class RAGOptimizeRequest(BaseModel):
     """RAG 提示词优化请求。"""
 

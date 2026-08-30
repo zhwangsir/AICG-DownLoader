@@ -371,6 +371,19 @@ class RAGService:
         self._ensure_initialized()
         return [e.to_dict() for e in self._entries if e.category == "style"]
 
+    def get_templates(self, category: str | None = None) -> list[dict[str, Any]]:
+        """获取类型片叙事镜头模板列表（M25.3 模板起手）。
+
+        Args:
+            category: 类别过滤（默认 genre_trope，传入其他值可扩展后续模板类别）。
+
+        Returns:
+            模板条目列表（含 id/title/category/tags/content/negative_terms/recommended_loras）。
+        """
+        self._ensure_initialized()
+        target = category or "genre_trope"
+        return [e.to_dict() for e in self._entries if e.category == target]
+
     # ------------------------------------------------------------------
     # 提示词优化
     # ------------------------------------------------------------------

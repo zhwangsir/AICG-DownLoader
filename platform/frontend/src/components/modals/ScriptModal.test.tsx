@@ -2,14 +2,22 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { vi } from "vitest";
 import { ScriptModal } from "./ScriptModal";
 import { useDramaStore } from "../../store/useDramaStore";
-import { generateScript } from "../../api/client";
-import type { AgentResponse, CharacterData, SceneData, ScriptData } from "../../api/client";
+import { generateScript, getPipelineTemplates } from "../../api/client";
+import type {
+  AgentResponse,
+  CharacterData,
+  PipelineTemplateItem,
+  SceneData,
+  ScriptData,
+} from "../../api/client";
 
 vi.mock("../../api/client", () => ({
   generateScript: vi.fn(),
+  getPipelineTemplates: vi.fn(),
 }));
 
 const mockGenerateScript = vi.mocked(generateScript);
+const mockGetPipelineTemplates = vi.mocked(getPipelineTemplates);
 
 const okResp = <T,>(data: T): AgentResponse<T> => ({
   success: true,
@@ -110,6 +118,8 @@ describe("ScriptModal 新建模式", () => {
   beforeEach(() => {
     useDramaStore.getState().reset();
     vi.clearAllMocks();
+    // 默认无模板可选（模板库为空），避免影响既有断言
+    mockGetPipelineTemplates.mockResolvedValue({ templates: [], total: 0, categories: [] });
   });
 
   it("默认渲染：创意/题材/集数/每集分镜数默认值，无「返回编辑模式」", () => {
@@ -204,6 +214,7 @@ describe("ScriptModal 编辑模式", () => {
     useDramaStore.getState().reset();
     useDramaStore.getState().setScriptData(sampleScript);
     vi.clearAllMocks();
+    mockGetPipelineTemplates.mockResolvedValue({ templates: [], total: 0, categories: [] });
   });
 
   it("默认渲染：标题/题材/角色/场景初始值", () => {
@@ -327,5 +338,83 @@ describe("ScriptModal 编辑模式", () => {
     const { onClose } = renderEdit();
     fireEvent.click(screen.getByText("关闭"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ScriptModal M25.3 模板起手", () => {
+  const tplA: PipelineTemplateItem = {
+    id: "trope_boss_romance_confrontation",
+    title: "霸总对峙/壁咚",
+    category: "genre_trope",
+    tags: ["霸总", "对峙"],
+    summary: "CEO romance confrontation...",
+    content: "CEO romance confrontation: tall male lead in tailored suit",
+  };
+  const tplB: PipelineTemplateItem = {
+    id: "trope_sweet_cafe_date",
+    title: "甜宠咖啡馆约会",
+    category: "genre_trope",
+    tags: ["甜宠", "约会"],
+    summary: "sweet romance cafe date",
+    content: "sweet romance cafe date: young couple sitting across a small table",
+  };
+
+  beforeEach(() => {
+    useDramaStore.getState().reset();
+    vi.clearAllMocks();
+    mockGetPipelineTemplates.mockResolvedValue({
+      templates: [tplA, tplB],
+      total: 2,
+      categories: ["genre_trope"],
+    });
+  });
+
+  it("模板加载成功后渲染下拉选项（含默认「不使用模板」项）", async () => {
+    renderNew();
+    await waitFor(() =>
+      expect(screen.getByText("模板起手（可选）")).toBeInTheDocument()
+    );
+    const select = fieldControl("模板起手（可选）", "select") as HTMLSelectElement;
+    expect(select.options).toHaveLength(3); // 1 默认 + 2 模板
+    expect(select.options[0].textContent).toBe("不使用模板，直接输入创意");
+    expect(select.options[1].textContent).toBe("霸总对峙/壁咚（霸总/对峙）");
+    expect(select.options[2].textContent).toBe("甜宠咖啡馆约会（甜宠/约会）");
+  });
+
+  it("选中模板后将「标题：内容」预填到创意输入框，可继续修改", async () => {
+    renderNew();
+    await waitFor(() => screen.getByText("模板起手（可选）"));
+    fireEvent.change(fieldControl("模板起手（可选）", "select"), {
+      target: { value: "trope_boss_romance_confrontation" },
+    });
+    const premise = screen.getByPlaceholderText("输入你的创意...") as HTMLInputElement;
+    expect(premise.value).toBe(
+      "霸总对峙/壁咚：CEO romance confrontation: tall male lead in tailored suit"
+    );
+    // 用户可修改预填内容后再生成
+    fireEvent.change(premise, { target: { value: "修改后的创意" } });
+    expect(premise.value).toBe("修改后的创意");
+  });
+
+  it("模板库为空时不渲染模板选择器", async () => {
+    mockGetPipelineTemplates.mockResolvedValue({ templates: [], total: 0, categories: [] });
+    renderNew();
+    await waitFor(() =>
+      expect(mockGetPipelineTemplates).toHaveBeenCalledTimes(1)
+    );
+    expect(screen.queryByText("模板起手（可选）")).not.toBeInTheDocument();
+  });
+
+  it("模板库加载失败时静默降级（不渲染选择器，不阻塞生成流程）", async () => {
+    mockGetPipelineTemplates.mockRejectedValue(new Error("后端离线"));
+    const { onSuccess } = renderNew();
+    await waitFor(() =>
+      expect(mockGetPipelineTemplates).toHaveBeenCalledTimes(1)
+    );
+    expect(screen.queryByText("模板起手（可选）")).not.toBeInTheDocument();
+    // 生成主流程不受影响：仍可提交生成并成功回调
+    mockGenerateScript.mockResolvedValue(okResp(sampleScript));
+    fireEvent.click(screen.getByText("生成"));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(sampleScript));
   });
 });

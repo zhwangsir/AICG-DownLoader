@@ -41,3 +41,12 @@ platform/frontend/.debug/
 .DS_Store
 .vscode/
 .idea/
+
+# 测试/运行产物（不入库）
+.coverage
+platform/frontend/coverage/
+platform/backend/test_artifacts/
+platform/output/
+tts-samples/
+dashbox/works/
+platform/reports/
