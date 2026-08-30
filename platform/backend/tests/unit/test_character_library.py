@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -117,6 +118,77 @@ class TestRegisterFromCard:
         assert a2.created_at == a1.created_at
 
 
+class TestAssetLineage:
+    """M18.7 资产血缘：source_script_id + updated_at_iso 入库与兼容。
+
+    背景：M18.6 实测新剧本角色（林远/苏清）三视图被 QC 拦截后，收集阶段按
+    character_id 静默命中上一轮旧剧本同 ID 资产（林默/林小满），ref2va 参考与
+    视觉对照基准双双错配。资产记录须带血缘标记供收集阶段防串戏校验。
+    """
+
+    def test_register_writes_lineage_fields(self, library, sample_char):
+        """入库写入 source_script_id 与 ISO 8601 的 updated_at_iso，落盘往返后仍在。"""
+        asset = library.register_from_card(
+            character=sample_char,
+            reference_images={"front": "http://x/f.png"},
+            used_prompts={"positive_prompt": "p"},
+            source_script_id="proj-new",
+        )
+        assert asset.source_script_id == "proj-new"
+        assert asset.updated_at_iso
+        # ISO 8601 格式可解析
+        datetime.fromisoformat(asset.updated_at_iso)
+
+        loaded = library.get(sample_char.character_id)
+        assert loaded is not None
+        assert loaded.source_script_id == "proj-new"
+        assert loaded.updated_at_iso == asset.updated_at_iso
+
+    def test_register_without_lineage_marks_legacy(self, library, sample_char):
+        """未提供 source_script_id → 空串（legacy 旧资产口径）。"""
+        asset = library.register_from_card(sample_char, {}, {"positive_prompt": "p"})
+        assert asset.source_script_id == ""
+
+    def test_reregister_empty_lineage_preserves_existing(self, library, sample_char):
+        """画布单角色重生成（无剧本上下文，空血缘）不清空既有血缘标记。"""
+        library.register_from_card(
+            sample_char, {}, {"positive_prompt": "p"}, source_script_id="proj-1"
+        )
+        asset = library.register_from_card(
+            sample_char, {"front": "new.png"}, {"positive_prompt": "p2"}
+        )
+        assert asset.source_script_id == "proj-1"
+        assert asset.reference_images["front"] == "new.png"
+
+    def test_reregister_new_lineage_overwrites(self, library, sample_char):
+        """新剧本重新生成 → 血缘更新为新剧本 project_id。"""
+        library.register_from_card(
+            sample_char, {}, {"positive_prompt": "p"}, source_script_id="proj-old"
+        )
+        asset = library.register_from_card(
+            sample_char, {}, {"positive_prompt": "p2"}, source_script_id="proj-new"
+        )
+        assert asset.source_script_id == "proj-new"
+
+    def test_legacy_asset_file_loads_as_legacy(self, library):
+        """M18.7 前旧格式资产文件（无血缘字段）仍可加载，按 legacy 处理不报错。"""
+        (library._dir / "char_001.json").write_text(
+            json.dumps({
+                "character_id": "char_001",
+                "name": "林默",
+                "reference_images": {"front": "http://old/f.png"},
+                "updated_at": 1786000000,
+            }),
+            encoding="utf-8",
+        )
+        loaded = library.get("char_001")
+        assert loaded is not None
+        assert loaded.source_script_id == ""
+        assert loaded.updated_at_iso == ""
+        # int epoch updated_at 保持不变（排序兼容）
+        assert loaded.updated_at == 1786000000
+
+
 class TestAppearanceLockResolution:
     def test_locked_character_resolved(self, library, sample_char):
         library.register_from_card(sample_char, {"front": "f.png"}, {"positive_prompt": "外观关键词A"})
@@ -220,6 +292,34 @@ class TestCharacterAgentAutoRegister:
             "fp, cinematic realistic, photorealistic, professional photography"
         )
         assert "front" in asset.reference_images
+
+    async def test_execute_writes_source_script_id(
+        self,
+        library,
+        sample_char,
+        mock_call_llm,
+        mock_call_comfyui,
+        mock_get_comfyui_result,
+    ):
+        """M18.7：CharacterRequest.project_id 透传写入资产 source_script_id（血缘标记）。"""
+        mock_call_llm.return_value = json.dumps(
+            {"front_view_prompt": "fp", "side_view_prompt": "sp", "closeup_prompt": "cp", "negative_prompt": "neg"}
+        )
+        mock_get_comfyui_result.return_value = {
+            "7": {"images": [{"filename": "c.png", "subfolder": "", "type": "output"}]}
+        }
+        agent = CharacterAgent()
+
+        with patch("app.agents.character_agent.character_library", library):
+            response = await agent.execute(
+                CharacterRequest(character=sample_char, project_id="proj-abc")
+            )
+
+        assert response.success is True
+        asset = library.get(sample_char.character_id)
+        assert asset is not None
+        assert asset.source_script_id == "proj-abc"
+        assert asset.updated_at_iso
 
     async def test_register_failure_does_not_break_generation(
         self,

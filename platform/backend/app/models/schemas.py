@@ -104,6 +104,12 @@ class CharacterAsset(BaseModel):
     appearance_lock: str = Field("", description="外观锁定卡：分镜生成时强制注入的核心外观关键词")
     locked: bool = Field(True, description="锁定后分镜/视频生成强制引用外观锁定卡")
     consistency_level: str = "L3"
+    # M18.7 资产血缘：source_script_id 记录生成该资产三视图的剧本 project_id，
+    # 空串 = legacy 旧资产（M18.7 前入库，无血缘信息）；收集阶段据此跳过跨剧本陈旧资产。
+    # updated_at_iso 为 updated_at 的 ISO 8601 人类可读形式；updated_at 保留 epoch 秒 int
+    # （pydantic v2 不允许 int→str 强制转换，改类型会导致旧资产文件加载失败）
+    source_script_id: str = ""
+    updated_at_iso: str = ""
     created_at: int = 0
     updated_at: int = 0
 
@@ -253,6 +259,8 @@ class CharacterRequest(BaseModel):
     # 预览阶段传入已编辑的提示词，直接生成图片
     preview_positive_prompt: str = Field("", description="预览确认后的正面提示词（三视图共用）")
     preview_negative_prompt: str = Field("", description="预览确认后的负面提示词")
+    # M18.7 血缘标记：剧本 project_id，角色生成后写入资产库 source_script_id
+    project_id: str = Field("", description="当前剧本的 project_id，空串表示画布单角色模式")
 
 
 class CharacterPreviewRequest(BaseModel):

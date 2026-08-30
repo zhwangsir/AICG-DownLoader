@@ -9,7 +9,8 @@ import pytest
 
 from app.agents.character_agent import CharacterAgent
 from app.config import settings
-from app.models.schemas import CharacterRequest
+from app.models.schemas import CharacterAsset, CharacterRequest
+from app.services.character_library import CharacterLibrary
 from app.services.style_anchor import SDXL_CHECKPOINT_ANIME, SDXL_CHECKPOINT_REALISTIC
 
 
@@ -680,6 +681,73 @@ class TestCharacterAgentViewQC:
 
         assert response.success is False
         mock_lib.register_from_card.assert_not_called()
+
+    async def test_qc_exhaustion_isolates_library_residual(
+        self, agent, sample_character, mock_call_llm, mock_call_comfyui, monkeypatch
+    ):
+        """M18.7 拦截即隔离：QC 重试耗尽判失败 → 显式删除资产库该 character_id 残留。
+
+        背景：M18.6 实测新剧本角色（林远/苏清 char_001/002）被 QC 拦截后，旧剧本
+        同 ID 资产（林默/林小满）仍残留资产库，被 _collect_character_reference_images
+        静默命中，ref2va 参考与漂移对照基准双双错配。判失败时必须隔离残留。
+        """
+        self._enable_qc(monkeypatch)
+        self._mock_image_download(agent)
+        self._attach_vlm(agent, [self.QC_FAIL, self.QC_FAIL, self.QC_FAIL])
+        mock_call_llm.return_value = self._PROMPTS_JSON
+        self._patch_sdxl_generate(agent)
+
+        with patch("app.agents.character_agent.character_library") as mock_lib:
+            response = await agent.execute(CharacterRequest(character=sample_character))
+
+        assert response.success is False
+        mock_lib.delete.assert_called_once_with(sample_character.character_id)
+        mock_lib.register_from_card.assert_not_called()
+
+    async def test_qc_exhaustion_deletes_stale_asset_in_real_library(
+        self, agent, sample_character, mock_call_llm, mock_call_comfyui, monkeypatch, tmp_path
+    ):
+        """M18.7：真实资产库预置旧剧本残留（同 character_id 不同血缘），QC 拦截后残留被删除。"""
+        library = CharacterLibrary(library_dir=tmp_path / "library")
+        library.save(
+            CharacterAsset(
+                character_id=sample_character.character_id,
+                name="旧角色",
+                reference_images={"front": "http://old/front.png"},
+                source_script_id="proj-old",
+            )
+        )
+        self._enable_qc(monkeypatch)
+        self._mock_image_download(agent)
+        self._attach_vlm(agent, [self.QC_FAIL, self.QC_FAIL, self.QC_FAIL])
+        mock_call_llm.return_value = self._PROMPTS_JSON
+        self._patch_sdxl_generate(agent)
+
+        with patch("app.agents.character_agent.character_library", library):
+            response = await agent.execute(
+                CharacterRequest(character=sample_character, project_id="proj-new")
+            )
+
+        assert response.success is False
+        # 旧剧本残留已被隔离，后续收集不会再命中
+        assert library.get(sample_character.character_id) is None
+
+    async def test_qc_exhaustion_isolation_error_does_not_mask_failure(
+        self, agent, sample_character, mock_call_llm, mock_call_comfyui, monkeypatch
+    ):
+        """M18.7：资产库删除异常不阻断/不掩盖质检拦截结果（仍 success=False）。"""
+        self._enable_qc(monkeypatch)
+        self._mock_image_download(agent)
+        self._attach_vlm(agent, [self.QC_FAIL, self.QC_FAIL, self.QC_FAIL])
+        mock_call_llm.return_value = self._PROMPTS_JSON
+        self._patch_sdxl_generate(agent)
+
+        with patch("app.agents.character_agent.character_library") as mock_lib:
+            mock_lib.delete.side_effect = RuntimeError("disk error")
+            response = await agent.execute(CharacterRequest(character=sample_character))
+
+        assert response.success is False
+        assert "质检" in response.error
 
     async def test_vlm_exception_fail_open(
         self, agent, sample_character, mock_call_llm, mock_call_comfyui, monkeypatch

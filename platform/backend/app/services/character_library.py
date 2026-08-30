@@ -14,6 +14,7 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,8 @@ class CharacterLibrary:
 
     def save(self, asset: CharacterAsset) -> CharacterAsset:
         asset.updated_at = int(time.time())
+        # M18.7 资产血缘：同步写入 ISO 8601 人类可读时间戳（updated_at 仍为 epoch 秒，供排序兼容）
+        asset.updated_at_iso = datetime.now().astimezone().isoformat(timespec="seconds")
         if not asset.created_at:
             asset.created_at = asset.updated_at
         with self._lock:
@@ -116,11 +119,15 @@ class CharacterLibrary:
         reference_images: dict[str, str],
         used_prompts: dict[str, str],
         consistency_level: str = "L3",
+        source_script_id: str = "",
     ) -> CharacterAsset:
         """角色定妆照生成后自动登记资产库（默认锁定，强制跨集引用）。
 
         外观锁定卡默认取定妆正面 prompt（含精确外观关键词），
         已存在资产时保留用户手动编辑过的 appearance_lock。
+
+        M18.7 血缘：source_script_id 传入剧本 project_id；空串表示旧资产兼容
+        或画布单角色重生成（不覆盖既有血缘）。
         """
         existing = self.get(character.character_id)
         appearance_lock = (
@@ -128,6 +135,8 @@ class CharacterLibrary:
             if existing and existing.appearance_lock
             else used_prompts.get("positive_prompt", "")[:APPEARANCE_LOCK_MAX_CHARS]
         )
+        # 血缘标记：空串且旧资产已有血缘 → 保留旧血缘（画布单角色重生成不丢上下文）
+        lineage_id = source_script_id or (existing.source_script_id if existing else "")
         asset = CharacterAsset(
             character_id=character.character_id,
             name=character.name,
@@ -140,6 +149,7 @@ class CharacterLibrary:
             appearance_lock=appearance_lock,
             locked=existing.locked if existing else True,
             consistency_level=consistency_level,
+            source_script_id=lineage_id,
             created_at=existing.created_at if existing else 0,
         )
         return self.save(asset)

@@ -285,7 +285,12 @@ class PipelineOrchestrator:
 
         async def gen_one(index: int, character: Any) -> dict[str, Any]:
             response = await character_agent.execute(
-                CharacterRequest(character=character, style=request.style, consistency_level="L3")
+                CharacterRequest(
+                    character=character, style=request.style, consistency_level="L3",
+                    # M18.7 资产血缘：定妆照入库标记所属剧本 project_id，
+                    # 与 _collect_character_reference_images 的血缘校验口径一致
+                    project_id=script.project_id,
+                )
             )
             if not response.success:
                 logger.warning("角色定妆照失败（跳过）: %s %s", character.name, response.error)
@@ -334,7 +339,9 @@ class PipelineOrchestrator:
         # M12.1 多镜 SHOT prompt 节拍视觉化：逐场景 narrative_beat 透传到 VideoRequest
         scene_beat_map = {s.scene_id: s.narrative_beat for s in script.scenes}
         # H3 ref2va 角色一致性：资产库三视图参考图注入每个 VideoRequest
-        reference_images = self._collect_character_reference_images(script)
+        # M18.7：stats 回写陈旧跨剧本资产跳过计数，入报告 steps.video
+        ref_stats: dict[str, int] = {}
+        reference_images = self._collect_character_reference_images(script, stats=ref_stats)
         # M15.1 画风锚定：H3 视频 prompt 强制追加与剧本/角色/分镜一致的画风尾，
         # 负面词注入冲突画风（如写实风排斥 anime/cartoon），防止 footage 画风漂移
         anchor = resolve_style_anchor(request.style)
@@ -392,7 +399,12 @@ class PipelineOrchestrator:
         self._save_shot_params(project_id, items, videos=videos, failed=failed)
         if not videos:
             raise RuntimeError("视频生成失败: 全部场景失败")
-        report["steps"]["video"] = {"count": len(videos), "failed_scenes": failed}
+        report["steps"]["video"] = {
+            "count": len(videos),
+            "failed_scenes": failed,
+            # M18.7 收集防串戏：跳过的陈旧跨剧本资产数（0 = 参考图集无血缘污染）
+            "reference_images_stale_skipped": ref_stats.get("reference_images_stale_skipped", 0),
+        }
         self._progress(task_id, "video", 1, f"视频完成: {len(videos)} 成功 / {len(failed)} 失败")
         return videos
 
@@ -430,7 +442,9 @@ class PipelineOrchestrator:
         anchor = resolve_style_anchor(request.style)
         style_neg = style_negative_tail(anchor).lstrip(", ")
         video_negative = f"{style_neg}, blurry, low quality, distorted" if style_neg else ""
-        reference_images = self._collect_character_reference_images(script)
+        # M18.7：stats 回写陈旧跨剧本资产跳过计数，入报告 steps.video
+        ref_stats: dict[str, int] = {}
+        reference_images = self._collect_character_reference_images(script, stats=ref_stats)
 
         service = LongVideoService()
         try:
@@ -451,6 +465,8 @@ class PipelineOrchestrator:
             "mode": "long",
             "chunks": result.chunks_completed,
             "duration_seconds": result.duration_seconds,
+            # M18.7 收集防串戏：跳过的陈旧跨剧本资产数（与标准模式同口径）
+            "reference_images_stale_skipped": ref_stats.get("reference_images_stale_skipped", 0),
         }
         self._progress(
             task_id, "video", 1,
@@ -593,24 +609,51 @@ class PipelineOrchestrator:
         return True
 
     @staticmethod
-    def _collect_character_reference_images(script: Script) -> list[str]:
+    def _collect_character_reference_images(
+        script: Script, stats: dict[str, int] | None = None
+    ) -> list[str]:
         """汇总剧本全部角色在资产库中的三视图参考图（H3 ref2va 角色一致性）。
 
         Scene 无角色关联字段，故取剧本全部角色；按角色顺序合并
         reference_images，去重、保序、过滤空 URL，总量截断到
         h3_ref_max_images（视频 Agent 侧关键帧再占 1 席后最终截断）。
+
+        M18.7 收集防串戏：资产带 source_script_id 且与当前剧本 project_id 不一致时
+        跳过该角色——陈旧跨剧本资产（M18.6 实测新剧本角色被 QC 拦截后静默命中旧剧本
+        同 ID 资产，ref2va 参考与漂移对照基准双双错配）。legacy 无血缘字段资产仅在
+        该角色本轮未重新生成时才可能残留（重新生成会覆盖写入血缘；QC 拦截已隔离删除），
+        兜底允许使用并记 info 日志提示陈旧。stats 非空时回写
+        reference_images_stale_skipped（跳过的陈旧资产角色数，报告 steps.video 消费）。
         """
         refs: list[str] = []
         seen: set[str] = set()
+        stale_skipped = 0
+        current_script_id = script.project_id
         for character in script.characters:
             asset = character_library.get(character.character_id)
             if asset is None:
                 continue
+            # M18.7 血缘校验：带血缘且与当前剧本不一致 → 陈旧跨剧本资产，跳过防串戏
+            if asset.source_script_id and asset.source_script_id != current_script_id:
+                stale_skipped += 1
+                logger.info(
+                    "角色 %s 资产血缘 %s 与当前剧本 %s 不一致，跳过陈旧参考图（防串戏）",
+                    character.character_id, asset.source_script_id, current_script_id,
+                )
+                continue
+            if not asset.source_script_id:
+                # legacy 无血缘资产（M18.7 前入库）：兜底可用，提示陈旧建议重新生成
+                logger.info(
+                    "角色 %s 使用 legacy 无血缘资产参考图（陈旧资产兜底，建议重新生成定妆照）",
+                    character.character_id,
+                )
             for url in asset.reference_images.values():
                 url = (url or "").strip()
                 if url and url not in seen:
                     seen.add(url)
                     refs.append(url)
+        if stats is not None:
+            stats["reference_images_stale_skipped"] = stale_skipped
         return refs[: settings.h3_ref_max_images]
 
     async def _step_voice(

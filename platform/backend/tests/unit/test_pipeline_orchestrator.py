@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,6 +23,7 @@ from app.models.schemas import (
     CharacterAsset,
     PipelineRunRequest,
     Scene,
+    Script,
     VideoBatchRequest,
 )
 from app.services.pipeline_orchestrator import (
@@ -455,6 +457,159 @@ class TestCharacterReferenceInjection:
 
         batch_req = mocks["video"].batch_execute.call_args.args[0]
         assert batch_req.items[0].reference_images == ["http://x/only.png"]
+
+
+class TestReferenceImageLineageGuard:
+    """M18.7 收集防串戏：_collect_character_reference_images 血缘校验 + 计数上报。
+
+    背景：M18.6 实测新剧本角色（char_001 林远 / char_002 苏清）三视图被 M18.2 QC
+    拦截后，收集阶段按 character_id 静默命中上一轮旧剧本同 ID 资产（林默/林小满），
+    ref2va 参考与视觉对照基准双双错配，drift 检测失去意义。
+    规则：资产 source_script_id 存在且与当前剧本 project_id 不一致 → 跳过并计数；
+    legacy 无血缘字段资产仅在该角色本轮未重新生成时才可能残留，兜底允许使用并记 info。
+    """
+
+    @staticmethod
+    def _script(project_id: str) -> Script:
+        data = _script_data()
+        data["project_id"] = project_id
+        return Script(**data)
+
+    @staticmethod
+    def _asset(
+        character_id: str, images: dict[str, str], source_script_id: str = ""
+    ) -> CharacterAsset:
+        return CharacterAsset(
+            character_id=character_id,
+            name=character_id,
+            reference_images=images,
+            source_script_id=source_script_id,
+        )
+
+    def test_cross_script_asset_skipped(self):
+        """资产血缘与当前剧本不一致 → 跳过该角色参考图，stats 计数 1。"""
+        assets = {
+            "char_001": self._asset(
+                "char_001", {"front": "http://x/old1.png"}, source_script_id="proj-old"
+            ),
+            "char_002": self._asset(
+                "char_002", {"front": "http://x/new2.png"}, source_script_id="proj-new"
+            ),
+        }
+        stats: dict[str, int] = {}
+        with patch("app.services.pipeline_orchestrator.character_library") as m_lib:
+            m_lib.get = MagicMock(side_effect=lambda cid: assets.get(cid))
+            refs = PipelineOrchestrator._collect_character_reference_images(
+                self._script("proj-new"), stats=stats
+            )
+
+        assert refs == ["http://x/new2.png"]
+        assert stats["reference_images_stale_skipped"] == 1
+
+    def test_same_script_asset_kept(self):
+        """血缘一致 → 正常收集，无跳过。"""
+        assets = {
+            "char_001": self._asset(
+                "char_001", {"front": "http://x/f1.png"}, source_script_id="proj-new"
+            ),
+        }
+        stats: dict[str, int] = {}
+        with patch("app.services.pipeline_orchestrator.character_library") as m_lib:
+            m_lib.get = MagicMock(side_effect=lambda cid: assets.get(cid))
+            refs = PipelineOrchestrator._collect_character_reference_images(
+                self._script("proj-new"), stats=stats
+            )
+
+        assert refs == ["http://x/f1.png"]
+        assert stats["reference_images_stale_skipped"] == 0
+
+    def test_legacy_asset_fallback_allowed_with_info_log(self, caplog):
+        """legacy 无血缘资产（M18.7 前入库）→ 兜底允许使用，记 info 日志提示陈旧。"""
+        assets = {
+            "char_001": self._asset("char_001", {"front": "http://x/legacy1.png"}),
+            "char_002": self._asset(
+                "char_002", {"front": "http://x/stale2.png"}, source_script_id="proj-old"
+            ),
+        }
+        stats: dict[str, int] = {}
+        with patch("app.services.pipeline_orchestrator.character_library") as m_lib:
+            m_lib.get = MagicMock(side_effect=lambda cid: assets.get(cid))
+            with caplog.at_level(logging.INFO, logger="app.services.pipeline_orchestrator"):
+                refs = PipelineOrchestrator._collect_character_reference_images(
+                    self._script("proj-new"), stats=stats
+                )
+
+        assert refs == ["http://x/legacy1.png"]
+        assert stats["reference_images_stale_skipped"] == 1
+        assert any("legacy" in r.message for r in caplog.records)
+
+    async def test_video_step_reports_stale_skipped_count(self, pipeline_req, mocks):
+        """步骤级上报：steps.video.reference_images_stale_skipped 记录跳过数，
+        VideoRequest.reference_images 仅含血缘一致角色的参考图。"""
+        data = _script_data()
+        data["project_id"] = "proj-new"
+        mocks["script"].execute = AsyncMock(return_value=AgentResponse(success=True, data=data))
+        mocks["charlib"].get = MagicMock(
+            side_effect=lambda cid: {
+                "char_001": self._asset(
+                    "char_001", {"front": "http://x/old1.png"}, source_script_id="proj-old"
+                ),
+                "char_002": self._asset(
+                    "char_002", {"front": "http://x/new2.png"}, source_script_id="proj-new"
+                ),
+            }.get(cid)
+        )
+        orch = PipelineOrchestrator()
+        task_id = orch.start(pipeline_req)
+        await _wait_done(orch, task_id)
+
+        from app.core.progress import progress_tracker
+
+        record = progress_tracker.get(task_id)
+        assert record.status == "completed"
+        assert record.result["steps"]["video"]["reference_images_stale_skipped"] == 1
+        batch_req = mocks["video"].batch_execute.call_args.args[0]
+        for item in batch_req.items:
+            assert item.reference_images == ["http://x/new2.png"]
+
+    async def test_video_step_stale_count_zero_when_all_fresh(self, pipeline_req, mocks):
+        """全部资产血缘一致 → 计数为 0（字段始终存在于 steps.video）。"""
+        data = _script_data()
+        data["project_id"] = "proj-new"
+        mocks["script"].execute = AsyncMock(return_value=AgentResponse(success=True, data=data))
+        mocks["charlib"].get = MagicMock(
+            side_effect=lambda cid: self._asset(
+                cid, {"front": f"http://x/{cid}.png"}, source_script_id="proj-new"
+            )
+        )
+        orch = PipelineOrchestrator()
+        task_id = orch.start(pipeline_req)
+        await _wait_done(orch, task_id)
+
+        from app.core.progress import progress_tracker
+
+        record = progress_tracker.get(task_id)
+        assert record.status == "completed"
+        assert record.result["steps"]["video"]["reference_images_stale_skipped"] == 0
+
+    async def test_character_step_passes_script_project_id(self, mocks):
+        """M18.7 血缘写入口径一致：定妆照步骤将剧本 project_id 透传 CharacterRequest。"""
+        data = _script_data()
+        data["project_id"] = "proj-lineage"
+        mocks["script"].execute = AsyncMock(return_value=AgentResponse(success=True, data=data))
+        req = PipelineRunRequest(
+            premise="深夜便利店偶遇",
+            scenes_per_episode=2,
+            generate_character_refs=True,
+            max_character_refs=1,
+            run_quality_check=False,
+        )
+        orch = PipelineOrchestrator()
+        task_id = orch.start(req)
+        await _wait_done(orch, task_id)
+
+        char_req = mocks["character"].execute.call_args.args[0]
+        assert char_req.project_id == "proj-lineage"
 
 
 class TestVisualQualityStep:

@@ -1200,6 +1200,23 @@
             "STATE.json"
           ],
           "notes": "core 重启加载 style 透传 + HunyuanImage 404 两项修复。第一轮（pipeline-badd72391e7e，同 M18.1 参数）：9 步全绿 storyboard/video 3/3；pc02 再次静默崩溃经计划任务救援恢复；M18.2 持续拦截（林远 side / 苏清 closeup 各连续 3 次不合格未入库）；M18.4 QC 未实跑（多镜组一次成功，组级 QC 按设计跳过）；drift 3/3 但指标被资产库陈旧参考污染。关键发现：① HunyuanImage 服务侧新故障 No module named 'hyimage.pipelines'（404 修复后请求已到达服务，服务 import 层损坏，workstation 待修），全链路回退 SDXL；② 新缺口 — M18.2 拦截后 _collect_character_reference_images 按 character_id 静默命中 M18.1 旧资产（林默/林小满 vs 本轮林远/苏清），ref2va 参考与视觉对照基准双双错配，drift 失去意义，派生候选：资产库按剧本指纹隔离/拦截后置空引用/资产版本化（待决策）。第二轮（pipeline-a91a8cfc2fa6，临时 H3_MULTISHOT_ENABLED=false 强制逐场景，验证后已还原并重启 health 200）：M18.4 检测+纠偏层首次实机全链路运行 — scene_1 检出画风漂移（写实渲染缺国漫线条/平涂/赛璐璐特征）→ strengthen_h3_style_clause 强化锚定换 seed 重生成 1/1 → 重试仍判漂移（3D 写实 CG 质感）→ 重试耗尽 fail-open 放行（不阻断生产）；scene_2/3 首检通过静默放行。结果 storyboard/video 3/3、成片 9.17s、quality 75、drift=[2,3]（scene_1 即唯一经 QC 纠偏场景恰为唯一过视觉对照者，提示性证据不作强归因）；pc02 全程健康复制零失败。M18 收官：约束/检测/纠偏三层全部实跑验证；drift 干净量化受资产库缺口阻塞列入后续候选。本轮无代码变更，全量回归维持 649 passed / 83.07%。"
+        },
+        {
+          "id": "M18.7",
+          "name": "参考图集质量根治（资产血缘 + 拦截即隔离 + 收集防串戏）",
+          "status": "completed",
+          "files": [
+            "platform/backend/app/models/schemas.py",
+            "platform/backend/app/services/character_library.py",
+            "platform/backend/app/agents/character_agent.py",
+            "platform/backend/app/services/pipeline_orchestrator.py",
+            "platform/backend/tests/unit/test_character_library.py",
+            "platform/backend/tests/unit/test_character_agent.py",
+            "platform/backend/tests/unit/test_pipeline_orchestrator.py",
+            "STATE.json",
+            "TEST_LOG.md"
+          ],
+          "notes": "落地 M18.6 派生候选，根治「QC 拦截后静默命中旧剧本同 ID 资产」缺口。① 资产血缘：CharacterAsset 新增 source_script_id（空串=legacy 旧资产）与 updated_at_iso（ISO 8601 人类可读；updated_at 保留 epoch int — pydantic v2 不允许 int→str 强转，改类型会使全部旧资产文件加载失败）；register_from_card 新增 source_script_id 参数（空串时保留既有血缘，画布单角色重生成不丢上下文）；CharacterRequest 新增 project_id；character_agent 入库写入 request.project_id；orchestrator._step_characters 透传 script.project_id（写入与校验同一口径）。② 拦截即隔离：_qc_three_views 两处重试耗尽判失败点先调 _isolate_character_asset 显式删除资产库该 character_id 残留并记 warning，隔离异常不阻断拦截。③ 收集防串戏：_collect_character_reference_images 新增 stats 出参；资产血缘存在且与当前剧本 project_id 不一致 → 跳过（info 日志）；legacy 无血缘资产仅在该角色本轮未重新生成时才可能残留（重新生成覆盖写血缘、QC 拦截已隔离），兜底允许使用并记 info 提示陈旧；steps.video（标准/长视频两路）新增 reference_images_stale_skipped 计数。TDD 15 例先红后绿（RED 14 红 1 防御绿）。全量回归 tests/unit：1247 passed（1232→1247）/ 10 failed 与基线逐一相同（NAS 挂载 + 嵌入模型外网既有环境失败，非回归）/ 覆盖率 TOTAL 99%（character_agent、character_library、schemas 100%，pipeline_orchestrator 94%）。未 commit/push；dashbox/、LICENSE/NOTICE、ToIV 未动。实机验证（新剧本 E2E drift 干净量化）待下一轮 core 复跑。"
         }
       ]
     },

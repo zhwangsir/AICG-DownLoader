@@ -106,6 +106,21 @@ def _fallback_view_prompt(char: Character, anchor: StyleAnchor) -> str:
         f"{anchor.style_name_en}, cinematic lighting, best quality{quality_tail}"
     )
 
+def _isolate_character_asset(character_id: str) -> None:
+    """M18.7 拦截即隔离：三视图 QC 重试耗尽判失败时，显式删除资产库中该
+    character_id 的残留资产（可能是上一轮旧剧本同 ID 资产），防止
+    _collect_character_reference_images 静默命中旧资产导致 ref2va 参考与
+    漂移对照基准错配（M18.6 实测教训）。隔离异常不阻断拦截主流程。"""
+    try:
+        deleted = character_library.delete(character_id)
+        logger.warning(
+            "角色 %s 三视图质检重试耗尽判失败，已隔离资产库残留资产（deleted=%s，防串戏）",
+            character_id, deleted,
+        )
+    except Exception as e:
+        logger.warning("角色 %s 资产隔离异常（不阻断质检拦截）: %s", character_id, e)
+
+
 # 强制追加的正面提示词（确保单人和高质量 + 中性摄影棚背景）
 # M15.1：移除写死的专业摄影词，画风关键词由 style_anchor 在提示词生成阶段注入
 POSITIVE_SUFFIX = ", solo, single person, only one person, portrait, looking at viewer, simple neutral gray studio background, soft rim lighting, best quality, masterpiece, highly detailed skin, detailed facial features, sharp focus, cinematic lighting, depth of field"
@@ -291,6 +306,9 @@ class CharacterAgent(BaseAgent):
                     reference_images=reference_images,
                     used_prompts=card.used_prompts,
                     consistency_level=request.consistency_level,
+                    # M18.7 资产血缘：写入当前剧本 project_id，供收集阶段防串戏校验；
+                    # 空串（画布单角色生成）按 legacy 处理
+                    source_script_id=request.project_id,
                 )
             except Exception as e:
                 # 资产库登记失败不阻断角色生成主流程
@@ -571,6 +589,8 @@ class CharacterAgent(BaseAgent):
             if not reason:
                 break
             if attempt >= max_retries:
+                # M18.7 拦截即隔离：判失败时清除资产库残留（防止收集到旧剧本同 ID 资产）
+                _isolate_character_asset(char.character_id)
                 raise RuntimeError(f"front 视图质检连续 {attempt + 1} 次不合格: {reason}")
             logger.warning(
                 "角色 %s front 视图质检不合格（%s），换 seed 重生成 %d/%d",
@@ -590,6 +610,8 @@ class CharacterAgent(BaseAgent):
                 if not reason:
                     break
                 if attempt >= max_retries:
+                    # M18.7 拦截即隔离：判失败时清除资产库残留（防止收集到旧剧本同 ID 资产）
+                    _isolate_character_asset(char.character_id)
                     raise RuntimeError(
                         f"{view_name} 视图质检连续 {attempt + 1} 次不合格: {reason}"
                     )
