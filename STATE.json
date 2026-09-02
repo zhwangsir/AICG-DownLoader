@@ -2,7 +2,28 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-02",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 1d5c2be。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 505d039。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "p6_24fps_505d039": {
+    "commit": "505d039",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "stacked_on": "ccfe7a6",
+    "output_fps": "drama compose/export default 24",
+    "canvas": "compose fixed at 24",
+    "edit_modal": "default FPS_OPTIONS[0]=24; FPS_OPTIONS=[24,30,60] (30/60 still optional)",
+    "schemas": "Edit/Pipeline output_fps description pinned to 24; value was already 24",
+    "dashbox_episode": "still 1080×1920 (not changed)",
+    "dashbox_15x": "not labeled 2K",
+    "spark02": "not SSH-verified",
+    "tests": "frontend vitest 92; backend test_p6_compose_export_ltx 11",
+    "gaps": [
+      "voice 3–8s still not done",
+      "happyhorse-1.0 still listed as H3 alias",
+      "DashBox episode compose still 1080×1920 (engine export, not drama generate)"
+    ],
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "p6_compose_768_1d5c2be": {
     "commit": "1d5c2be",
     "pushed": true,

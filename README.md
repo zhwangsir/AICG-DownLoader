@@ -33,6 +33,10 @@
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 
+## 短剧 compose 默认 24fps（2026-09-02，`505d039`）
+
+`505d039` 已双推（叠 `ccfe7a6`）：短剧 compose/export 默认 `output_fps=24`。Canvas compose 固定 24；EditModal 默认 `FPS_OPTIONS[0]=24`；`FPS_OPTIONS=[24,30,60]`（30/60 仍可选）。schemas Edit/Pipeline `output_fps` 描述钉 24，值本来就是 24。未改 DashBox episode compose 1080×1920，未把 1.5× 标成 2K。未 SSH spark02。仍空：voice 3–8s；`happyhorse-1.0` 仍作 H3 别名；DashBox episode compose 仍 1080×1920。LICENSE/NOTICE/ToIV 未动。
+
 ## P6 compose 768P / 关 auto-LTX（2026-09-02，`1d5c2be`）
 
 `1d5c2be` 已双推（P6，叠 `18f06d8`）：短剧 compose/export 默认 `768x1344`（横屏 `1344x768`）。`route_video_engine` 与网关 `_select_video_backend` 不再 auto-LTX；`/v1/models` 仅 `LOCAL_LTX_ENABLED=true` 才列出 LTX-2.5。LTX 代码仍在 `ltx_enabled` 后。H3 成片 768P 未改。DashBox 1.5× 未标成 2K。未 SSH spark02。缺口：voice 3–8s 仍未做；Canvas/EditModal compose fps 仍 30（schema 默认 24，AICG 接着改）；`happyhorse-1.0` 仍作 H3 别名列出；DashBox episode compose 仍 1080×1920（引擎导出，不是短剧 generate）。LICENSE/NOTICE/ToIV 未动。
