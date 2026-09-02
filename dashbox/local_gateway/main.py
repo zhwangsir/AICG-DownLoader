@@ -73,7 +73,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://192.168.71.84:8000/v1").rstrip("/")
 VLM_BASE_URL = os.getenv("LOCAL_VLM_BASE_URL", "http://192.168.71.82:8000/v1").rstrip("/")
-VLM_MODEL_NAME = os.getenv("LOCAL_VLM_MODEL", "qwen3-vl-32b")
+VLM_MODEL_NAME = os.getenv("LOCAL_VLM_MODEL", "qwen3.8-flash-next")
 VLM_LOGICAL_MODELS = {
     "DC-freezone-vision-LLM",
     "DC-style-analyzer-LLM",

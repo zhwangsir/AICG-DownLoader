@@ -141,7 +141,7 @@ describe("VideoModal 空数据与基础渲染", () => {
   it("默认渲染：分镜选择/时长/提示词/反向提示词/关键帧预览", () => {
     renderModal();
     expect(
-      screen.getByText("生成视频片段（H3 / LTX-2.5 双引擎）")
+      screen.getByText("生成视频片段（MiniMax-H3）")
     ).toBeInTheDocument();
     expect((fieldControl("选择分镜", "select") as HTMLSelectElement).value).toBe("1");
     expect(
@@ -172,7 +172,7 @@ describe("VideoModal 空数据与基础渲染", () => {
 
   it("遮罩点击关闭；模态内部点击不关闭", () => {
     const { onClose, container } = renderModal();
-    fireEvent.click(screen.getByText("生成视频片段（H3 / LTX-2.5 双引擎）"));
+    fireEvent.click(screen.getByText("生成视频片段（MiniMax-H3）"));
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(container.querySelector(".modal-overlay")!);
     expect(onClose).toHaveBeenCalledTimes(1);

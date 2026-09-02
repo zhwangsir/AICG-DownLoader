@@ -2944,7 +2944,7 @@ function defaultComfyMediaModelConfig(
   const referenceCapabilities: Record<string, number | boolean> = {};
   const isMiniMaxH3Local = model.trim().toLowerCase() === "minimax-h3-local";
   const resolutionOptions = isMiniMaxH3Local
-    ? ["480p", "768p", "1080p"]
+    ? ["768P"]
     : ["480p", "640p"];
   const ratioOptions = isMiniMaxH3Local
     ? ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
@@ -3778,7 +3778,9 @@ function LocalMediaModelEditor({
             options={
               mediaType === "image"
                 ? ["1K", "2K", "3K", "4K", "8K", "1024x1024", "2048x2048"]
-                : ["480p", "720p", "1080p", "2K", "4K"]
+                : /minimax-h3/i.test(model)
+                  ? ["768P"]
+                  : ["480p", "720p", "768P", "1080p", "2K", "4K"]
             }
           />
           <CatalogMultiSelectField

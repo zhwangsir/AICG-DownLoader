@@ -1,7 +1,7 @@
 """P1: local MiniMax H3 Context-IR rewrite before generate.
 
 Spark LLM (qwen3.6-uncensored) rewrites the prompt H3 actually receives into the
-official Context-IR layout. Optional spark VLM (qwen3-vl-32b) adds retention
+official Context-IR layout. Optional spark VLM (qwen3.8-flash-next) adds retention
 notes when reference images exist. Fail-open: any error logs a warning and
 returns the original assembled prompt so generate is never blocked.
 

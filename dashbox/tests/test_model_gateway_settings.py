@@ -2058,7 +2058,7 @@ def test_comfyui_workflow_routes_create_one_media_model(monkeypatch, tmp_path):
     mappings = get_newapi_media_model_mappings()
     assert set(mappings) == {"MiniMax-H3-local"}
     config = mappings["MiniMax-H3-local"]["config"]
-    assert config["resolutionOptions"] == ["480p", "768p", "1080p"]
+    assert config["resolutionOptions"] == ["768p"]
     assert config["ratioOptions"] == [
         "21:9",
         "16:9",

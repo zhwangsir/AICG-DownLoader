@@ -1394,19 +1394,24 @@ VIDEO_MAX_WAIT_SECONDS = float(os.environ.get("DASHBOX_VIDEO_TIMEOUT", "900"))
 class GenerateVideoRequest(BaseModel):
     preset_id: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
-    negative_prompt: str | None = Field(None, description="仅 Wan 路线生效（双 CLIP 编码）")
+    negative_prompt: str | None = Field(None, description="仅遗留 Wan 工作流生效（短剧成片不选 Wan）")
     first_frame_url: str = Field(min_length=1, description="首帧图绝对 URL（必填）")
-    width: int = Field(832, ge=64, le=2048)
-    height: int = Field(480, ge=64, le=2048)
-    length: int = Field(81, ge=9, le=241, description="帧数（wan 81≈5s / h3 124≈5s）")
+    width: int = Field(768, ge=64, le=2048)
+    height: int = Field(1344, ge=64, le=2048)
+    length: int = Field(124, ge=9, le=241, description="帧数（H3 124≈5s / 241≈10s）")
     seed: int | None = Field(None, description="缺省随机")
     project_id: str | None = Field(None, description="提供则 mp4 落盘项目媒体并返回 url")
+
+
+def _drama_video_preset_ids() -> list[str]:
+    """短剧/漫剧成片可选预设：仅 H3。Wan JSON 留在磁盘，不进 generate 目录。"""
+    return [pid for pid, meta in NSFW_VIDEO_PRESETS.items() if meta.get("route") == "h3"]
 
 
 def _load_preset_workflow(preset_id: str) -> tuple[dict[str, Any], dict[str, str]]:
     meta = NSFW_VIDEO_PRESETS.get(preset_id)
     if not meta:
-        raise HTTPException(400, f"未知预设: {preset_id}（可选: {', '.join(NSFW_VIDEO_PRESETS)}）")
+        raise HTTPException(400, f"未知预设: {preset_id}（可选: {', '.join(_drama_video_preset_ids())}）")
     path = PRESET_DIR / meta["file"]
     if not path.is_file():
         raise HTTPException(500, f"预设文件缺失: {path}")
@@ -1598,6 +1603,7 @@ def list_video_presets(user: dict = Depends(get_api_user)) -> dict[str, Any]:
     items = [
         {"id": pid, "label": m["label"], "trigger": m["trigger"], "route": m["route"]}
         for pid, m in NSFW_VIDEO_PRESETS.items()
+        if m.get("route") == "h3"
     ]
     return {"ok": True, "data": {"items": items}}
 
@@ -1613,6 +1619,12 @@ async def generate_video(
     """
     if not nsfw_status()["nsfw_enabled"]:
         raise HTTPException(403, "R18 视频生成需要先在模型库开启 R18")
+    meta = NSFW_VIDEO_PRESETS.get(req.preset_id)
+    if not meta or meta.get("route") != "h3":
+        raise HTTPException(
+            400,
+            f"短剧/漫剧成片引擎为 MiniMax-H3，可选预设: {', '.join(_drama_video_preset_ids())}",
+        )
     workflow, meta = _load_preset_workflow(req.preset_id)
     seed = req.seed if req.seed is not None else random.randint(0, 2**31 - 1)
     workflow = _patch_video_workflow(

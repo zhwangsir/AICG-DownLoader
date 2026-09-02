@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright (c) 2026 ClaymoreLab
 /**
- * R18 视频节点 —— 内置 4 个 NSFW 预设（Civitai 逆向 LoRA 链）直提 ComfyUI：
- * - Wan 2.2 I2V ×3（传教士/后入Twerk/口交特写）→ LB 三卡集群
- * - MiniMax H3 ×1（全能动作+音画同出）→ :8195 专用实例
+ * R18 视频节点 —— 短剧/漫剧成片引擎钉死 MiniMax H3（Wan JSON 留盘，不进可选目录）：
+ * - MiniMax H3（全能动作+音画 / 剧情无 LoRA）→ :8195
+ * - 画布 768×1344 24fps
  *
  * 与 R18 图片节点同构的门禁：R18 关闭时锁定态；首帧锚定强制（自身上传
  * 或上游连线）；产物 mp4 落盘项目媒体（videoUrl 回填，下游可引用）。
@@ -69,20 +69,15 @@ const DEFAULT_HEIGHT = 300;
 const OPERATIONS_PANEL_HEIGHT = 252;
 const OPERATIONS_PANEL_GAP = 12;
 
-/** 尺寸档按路线区分：wan 原生 832×480 系；h3 必须 32 倍数。 */
-const WAN_SIZE_PRESETS: ReadonlyArray<{ w: number; h: number; label: string }> = [
-  { w: 832, h: 480, label: '横 16:9' },
-  { w: 480, h: 832, label: '竖 9:16' },
-];
+/** H3 画布钉死 768P（768×1344 竖 / 1344×768 横），24fps。 */
 const H3_SIZE_PRESETS: ReadonlyArray<{ w: number; h: number; label: string }> = [
-  { w: 1280, h: 704, label: '横 16:9' },
-  { w: 704, h: 1280, label: '竖 9:16' },
+  { w: 1344, h: 768, label: '横 16:9' },
+  { w: 768, h: 1344, label: '竖 9:16' },
 ];
-/** 帧数档：wan 16fps（81≈5s）；h3 24fps（124≈5s / 241≈10s，17k+5 网格）。 */
-const LENGTH_PRESETS: ReadonlyArray<{ route: 'wan' | 'h3'; length: number; label: string }> = [
-  { route: 'wan', length: 81, label: '5s' },
-  { route: 'h3', length: 124, label: '5s' },
-  { route: 'h3', length: 241, label: '10s' },
+/** 帧数档：h3 24fps（124≈5s / 241≈10s，17k+5 网格）。 */
+const LENGTH_PRESETS: ReadonlyArray<{ length: number; label: string }> = [
+  { length: 124, label: '5s' },
+  { length: 241, label: '10s' },
 ];
 
 /** 相对项目媒体 URL → 后端可下载的绝对地址。 */
@@ -100,7 +95,7 @@ export const NSFWVideoGenNode = memo(({ id, data, selected }: NSFWVideoGenNodePr
   const nsfwEnabled = nsfwStatusData?.data?.nsfw_enabled === true;
   const { data: presetsData } = useVideoPresets(nsfwEnabled);
   const presets = useMemo<NsfwVideoPreset[]>(
-    () => presetsData?.data?.items ?? [],
+    () => (presetsData?.data?.items ?? []).filter((item) => item.route === 'h3'),
     [presetsData],
   );
 
@@ -114,9 +109,9 @@ export const NSFWVideoGenNode = memo(({ id, data, selected }: NSFWVideoGenNodePr
 
   const prompt = typeof data.prompt === 'string' ? data.prompt : '';
   const presetId = typeof data.presetId === 'string' ? data.presetId : '';
-  const width = typeof data.width === 'number' ? data.width : 832;
-  const height = typeof data.height === 'number' ? data.height : 480;
-  const length = typeof data.length === 'number' ? data.length : 81;
+  const width = typeof data.width === 'number' ? data.width : 768;
+  const height = typeof data.height === 'number' ? data.height : 1344;
+  const length = typeof data.length === 'number' ? data.length : 124;
   const isGenerating = data.isGenerating === true;
   const generationError =
     typeof data.generationError === 'string' && data.generationError.length > 0
@@ -139,12 +134,12 @@ export const NSFWVideoGenNode = memo(({ id, data, selected }: NSFWVideoGenNodePr
   const activePreset = presets.find((p) => p.id === presetId) ?? null;
   useEffect(() => {
     if (!activePreset) return;
-    const sizes = activePreset.route === 'wan' ? WAN_SIZE_PRESETS : H3_SIZE_PRESETS;
-    const len = LENGTH_PRESETS.find((l) => l.route === activePreset.route);
+    const sizes = H3_SIZE_PRESETS;
+    const len = LENGTH_PRESETS[0];
     updateNodeData(id, {
-      width: sizes[0].w,
-      height: sizes[0].h,
-      length: len?.length ?? (activePreset.route === 'wan' ? 81 : 124),
+      width: sizes[1].w,
+      height: sizes[1].h,
+      length: len?.length ?? 124,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅在切换预设时同步
   }, [presetId]);
@@ -269,8 +264,8 @@ export const NSFWVideoGenNode = memo(({ id, data, selected }: NSFWVideoGenNodePr
     );
   }
 
-  const sizePresets = activePreset?.route === 'h3' ? H3_SIZE_PRESETS : WAN_SIZE_PRESETS;
-  const lengthOptions = LENGTH_PRESETS.filter((l) => l.route === (activePreset?.route ?? 'wan'));
+  const sizePresets = H3_SIZE_PRESETS;
+  const lengthOptions = LENGTH_PRESETS;
 
   return (
     <div
@@ -367,7 +362,7 @@ export const NSFWVideoGenNode = memo(({ id, data, selected }: NSFWVideoGenNodePr
           }}
           onClick={(event) => event.stopPropagation()}
         >
-          {/* 预设选择：4 个内置 NSFW 链（触发词随预设提示） */}
+          {/* 预设选择：H3 成片链（Wan 已从短剧目录隐藏） */}
           <div className="flex items-center gap-1.5">
             {presets.map((preset) => (
               <button

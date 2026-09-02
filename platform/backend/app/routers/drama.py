@@ -425,7 +425,7 @@ async def generate_storyboard_batch(request: StoryboardBatchRequest) -> AgentRes
 
 @router.post("/video/generate", response_model=AgentResponse)
 async def generate_video(request: VideoRequest) -> AgentResponse:
-    """视频 Agent：分镜关键帧 → 视频片段（Wan 2.2 I2V）。"""
+    """视频 Agent：分镜关键帧 → 视频片段（MiniMax-H3）。"""
     return await video_agent.execute(request)
 
 

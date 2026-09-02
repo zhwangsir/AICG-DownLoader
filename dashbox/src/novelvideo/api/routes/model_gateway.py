@@ -73,7 +73,7 @@ def _default_comfyui_media_model_config(
     reference_limits: dict[str, int | bool] = {}
     is_minimax_h3_local = model.strip().lower() == "minimax-h3-local"
     resolution_options = (
-        ["480p", "768p", "1080p"]
+        ["768P"]
         if is_minimax_h3_local
         else ["480p", "640p"]
     )

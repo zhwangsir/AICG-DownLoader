@@ -986,17 +986,17 @@ export default function Canvas() {
             type: "video",
             detail: vd
               ? `已生成 (${vd.duration_seconds}s)`
-              : `H3 / LTX-2.5 · ${scene.duration_seconds}s`,
+              : `MiniMax-H3 · ${scene.duration_seconds}s`,
             preview: vd
-              ? `分辨率 1080x1920 · ${vd.duration_seconds || scene.duration_seconds}s`
+              ? `分辨率 768×1344 · ${vd.duration_seconds || scene.duration_seconds}s`
               : sb
               ? `基于分镜图生成 ${scene.duration_seconds}s 视频：${(scene.description || "").slice(0, 60)}${(scene.description || "").length > 60 ? "…" : ""}`
               : `基于分镜图生成 ${scene.duration_seconds}s 视频：${(scene.description || "").slice(0, 60)}${(scene.description || "").length > 60 ? "…" : ""}`,
-            tags: ["H3 / LTX-2.5", `${scene.duration_seconds || 3}s`].filter(Boolean) as string[],
+            tags: ["MiniMax-H3", `${scene.duration_seconds || 3}s`].filter(Boolean) as string[],
             meta: [
-              { label: "模型", value: "H3 / LTX-2.5 双引擎" },
+              { label: "模型", value: "MiniMax-H3" },
               { label: "时长", value: `${vd?.duration_seconds || scene.duration_seconds || 0}s` },
-              { label: "分辨率", value: "1080x1920" },
+              { label: "分辨率", value: "768×1344" },
               { label: "状态", value: vd ? "已生成" : "待生成" },
             ],
             videoUrl: vd?.video_url,

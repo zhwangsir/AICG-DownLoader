@@ -1109,7 +1109,7 @@ class TestR18ScriptPlan:
         data = r.json()["data"]
         assert data["title"] == "雨夜"
         assert [s["kind"] for s in data["scenes"]] == ["portrait", "action"]
-        assert data["scenes"][1]["preset_id"] == "wan22-missionary"
+        assert data["scenes"][1]["preset_id"] == "h3-aio"
 
     def test_planner_value_error_maps_503(self, monkeypatch):
         ml.set_nsfw(True)
@@ -1548,7 +1548,7 @@ class TestR18ComposeEndpoint:
 class TestGenerateVideo:
     def _post(self, client: TestClient, **overrides):
         body = {
-            "preset_id": "wan22-missionary",
+            "preset_id": "h3-aio",
             "prompt": "m15510n4ry, a woman",
             "first_frame_url": "http://x/frame.png",
         }
@@ -1568,21 +1568,27 @@ class TestGenerateVideo:
             c = _client()
             r = self._post(c, preset_id="no-such")
             assert r.status_code == 400
-            assert "wan22-missionary" in r.json()["detail"]
+            assert "h3-aio" in r.json()["detail"]
+
+    def test_wan_preset_rejected_on_generate_path(self):
+        """Wan JSON 留盘，但短剧 generate 路径不得选 Wan。"""
+        ml.set_nsfw(True)
+        with respx.mock:
+            c = _client()
+            r = self._post(c, preset_id="wan22-missionary")
+            assert r.status_code == 400
+            detail = r.json()["detail"]
+            assert "MiniMax-H3" in detail
+            assert "h3-aio" in detail
+            assert "wan22" not in detail
 
     def test_video_presets_hidden_without_r18(self):
         c = _client()
         assert c.get("/model-library/video-presets").json()["data"]["items"] == []
         ml.set_nsfw(True)
         items = c.get("/model-library/video-presets").json()["data"]["items"]
-        assert len(items) == 5
-        assert {i["id"] for i in items} == {
-            "wan22-missionary",
-            "wan22-doggie-twerk",
-            "wan22-blowjob-closeup",
-            "h3-aio",
-            "h3-clean",
-        }
+        assert {i["id"] for i in items} == {"h3-aio", "h3-clean"}
+        assert all(i["route"] == "h3" for i in items)
 
     def test_patch_workflow_wan(self):
         wf, _ = ml_routes._load_preset_workflow("wan22-missionary")
@@ -1620,8 +1626,8 @@ class TestGenerateVideo:
             prompt="hmmotion, scene",
             negative_prompt=None,
             first_frame_name="h.png",
-            width=1280,
-            height=704,
+            width=768,
+            height=1344,
             length=124,
             seed=7,
         )
@@ -1629,7 +1635,7 @@ class TestGenerateVideo:
         assert i2v["inputs"]["prompt"] == "hmmotion, scene"
         unet = next(n for n in out.values() if n["class_type"] == "UNETLoader")
         assert unet["inputs"]["unet_name"].startswith("10Eros")
-        assert i2v["inputs"]["width"] == 1280 and i2v["inputs"]["length"] == 124
+        assert i2v["inputs"]["width"] == 768 and i2v["inputs"]["length"] == 124
         noise = next(n for n in out.values() if n["class_type"] == "RandomNoise")
         assert noise["inputs"]["noise_seed"] == 7
         load = next(n for n in out.values() if n["class_type"] == "LoadImage")

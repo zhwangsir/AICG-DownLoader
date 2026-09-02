@@ -28,8 +28,12 @@ describe('shotLengthFrames', () => {
 });
 
 describe('shotVideoSize', () => {
-  it('h3 32 对齐：832x1216 原样通过', () => {
-    expect(shotVideoSize('832x1216', 'h3')).toEqual({ width: 832, height: 1216 });
+  it('h3 竖版钉死 768×1344（忽略上游 832x1216）', () => {
+    expect(shotVideoSize('832x1216', 'h3')).toEqual({ width: 768, height: 1344 });
+  });
+
+  it('h3 横版钉死 1344×768', () => {
+    expect(shotVideoSize('1216x832', 'h3')).toEqual({ width: 1344, height: 768 });
   });
 
   it('wan 最长边 832：竖版 832x1216 → 576x832（16 对齐，≈原始 2:3）', () => {

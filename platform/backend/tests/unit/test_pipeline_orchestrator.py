@@ -932,3 +932,20 @@ class TestVideoStyleAnchoring:
         assert len(batch_req.items) == 2
         for item in batch_req.items:
             assert item.style == "国漫"
+
+
+class TestP5FilmFinalFlags:
+    """P5: 一键流水线成片必须 preview=false / quality=final / engine=h3。"""
+
+    async def test_film_step_pins_h3_final(self, pipeline_req, mocks):
+        orch = PipelineOrchestrator()
+        task_id = orch.start(pipeline_req)
+        await _wait_done(orch, task_id)
+
+        batch_req = mocks["video"].batch_execute.call_args.args[0]
+        assert len(batch_req.items) == 2
+        for item in batch_req.items:
+            assert item.engine == "h3"
+            assert item.preview is False
+            assert item.quality == "final"
+

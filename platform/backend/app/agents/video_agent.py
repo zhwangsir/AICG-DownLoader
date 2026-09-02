@@ -961,7 +961,9 @@ def apply_h3_turbo_for_request(
 ) -> None:
     """P3 双速：预览打开 Turbo；成片/默认保持 20 步且不插节点。"""
     preview = is_h3_preview_request(request)
-    enabled = preview or bool(settings.h3_turbo_enabled)
+    quality = (getattr(request, "quality", None) or "").strip().lower() if request else ""
+    force_final = quality in {"final", "delivery", "baseline", "max"}
+    enabled = False if force_final else (preview or bool(settings.h3_turbo_enabled))
     steps = _h3_turbo_steps_for_mode(mode) if preview else None
     lora_name = resolve_h3_turbo_lora_name() if preview else None
     _apply_h3_turbo_to_workflow(

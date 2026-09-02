@@ -94,10 +94,11 @@ export function shotLengthFrames(durationSec: number, route: 'wan' | 'h3'): numb
 /** 视频尺寸：h3 需 32 对齐（首帧生成分辨率 832x1216 等本就满足）；
  *  wan 14B 限制最长边 832（等比缩放 + 16 对齐），否则慢到不可用。 */
 export function shotVideoSize(size: string, route: 'wan' | 'h3'): { width: number; height: number } {
-  const [w, h] = size.split('x').map((v) => Number.parseInt(v, 10) || 832);
+  const [w, h] = size.split('x').map((v) => Number.parseInt(v, 10) || 768);
   const snap = (v: number, step: number) => Math.max(240, Math.round(v / step) * step);
   if (route === 'h3') {
-    return { width: snap(w, 32), height: snap(h, 32) };
+    if (h >= w) return { width: 768, height: 1344 };
+    return { width: 1344, height: 768 };
   }
   const scale = Math.min(1, 832 / Math.max(w, h));
   return { width: snap(w * scale, 16), height: snap(h * scale, 16) };
@@ -248,8 +249,7 @@ export const NSFWVideoBatchNode = memo(({ id, data, selected }: NSFWVideoBatchNo
     (shot: NsfwVideoBatchShot, videoUrl: string): string | null => {
       const store = useCanvasStore.getState();
       const position = store.findNodePosition(id, 320, 240);
-      const route = shot.kind === 'action' && shot.presetId.startsWith('wan22') ? 'wan' : 'h3';
-      const { width, height } = shotVideoSize(upstream?.size ?? '832x1216', route as 'wan' | 'h3');
+      const { width, height } = shotVideoSize(upstream?.size ?? '768x1344', 'h3');
       const childId = store.addNode(CANVAS_NODE_TYPES.video, position, {
         displayName: `R18 成片 S${shot.sceneNo}`,
         videoUrl,
@@ -313,10 +313,10 @@ export const NSFWVideoBatchNode = memo(({ id, data, selected }: NSFWVideoBatchNo
       const projectId = readUrl().project;
       if (!projectId || !shot.firstFrameUrl) return;
       updateShot(shot.id, { phase: 'video', error: null });
-      const presetId =
+      const rawPreset =
         shot.kind === 'action' && shot.presetId ? shot.presetId : PLOT_PRESET;
-      const route: 'wan' | 'h3' = presetId.startsWith('wan22') ? 'wan' : 'h3';
-      const { width, height } = shotVideoSize(upstream?.size ?? '832x1216', route);
+      const presetId = rawPreset.startsWith('wan22') ? 'h3-aio' : rawPreset;
+      const { width, height } = shotVideoSize(upstream?.size ?? '768x1344', 'h3');
       // I2V 提示词只描述运动（对白交给 TTS 音轨，不写进 prompt——h3 音画
       // 会照 prompt 念词，写了就与配音轨双声重叠）；portrait 空运动词给缓动兜底
       const prompt =
@@ -329,7 +329,7 @@ export const NSFWVideoBatchNode = memo(({ id, data, selected }: NSFWVideoBatchNo
           first_frame_url: toAbsoluteUrl(shot.firstFrameUrl),
           width,
           height,
-          length: shotLengthFrames(shot.durationSec, route),
+          length: shotLengthFrames(shot.durationSec, 'h3'),
           project_id: projectId,
         });
         const url = result.ok ? (result.data.url ?? '') : '';

@@ -45,13 +45,12 @@ class Settings(BaseSettings):
     exo_model_kimi: str = "qwen3.6-uncensored"
 
     # ====================================================================
-    # 视觉质检模型（spark01 VLM，Qwen3-VL-32B-Instruct-FP8）
-    # 与 LLM 拆分：spark01 :8000 跑 Qwen3-VL-32B（别名 qwen3-vl-32b /
-    # molmo2-8b / omni-captioner）；spark02 只做文本 LLM。
-    # 与 .env.example / ToIV 对齐。无 .env 时也不得漂回 spark02。
+    # 视觉质检模型（spark01 VLM，qwen3.8-flash-next：更强 + 1M 上下文 + 视觉）
+    # 与 LLM 拆分：spark01 :8000 跑 qwen3.8-flash-next；spark02 只做文本 LLM。
+    # VISUAL_MODEL_NAME / 环境变量仍可覆盖。无 .env 时不得漂回 qwen3-vl-32b。
     # ====================================================================
     visual_model_url: str = "http://192.168.71.82:8000/v1"
-    visual_model_name: str = "qwen3-vl-32b"
+    visual_model_name: str = "qwen3.8-flash-next"
     # M16.2 分镜拼贴检测：关键帧生成后校验出场角色外貌一致性，失真自动重试
     storyboard_appearance_check: bool = True
     # M18.2 三视图 VLM 质检：三视图生成后、角色卡入库前校验 front 合格

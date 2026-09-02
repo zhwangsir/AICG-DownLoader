@@ -137,7 +137,7 @@ export function VideoModal({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={modalScrollStyle} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">生成视频片段（H3 / LTX-2.5 双引擎）</div>
+        <div className="modal-title">生成视频片段（MiniMax-H3）</div>
         {storyboards.length === 0 ? (
           <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
             请先生成分镜关键帧。

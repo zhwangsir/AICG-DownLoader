@@ -394,6 +394,10 @@ class PipelineOrchestrator:
                 # P2/M17.4 流水线级全模态参考 + 角色圣经音色/视频（仅 h3 ref2va 消费）
                 reference_videos=merged_videos,
                 reference_audios=merged_audios,
+                # P5 成片：一键流水线强制 20 步 turbo-off，引擎钉死 H3
+                engine="h3",
+                preview=False,
+                quality="final",
             )
             for sb in storyboards
         ]

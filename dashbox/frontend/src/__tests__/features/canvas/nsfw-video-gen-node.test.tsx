@@ -96,9 +96,9 @@ function makeData(
     displayName: "R18 视频",
     prompt: "",
     presetId: "",
-    width: 832,
-    height: 480,
-    length: 81,
+    width: 768,
+    height: 1344,
+    length: 124,
     videoUrl: null,
     firstFrameUrl: null,
     isGenerating: false,
@@ -145,12 +145,12 @@ describe("NSFWVideoGenNode", () => {
     expect(screen.queryByTitle(/生成 R18 视频/)).toBeNull();
   });
 
-  it("R18 开启后显示预设按钮，缺预设时生成禁用", async () => {
+  it("R18 开启后只显示 H3 预设，缺预设时生成禁用", async () => {
     nsfwEnabled = true;
-    renderNode({ prompt: "m15510n4ry, a woman" });
-    // 预设按钮来自 /video-presets（上游 mock 提供 2 个）
-    expect(await screen.findByText("传教士")).toBeTruthy();
-    expect(screen.getByText("全能动作+音画")).toBeTruthy();
+    renderNode({ prompt: "hmmotion, a woman" });
+    // mock 仍带 wan 项，UI 必须按 route===h3 过滤
+    expect(await screen.findByText("全能动作+音画")).toBeTruthy();
+    expect(screen.queryByText("传教士")).toBeNull();
     const button = screen.getByTitle("需先选择预设");
     expect(button.hasAttribute("disabled")).toBe(true);
   });
@@ -171,13 +171,13 @@ describe("NSFWVideoGenNode", () => {
     expect(screen.queryByText(/图生视频需要一张首帧图/)).toBeNull();
   });
 
-  it("选预设后同步路线默认尺寸（h3 → 1280×704 / 124 帧）", async () => {
+  it("选预设后同步路线默认尺寸（h3 → 768×1344 / 124 帧）", async () => {
     nsfwEnabled = true;
     renderNode({ presetId: "h3-aio" });
     await waitFor(() => {
       expect(updateNodeData).toHaveBeenCalledWith(
         "node-1",
-        expect.objectContaining({ width: 1280, height: 704, length: 124 }),
+        expect.objectContaining({ width: 768, height: 1344, length: 124 }),
       );
     });
   });
@@ -198,8 +198,8 @@ describe("NSFWVideoGenNode", () => {
     renderNode({
       prompt: "hmmotion, scene",
       presetId: "h3-aio",
-      width: 1280,
-      height: 704,
+      width: 768,
+      height: 1344,
       length: 124,
     });
     const button = await screen.findByTitle(/生成 R18 视频/);
@@ -212,7 +212,7 @@ describe("NSFWVideoGenNode", () => {
     expect(payload.preset_id).toBe("h3-aio");
     expect(payload.project_id).toBe("proj-1");
     expect(payload.first_frame_url).toMatch(/^http:\/\/localhost:\d+\//);
-    expect(payload.width).toBe(1280);
+    expect(payload.width).toBe(768);
     expect(payload.length).toBe(124);
     await waitFor(() => {
       const patch = updateNodeData.mock.calls.find(
@@ -227,7 +227,7 @@ describe("NSFWVideoGenNode", () => {
   it("生成失败时错误写入节点", async () => {
     nsfwEnabled = true;
     mutateAsync.mockRejectedValue(new Error("ComfyUI 执行失败"));
-    renderNode({ prompt: "x", presetId: "wan22-missionary" });
+    renderNode({ prompt: "x", presetId: "h3-aio" });
     await userEvent.click(await screen.findByTitle(/生成 R18 视频/));
     await waitFor(() => {
       expect(

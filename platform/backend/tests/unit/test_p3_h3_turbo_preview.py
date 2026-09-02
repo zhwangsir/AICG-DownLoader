@@ -176,3 +176,14 @@ class TestGlobalTurboDefault:
         apply_h3_turbo_for_request(wf, _req(), "fl2va")
         assert wf["100"]["class_type"] == "MiniMaxH3TurboLoRA"
         assert wf["32"]["inputs"]["steps"] == 6
+
+    def test_quality_final_wins_over_global_turbo(self, monkeypatch):
+        """P5: 成片 quality=final 即使全局 turbo 开着也保持 20 步。"""
+        monkeypatch.setattr(settings, "h3_turbo_enabled", True)
+        monkeypatch.setattr(settings, "h3_turbo_steps", 6)
+        wf = _fl2va()
+        apply_h3_turbo_for_request(wf, _req(preview=False, quality="final"), "fl2va")
+        assert "100" not in wf
+        assert "101" not in wf
+        assert wf["32"]["inputs"]["steps"] == 20
+

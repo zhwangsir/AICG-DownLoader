@@ -22,11 +22,8 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-# 与 routes/model_library.NSFW_VIDEO_PRESETS 保持一致（action 镜头四选一）
+# 短剧/漫剧成片引擎钉死 MiniMax-H3。Wan JSON 留盘，不进 action 可选目录。
 R18_ACTION_PRESETS: dict[str, str] = {
-    "wan22-missionary": "传教士位（Wan 2.2 I2V，触发词 m15510n4ry）",
-    "wan22-doggie-twerk": "后入/Twerk（Wan 2.2 I2V，触发词 d0gg1e, twerk）",
-    "wan22-blowjob-closeup": "口交特写（Wan 2.2 I2V，触发词 bl0wj0b）",
     "h3-aio": "全能动作+音画同出（MiniMax H3，触发词 hmmotion，原生呻吟声）",
 }
 _FALLBACK_PRESET = "h3-aio"
@@ -41,11 +38,8 @@ SYSTEM_PROMPT = """# R18 短剧分镜规划师
 - plot：剧情镜头（铺垫/对话/过渡/转场/收尾，非成人内容）
 - action：成人内容镜头（核心卖点，一部剧 1~3 个，分布在片中段）
 
-## action 镜头预设（preset_id 按剧情贴合度四选一）
-- wan22-missionary：传教士位，画面前Normal位交合
-- wan22-doggie-twerk：后入/Twerk 律动
-- wan22-blowjob-closeup：口交特写
-- h3-aio：全能动作+音画同出（MiniMax H3 原生呻吟声，动作自由度最高，其余三个是静音 I2V）
+## action 镜头预设（preset_id 仅 MiniMax H3）
+- h3-aio：全能动作+音画同出（MiniMax H3 原生呻吟声）。短剧/漫剧不选 Wan/LTX。
 
 preset_id 只在 kind=action 时填写；plot/portrait 一律空串。
 
