@@ -33,6 +33,10 @@
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 
+## P6 compose 768P / 关 auto-LTX（2026-09-02，`1d5c2be`）
+
+`1d5c2be` 已双推（P6，叠 `18f06d8`）：短剧 compose/export 默认 `768x1344`（横屏 `1344x768`）。`route_video_engine` 与网关 `_select_video_backend` 不再 auto-LTX；`/v1/models` 仅 `LOCAL_LTX_ENABLED=true` 才列出 LTX-2.5。LTX 代码仍在 `ltx_enabled` 后。H3 成片 768P 未改。DashBox 1.5× 未标成 2K。未 SSH spark02。缺口：voice 3–8s 仍未做；Canvas/EditModal compose fps 仍 30（schema 默认 24，AICG 接着改）；`happyhorse-1.0` 仍作 H3 别名列出；DashBox episode compose 仍 1080×1920（引擎导出，不是短剧 generate）。LICENSE/NOTICE/ToIV 未动。
+
 ## P5 短剧只留 H3 / VLM flash-next（2026-09-02，`7623d05`）
 
 `7623d05` 已双推（P5，叠 `240d34d`）：短剧 generate 列表/UI 只留 H3（`h3-aio`/`h3-clean`），POST 不再接受 `wan22-*`；非法 action preset 映射到 `h3-aio`。Wan JSON 仍在盘上。MiniMax-H3-local 模板只 768P；UI `768×1344`/`1344×768`。一键成片 orchestrator 钉 `engine=h3, preview=false, quality=final`，`quality=final` 压过全局 `h3_turbo_enabled`。VLM 默认 `visual_model_name` / `LOCAL_VLM_MODEL` 改为 `qwen3.8-flash-next`（用户指定：更强、100万上下文、带视觉），env 仍可覆盖。未 SSH spark02。缺口：LTX auto 路由代码还在但一键成片钉 H3；compose 导出标签仍 1080x1920；voice 3–8s 未做。LICENSE/NOTICE/ToIV 未动。

@@ -2,7 +2,29 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-02",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 7623d05。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 1d5c2be。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "p6_compose_768_1d5c2be": {
+    "commit": "1d5c2be",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "stacked_on": "18f06d8",
+    "compose_export": "default 768x1344; landscape 1344x768",
+    "no_auto_ltx": "route_video_engine and gateway _select_video_backend no longer auto-LTX",
+    "models": "/v1/models lists LTX-2.5 only if LOCAL_LTX_ENABLED=true",
+    "ltx_code": "still behind ltx_enabled",
+    "h3_final": "still 768P",
+    "dashbox_15x": "not labeled 2K",
+    "spark02": "not SSH-verified",
+    "tests": "platform 166; dashbox 35; frontend 77",
+    "gaps": [
+      "voice 3–8s still not done",
+      "Canvas/EditModal compose fps still 30 (schema default 24; AICG continuing)",
+      "happyhorse-1.0 still listed as H3 alias",
+      "DashBox episode compose still 1080×1920 (engine export, not drama generate)"
+    ],
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "p5_h3_only_7623d05": {
     "commit": "7623d05",
     "pushed": true,
