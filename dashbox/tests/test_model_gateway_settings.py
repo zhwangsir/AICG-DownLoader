@@ -2773,7 +2773,7 @@ def test_official_media_model_catalog_uses_ce_export_shape():
     minimax = videos[-1]
     assert minimax["id"] == "MiniMax-H3"
     assert minimax["gatewayModel"] == "MiniMax-H3"
-    assert minimax["resolutionOptions"] == ["768p", "2k"]
+    assert minimax["resolutionOptions"] == ["768p"]
     assert minimax["ratioOptions"] == [
         "21:9",
         "16:9",

@@ -13,6 +13,14 @@ from app.models.schemas import AgentResponse, VideoBatchRequest, VideoRequest
 from app.config import settings
 
 
+
+@pytest.fixture(autouse=True)
+def _sfw_pin_off(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.settings_service.settings_service.nsfw_status",
+        lambda: {"nsfw_enabled": False, "has_pin": False},
+    )
+
 @pytest.fixture
 def agent():
     return VideoAgent()
@@ -1234,3 +1242,22 @@ class TestH3TurboWorkflowTransformation:
             _apply_h3_turbo_to_workflow(fresh_workflow)
 
         assert "未找到 UNETLoader 节点 1" in caplog.text
+
+
+class TestH3UnetNsfwPin:
+    def test_sfw_unets_are_minimax(self):
+        from app.agents.video_agent import resolve_h3_unet_names
+        from app.config import settings
+        fl2va, ref2va = resolve_h3_unet_names(nsfw=False)
+        assert fl2va == settings.h3_unet_name
+        assert ref2va == settings.h3_ref_unet_name
+        assert "10Eros" not in fl2va
+
+    def test_nsfw_pin_uses_10eros_unets(self):
+        from app.agents.video_agent import resolve_h3_unet_names
+        from app.config import settings
+        fl2va, ref2va = resolve_h3_unet_names(nsfw=True)
+        assert fl2va == settings.h3_nsfw_unet_name
+        assert ref2va == settings.h3_nsfw_ref_unet_name
+        assert fl2va.startswith("10Eros")
+        assert ref2va.startswith("10Eros")

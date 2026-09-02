@@ -474,6 +474,20 @@ _BEAT_AUDIO_PRIORITY = (
 )
 
 
+
+def resolve_h3_unet_names(nsfw: bool | None = None) -> tuple[str, str]:
+    """SFW minimax_h3_* vs NSFW 10Eros, keyed off settings_service PIN flag."""
+    if nsfw is None:
+        try:
+            from app.services.settings_service import settings_service
+            nsfw = bool(settings_service.nsfw_status().get("nsfw_enabled"))
+        except Exception:
+            nsfw = False
+    if nsfw:
+        return settings.h3_nsfw_unet_name, settings.h3_nsfw_ref_unet_name
+    return settings.h3_unet_name, settings.h3_ref_unet_name
+
+
 def build_audio_direction(beats: list[str]) -> str:
     """按组内叙事节拍确定性生成 H3 官方音频字段（soundscape + music）。
 
@@ -1175,7 +1189,7 @@ class VideoAgent(BaseAgent):
             for url in ref_urls:
                 ref_names.append(await self.upload_image_to_comfyui(worker_url, url))
             workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3_R2V))
-            workflow["1"]["inputs"]["unet_name"] = settings.h3_ref_unet_name
+            workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[1]
             # 角色参考图动态挂接：LoadImage 节点 11/12/... → ref_images 组内 ref_image_1/2/...
             # （COMFY_AUTOGROW_V3 API 格式为嵌套 dict，扁平键执行期 TypeError）
             ref_group = workflow["20"]["inputs"].setdefault("ref_images", {})
@@ -1198,7 +1212,7 @@ class VideoAgent(BaseAgent):
             workflow["20"]["inputs"]["ref_image_size"] = settings.h3_ref_image_size
         else:
             workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3))
-            workflow["1"]["inputs"]["unet_name"] = settings.h3_unet_name
+            workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[0]
             # M17.3 多镜 FL2VA 双锚定：组末帧 = 末场景的链式末帧（orchestrator 注入
             # 的组后一镜关键帧，实现组间链式连续）；无链式末帧时回退末场景自身关键帧
             last_frame_url = requests[-1].last_frame_url or requests[-1].image_url
@@ -1510,7 +1524,7 @@ class VideoAgent(BaseAgent):
         positive = _append_audio_direction(positive, [request.narrative_beat])
 
         workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3))
-        workflow["1"]["inputs"]["unet_name"] = settings.h3_unet_name
+        workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[0]
         workflow["2"]["inputs"]["clip_name"] = settings.h3_clip_name
         workflow["3"]["inputs"]["vae_name"] = settings.h3_video_vae_name
         workflow["4"]["inputs"]["vae_name"] = settings.h3_audio_vae_name
@@ -1582,7 +1596,7 @@ class VideoAgent(BaseAgent):
         num_frames = _snap_h3_frames(request.duration_seconds)
 
         workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3_R2V))
-        workflow["1"]["inputs"]["unet_name"] = settings.h3_ref_unet_name
+        workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[1]
         workflow["2"]["inputs"]["clip_name"] = settings.h3_clip_name
         workflow["3"]["inputs"]["vae_name"] = settings.h3_video_vae_name
         workflow["4"]["inputs"]["vae_name"] = settings.h3_audio_vae_name

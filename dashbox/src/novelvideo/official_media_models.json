@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "catalogVersion": "2026.08.14.1",
+  "catalogVersion": "2026.09.02.1",
   "name": "DashBox CE official media models",
   "mediaModels": {
     "LingShan-G2": {
@@ -258,7 +258,7 @@
         "referenceAudioMax": 3,
         "referenceImageMax": 9,
         "referenceVideoMax": 3,
-        "resolutionOptions": ["768P", "2K"]
+        "resolutionOptions": ["768P"]
       }
     }
   }

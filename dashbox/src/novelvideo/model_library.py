@@ -48,6 +48,7 @@ DEFAULT_NSFW_KEYWORDS = (
     ",vagassist,slop,missionary,d0gg1e,c0wg1rl,bl0wj0b,m15510n4ry,pull0ut,b0dyshot"
     ",cum,futa,naughty,bounce,cowgirl,fingering,orgasm,anal,handjob,boob,penis"
     ",vagina,creampie,ahegao,paizuri,tiddies,nipple,dr34mjob"
+    ",10eros"
 )
 MODEL_FILE_EXTENSIONS = {".safetensors", ".pt", ".pth", ".ckpt", ".bin", ".onnx"}
 DOWNLOAD_SUBDIR_WHITELIST = {

@@ -1646,7 +1646,9 @@ class HuimengVideoGenerator(VideoGeneratorBase):
                 "return_last_frame": False,
             }
 
-            if last_frame:
+            if has_multimodal_refs:
+                params.update(reference_params)
+            elif last_frame:
                 if not first_frame:
                     return VideoGenResult(
                         status=VideoGenStatus.FAILED,
@@ -1654,13 +1656,16 @@ class HuimengVideoGenerator(VideoGeneratorBase):
                     )
                 params["first_frame_image"] = first_frame
                 params["last_frame_image"] = last_frame
-            elif has_multimodal_refs:
-                params.update(reference_params)
             elif first_frame:
                 params["image_url"] = first_frame
 
             if self._supports_audio_param():
                 params["generate_audio"] = bool(self.generate_audio)
+            try:
+                from novelvideo.model_library import nsfw_status as _nsfw_status
+                params["nsfw"] = bool(_nsfw_status().get("nsfw_enabled"))
+            except Exception:
+                params["nsfw"] = False
 
         task_id: str | None = None
         try:
@@ -2857,12 +2862,12 @@ class NewApiVideoGenerator(VideoGeneratorBase):
                 await self._apply_huimeng_protocol_media_inputs(
                     metadata,
                     mode=(
-                        "first_last_frame"
+                        "all_reference"
+                        if kwargs.get("references")
+                        else "first_last_frame"
                         if last_frame_path
                         else "first_frame"
                         if image_path
-                        else "all_reference"
-                        if kwargs.get("references")
                         else "text_to_video"
                     ),
                     image_path=image_path,
@@ -2902,6 +2907,15 @@ class NewApiVideoGenerator(VideoGeneratorBase):
             )
 
             self._canonicalize_video_payload(payload, metadata)
+            try:
+                from novelvideo.model_library import nsfw_status as _nsfw_status
+                nsfw_on = bool(_nsfw_status().get("nsfw_enabled"))
+            except Exception:
+                nsfw_on = False
+            payload["nsfw"] = nsfw_on
+            meta = payload.get("metadata")
+            if isinstance(meta, dict):
+                meta["nsfw"] = nsfw_on
             payload = apply_media_request_schema(
                 payload, self.request_schema, self.model_params
             )

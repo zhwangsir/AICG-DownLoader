@@ -25,7 +25,7 @@ NewAPI/OpenAI 兼容协议契约面，把 DashBox CE 的全部模型调用转发
   ltx-2.5-video-vae-bf16.safetensors / ltx-2.5-audio-vae-bf16.safetensors
 - LB :8188 majicMIX ckpt 存在；IPAdapter 真实文件名
   ip-adapter-plus-face_sdxl_vit-h.safetensors + CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors
-- H3 :8195 权重名与模板一致；MiniMaxH3ImageToVideo first_frame/last_frame 均 optional
+- H3 :8195 权重名与模板一致；MiniMaxH3ImageToVideo first_frame/last_frame 均 optional；有参考图/视频/音频走 MiniMaxH3ReferenceToVideo（ref2va）；NSFW PIN 用 10Eros UNet，SFW 用 minimax_h3_*；2K 不是本地 H3-Regenerate
 """
 
 from __future__ import annotations
@@ -39,7 +39,17 @@ import random
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
+
+from local_gateway.h3_video import (
+    collect_video_inputs,
+    h3_resolution_scale,
+    h3_unets,
+    r2v_ref_images,
+    request_nsfw,
+    select_h3_mode,
+)
+from typing import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, Request
@@ -118,6 +128,11 @@ IPADAPTER_FILE = os.getenv("LOCAL_IPADAPTER_FILE", "ip-adapter-plus-face_sdxl_vi
 IPADAPTER_CLIP_VISION = os.getenv("LOCAL_IPADAPTER_CLIP_VISION", "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors")
 
 H3_UNET_NAME = os.getenv("LOCAL_H3_UNET", "minimax_h3_fl2va_pruned_int8_convrot.safetensors")
+H3_REF_UNET_NAME = os.getenv("LOCAL_H3_REF_UNET", "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
+H3_NSFW_UNET_NAME = os.getenv("LOCAL_H3_NSFW_UNET", "10Eros_Max_h3_fl2va_beta2_pruned_int8_convrot.safetensors")
+H3_NSFW_REF_UNET_NAME = os.getenv(
+    "LOCAL_H3_NSFW_REF_UNET", "10Eros_Max_h3_ref2va_beta2_pruned_int8_convrot.safetensors"
+)
 H3_CLIP_NAME = os.getenv("LOCAL_H3_CLIP", "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
 H3_VIDEO_VAE = os.getenv("LOCAL_H3_VIDEO_VAE", "minimax_h3_video_vae_fp16.safetensors")
 H3_AUDIO_VAE = os.getenv("LOCAL_H3_AUDIO_VAE", "minimax_h3_audio_vae_fp32.safetensors")
@@ -263,6 +278,36 @@ H3_WORKFLOW_TEMPLATE: dict[str, Any] = {
     "60": {"class_type": "SaveVideo", "inputs": {"video": ["50", 0], "filename_prefix": "dc_video", "format": "auto", "codec": "auto"}},
 }
 
+
+# MiniMax H3 ref2va 工作流（对齐 platform VideoAgent.WORKFLOW_TEMPLATE_H3_R2V）
+H3_R2V_WORKFLOW_TEMPLATE: dict[str, Any] = {
+    "1": {"class_type": "UNETLoader", "inputs": {"unet_name": H3_REF_UNET_NAME, "weight_dtype": "default"}},
+    "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": H3_CLIP_NAME, "type": "minimax", "device": "default"}},
+    "3": {"class_type": "VAELoader", "inputs": {"vae_name": H3_VIDEO_VAE}},
+    "4": {"class_type": "VAELoader", "inputs": {"vae_name": H3_AUDIO_VAE}},
+    "20": {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "inputs": {
+            "clip": ["2", 0], "vae": ["3", 0], "audio_vae": ["4", 0],
+            "prompt": "", "width": 768, "height": 1344, "length": 124,
+            "ref_image_size": "match",
+            "ref_images": {},
+        },
+    },
+    "30": {"class_type": "RandomNoise", "inputs": {"noise_seed": 0}},
+    "31": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "res_multistep"}},
+    "32": {"class_type": "BasicScheduler", "inputs": {"model": ["1", 0], "scheduler": "simple", "steps": 20, "denoise": 1.0}},
+    "33": {"class_type": "BasicGuider", "inputs": {"model": ["1", 0], "conditioning": ["20", 0]}},
+    "34": {
+        "class_type": "SamplerCustomAdvanced",
+        "inputs": {"noise": ["30", 0], "guider": ["33", 0], "sampler": ["31", 0], "sigmas": ["32", 0], "latent_image": ["20", 1]},
+    },
+    "40": {"class_type": "VAEDecode", "inputs": {"samples": ["34", 0], "vae": ["3", 0]}},
+    "41": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["34", 0], "vae": ["4", 0]}},
+    "50": {"class_type": "CreateVideo", "inputs": {"images": ["40", 0], "audio": ["41", 0], "fps": 24, "bit_depth": 8}},
+    "60": {"class_type": "SaveVideo", "inputs": {"video": ["50", 0], "filename_prefix": "dc_video", "format": "auto", "codec": "auto"}},
+}
+
 # ---------------------------------------------------------------------------
 # LTX-2.5 工作流模板（真机核验后的单阶段链路；T2V，I2V/FLF2V 动态注入）
 # ---------------------------------------------------------------------------
@@ -362,6 +407,8 @@ def _derive_video_size(body: dict[str, Any], backend: str) -> tuple[int, int]:
         base = {"9:16": (576, 1024), "16:9": (1024, 576), "1:1": (768, 768)}.get(ratio, (768, 512))
     resolution = str(body.get("resolution") or metadata.get("resolution") or "").strip().lower()
     scale = _RESOLUTION_SCALE.get(resolution, 1.0)
+    if backend == "h3":
+        scale = h3_resolution_scale(resolution, scale)
     return _snap_dim(base[0] * scale), _snap_dim(base[1] * scale)
 
 
@@ -451,9 +498,10 @@ def _build_h3_workflow(
     filename_prefix: str,
     first_image_name: str | None = None,
     last_image_name: str | None = None,
+    unet_name: str | None = None,
 ) -> dict[str, Any]:
     wf = json.loads(json.dumps(H3_WORKFLOW_TEMPLATE))
-    wf["1"]["inputs"]["unet_name"] = H3_UNET_NAME
+    wf["1"]["inputs"]["unet_name"] = unet_name or H3_UNET_NAME
     wf["2"]["inputs"]["clip_name"] = H3_CLIP_NAME
     wf["3"]["inputs"]["vae_name"] = H3_VIDEO_VAE
     wf["4"]["inputs"]["vae_name"] = H3_AUDIO_VAE
@@ -469,6 +517,52 @@ def _build_h3_workflow(
     if last_image_name:
         wf["11"] = {"class_type": "LoadImage", "inputs": {"image": last_image_name}}
         wf["20"]["inputs"]["last_frame"] = ["11", 0]
+    return wf
+
+
+
+def _build_h3_r2v_workflow(
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    num_frames: int,
+    seed: int,
+    filename_prefix: str,
+    ref_image_names: list[str],
+    ref_video_names: list[str] | None = None,
+    ref_audio_names: list[str] | None = None,
+    unet_name: str | None = None,
+) -> dict[str, Any]:
+    """MiniMaxH3ReferenceToVideo：ref_images 为 COMFY_AUTOGROW_V3 嵌套 dict。"""
+    wf = json.loads(json.dumps(H3_R2V_WORKFLOW_TEMPLATE))
+    wf["1"]["inputs"]["unet_name"] = unet_name or H3_REF_UNET_NAME
+    wf["2"]["inputs"]["clip_name"] = H3_CLIP_NAME
+    wf["3"]["inputs"]["vae_name"] = H3_VIDEO_VAE
+    wf["4"]["inputs"]["vae_name"] = H3_AUDIO_VAE
+    wf["20"]["inputs"]["prompt"] = prompt
+    wf["20"]["inputs"]["width"] = width
+    wf["20"]["inputs"]["height"] = height
+    wf["20"]["inputs"]["length"] = num_frames
+    wf["30"]["inputs"]["noise_seed"] = seed
+    wf["60"]["inputs"]["filename_prefix"] = filename_prefix
+    ref_group: dict[str, Any] = {}
+    for idx, name in enumerate(ref_image_names):
+        node_id = str(10 + idx)
+        wf[node_id] = {"class_type": "LoadImage", "inputs": {"image": name}}
+        ref_group[f"ref_image_{idx}"] = [node_id, 0]
+    wf["20"]["inputs"]["ref_images"] = ref_group
+    node_inputs = wf["20"]["inputs"]
+    for idx, name in enumerate(ref_video_names or []):
+        load_id, comp_id = f"7{idx}", f"8{idx}"
+        wf[load_id] = {"class_type": "LoadVideo", "inputs": {"file": name}}
+        wf[comp_id] = {"class_type": "GetVideoComponents", "inputs": {"video": [load_id, 0]}}
+        node_inputs.setdefault("ref_videos", {})[f"ref_video_{idx}"] = [comp_id, 0]
+        node_inputs.setdefault("ref_video_audios", {})[f"ref_video_audio_{idx}"] = [comp_id, 1]
+    for idx, name in enumerate(ref_audio_names or []):
+        load_id = f"9{idx}"
+        wf[load_id] = {"class_type": "LoadAudio", "inputs": {"audio": name}}
+        node_inputs.setdefault("ref_audios", {})[f"ref_audio_{idx}"] = [load_id, 0]
     return wf
 
 
@@ -569,12 +663,20 @@ def _error_response(message: str, status_code: int = 500, err_type: str = "serve
 # ComfyUI 通用辅助
 # ---------------------------------------------------------------------------
 
-async def _upload_image_to_comfyui(client: httpx.AsyncClient, base_url: str, image_url: str, prefix: str = "dc") -> str:
+async def _upload_image_to_comfyui(
+    client: httpx.AsyncClient,
+    base_url: str,
+    image_url: str,
+    prefix: str = "dc",
+    *,
+    replicate_to_lb: bool = True,
+) -> str:
     """下载 HTTP URL 图片并上传到 ComfyUI input 目录，返回文件名。
 
     配置 LOCAL_COMFYUI_LB_BACKEND_URLS（逗号分隔直连后端清单）时以同一文件名
     复制到全部后端（LB /upload 轮询单实例而 /prompt 按负载选实例，避免 LoadImage
     跨后端找不到文件）；部分后端失败仍继续，全部失败抛错。
+    H3 专用实例必须 replicate_to_lb=False，只传到 :8195。
     """
     img_resp = await client.get(image_url)
     if img_resp.status_code != 200:
@@ -583,7 +685,7 @@ async def _upload_image_to_comfyui(client: httpx.AsyncClient, base_url: str, ima
     filename = f"{prefix}_{uuid.uuid4().hex[:8]}.png"
 
     backends = [u.strip().rstrip("/") for u in COMFYUI_LB_BACKEND_URLS.split(",") if u.strip()]
-    targets = backends or [base_url]
+    targets = (backends or [base_url]) if replicate_to_lb else [base_url]
     ok = 0
     last_err = ""
     for target in targets:
@@ -601,6 +703,35 @@ async def _upload_image_to_comfyui(client: httpx.AsyncClient, base_url: str, ima
             last_err = f"{target} {e}"
     if ok == 0:
         raise RuntimeError(f"参考图上传 ComfyUI 全部失败: {last_err}")
+    return filename
+
+
+
+async def _upload_media_to_comfyui(
+    client: httpx.AsyncClient,
+    base_url: str,
+    media_url: str,
+    prefix: str,
+    fallback_suffix: str,
+) -> str:
+    """下载任意媒体并上传到单一 ComfyUI 实例 input（H3 :8195 无独立 /upload/audio）。"""
+    resp = await client.get(media_url)
+    if resp.status_code != 200 or not resp.content:
+        raise RuntimeError(f"下载参考媒体失败: {media_url} status={resp.status_code}")
+    url_path = media_url.split("?", 1)[0].rstrip("/")
+    ext = ""
+    if "." in url_path.rsplit("/", 1)[-1]:
+        ext = "." + url_path.rsplit(".", 1)[-1].lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov", ".mp3", ".wav", ".m4a", ".flac"}:
+        ext = fallback_suffix if fallback_suffix.startswith(".") else f".{fallback_suffix}"
+    filename = f"{prefix}_{uuid.uuid4().hex[:8]}{ext}"
+    up = await client.post(
+        f"{base_url}/upload/image",
+        files={"image": (filename, resp.content, "application/octet-stream")},
+        data={"type": "input", "overwrite": "true"},
+    )
+    if up.status_code != 200:
+        raise RuntimeError(f"参考媒体上传 ComfyUI 失败: {base_url} status={up.status_code}")
     return filename
 
 
@@ -964,9 +1095,14 @@ async def _verify_ltx_nodes(client: httpx.AsyncClient) -> str:
 
 
 def _select_video_backend(body: dict[str, Any]) -> str:
-    """路由：VIDEO_BACKEND 强制 > H3 模型名 > LTX 模型名 > 时长>15s / audio → H3，否则 LTX。"""
+    """路由：VIDEO_BACKEND 强制 > NSFW→H3 > H3 模型名 > LTX 模型名 > 时长>15s / audio → H3，否则 LTX。
+
+    NSFW 不走 Wan 2.2 / LTX（P0：SFW/NSFW 视频引擎都是集群 :8195 MiniMax H3）。
+    """
     if VIDEO_BACKEND_FORCE in ("h3", "ltx"):
         return VIDEO_BACKEND_FORCE
+    if request_nsfw(body):
+        return "h3"
     model = str(body.get("model") or "").lower()
     duration = float(body.get("duration") or 5)
     generate_audio = bool(body.get("generate_audio"))
@@ -993,8 +1129,10 @@ async def video_generations(request: Request) -> Response:
     duration = float(body.get("duration") or 5)
     backend = _select_video_backend(body)
 
-    first_frame = str(body.get("first_frame_image") or "").strip()
-    last_frame = str(body.get("last_frame_image") or "").strip()
+    media = collect_video_inputs(body)
+    first_frame = media["first"]
+    last_frame = media["last"]
+    nsfw = request_nsfw(body)
 
     task_id = f"task_{uuid.uuid4().hex[:16]}"
     task: dict[str, Any] = {
@@ -1006,23 +1144,79 @@ async def video_generations(request: Request) -> Response:
         async with _http(timeout=60.0) as client:
             if backend == "h3":
                 if not await _h3_online(client):
+                    if nsfw:
+                        return _error_response("H3 实例离线，NSFW 视频不回退 LTX/Wan", 502)
                     logger.warning("H3 实例离线，回退 LTX-2.5")
                     backend = "ltx"
                     task["backend"] = "ltx"
             if backend == "h3":
+                nsfw = request_nsfw(body)
+                fl2va_unet, ref2va_unet = h3_unets(nsfw)
+                media = collect_video_inputs(body)
+                first_frame = media["first"]
+                last_frame = media["last"]
+                mode = select_h3_mode(media)
                 width, height = _derive_video_size(body, "h3")
                 num_frames = _snap_h3_frames(duration)
-                first_name = await _upload_image_to_comfyui(client, H3_BASE_URL, first_frame, "dc_h3_first") if first_frame else None
-                last_name = await _upload_image_to_comfyui(client, H3_BASE_URL, last_frame, "dc_h3_last") if last_frame else None
-                workflow = _build_h3_workflow(
-                    prompt=prompt, width=width, height=height, num_frames=num_frames,
-                    seed=random.randint(0, 2**32 - 1), filename_prefix=f"dc_video_{task_id[-8:]}",
-                    first_image_name=first_name, last_image_name=last_name,
-                )
+                seed = random.randint(0, 2**32 - 1)
+                prefix = f"dc_video_{task_id[-8:]}"
+                if mode == "r2v":
+                    ref_urls = r2v_ref_images(media)
+                    ref_names: list[str] = []
+                    for url in ref_urls:
+                        ref_names.append(
+                            await _upload_image_to_comfyui(
+                                client, H3_BASE_URL, url, "dc_h3_ref", replicate_to_lb=False
+                            )
+                        )
+                    video_names = [
+                        await _upload_media_to_comfyui(
+                            client, H3_BASE_URL, url, "dc_h3_vref", ".mp4"
+                        )
+                        for url in media["ref_videos"][:3]
+                    ]
+                    audio_names = [
+                        await _upload_media_to_comfyui(
+                            client, H3_BASE_URL, url, "dc_h3_aref", ".mp3"
+                        )
+                        for url in media["ref_audios"][:3]
+                    ]
+                    workflow = _build_h3_r2v_workflow(
+                        prompt=prompt, width=width, height=height, num_frames=num_frames,
+                        seed=seed, filename_prefix=prefix,
+                        ref_image_names=ref_names,
+                        ref_video_names=video_names,
+                        ref_audio_names=audio_names,
+                        unet_name=ref2va_unet,
+                    )
+                else:
+                    # i2v / t2va：T2VA = omit first/last on ImageToVideo
+                    first_name = (
+                        await _upload_image_to_comfyui(
+                            client, H3_BASE_URL, first_frame, "dc_h3_first", replicate_to_lb=False
+                        )
+                        if first_frame
+                        else None
+                    )
+                    last_name = (
+                        await _upload_image_to_comfyui(
+                            client, H3_BASE_URL, last_frame, "dc_h3_last", replicate_to_lb=False
+                        )
+                        if last_frame
+                        else None
+                    )
+                    workflow = _build_h3_workflow(
+                        prompt=prompt, width=width, height=height, num_frames=num_frames,
+                        seed=seed, filename_prefix=prefix,
+                        first_image_name=first_name, last_image_name=last_name,
+                        unet_name=fl2va_unet,
+                    )
                 missing = await _preflight_workflow(client, H3_BASE_URL, workflow)
                 if missing:
                     return _error_response(f"H3 生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
                 task["prompt_id"] = await _submit_comfyui(client, H3_BASE_URL, workflow)
+                task["h3_mode"] = mode
+                task["unet"] = workflow["1"]["inputs"]["unet_name"]
             else:
                 node_err = await _verify_ltx_nodes(client)
                 if node_err:

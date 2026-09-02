@@ -493,7 +493,17 @@ def run_compose_episode(envelope: dict[str, Any], ctx: ProjectContext) -> dict[s
             )
             cmd = ["ffmpeg", "-y", "-i", str(video_path)]
             has_embedded_audio = False
-            if audio_path.exists():
+            audio_type = str(beat.get("audio_type") or "").strip().lower()
+            has_embedded_audio = _video_has_audio_stream(
+                video_path,
+                timeout_seconds=subprocess_timeout(30),
+            )
+            check_cancel()
+            # dialogue + H3 原生音轨：保留 H3 人声，不叠 IndexTTS
+            use_external_tts = audio_path.exists() and not (
+                audio_type == "dialogue" and has_embedded_audio
+            )
+            if use_external_tts:
                 cmd.extend(["-i", str(audio_path)])
                 cmd.extend(
                     [
@@ -522,12 +532,14 @@ def run_compose_episode(envelope: dict[str, Any], ctx: ProjectContext) -> dict[s
                     episode,
                     logs=[f"Beat {beat_num} 使用独立音频: {audio_path.name}"],
                 )
-            else:
-                has_embedded_audio = _video_has_audio_stream(
-                    video_path,
-                    timeout_seconds=subprocess_timeout(30),
+                has_embedded_audio = False
+            elif audio_path.exists() and audio_type == "dialogue" and has_embedded_audio:
+                manager.update_progress_for_project(
+                    ctx,
+                    "compose_episode",
+                    episode,
+                    logs=[f"Beat {beat_num} 对白镜头保留 H3 原生音轨，跳过 IndexTTS"],
                 )
-                check_cancel()
             if has_embedded_audio:
                 cmd.extend(
                     [

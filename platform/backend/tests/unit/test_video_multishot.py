@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+
 from app.agents.video_agent import (
     H3_MULTISHOT_PROMPT_GUIDE,
     VideoAgent,
@@ -25,6 +26,14 @@ from app.agents.video_agent import (
 )
 from app.config import settings
 from app.models.schemas import AgentResponse, VideoRequest
+
+@pytest.fixture(autouse=True)
+def _sfw_pin_off(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.settings_service.settings_service.nsfw_status",
+        lambda: {"nsfw_enabled": False, "has_pin": False},
+    )
+
 
 
 def _req(

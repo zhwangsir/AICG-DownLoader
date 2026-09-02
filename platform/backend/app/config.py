@@ -187,6 +187,8 @@ class Settings(BaseSettings):
     # VideoRequest.reference_images 非空时触发：分镜关键帧作第 1 张参考图（构图），
     # 角色资产库三视图参考图随后（外观锁定），共用 CLIP/双VAE/采样链配置
     h3_ref_unet_name: str = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+    h3_nsfw_unet_name: str = "10Eros_Max_h3_fl2va_beta2_pruned_int8_convrot.safetensors"
+    h3_nsfw_ref_unet_name: str = "10Eros_Max_h3_ref2va_beta2_pruned_int8_convrot.safetensors"
     # 参考图缩放策略：'match'（默认，与画布对齐）；'max' 保真度更高但慢数倍（官方 tooltip）
     h3_ref_image_size: str = "match"
     # r2v 节点 ref_images 动态组上限（COMFY_AUTOGROW_V3 max=9，含分镜关键帧 1 席）
@@ -267,7 +269,7 @@ class Settings(BaseSettings):
     nas_library_cache_ttl: float = 60.0  # 模型库扫描缓存秒数
     model_file_extensions: str = ".safetensors,.pt,.pth,.ckpt,.bin,.onnx"
     # NSFW 文件名关键词（逗号分隔，小写子串匹配；配合 nsfw_exact_names 精确名单）
-    nsfw_keywords: str = "nsfw,porn,xxx,hentai,r18,erotic,nude,urpm,lustify,bigasse,sexgod,footjob"
+    nsfw_keywords: str = "nsfw,porn,xxx,hentai,r18,erotic,nude,urpm,lustify,bigasse,sexgod,footjob,10eros"
     nsfw_exact_names: str = ""  # 精确文件名（不含扩展名），逗号分隔
     # 模型下载
     civitai_api_base: str = "https://civitai.red/api"  # 与 Rust 端 default_civitai_host 一致

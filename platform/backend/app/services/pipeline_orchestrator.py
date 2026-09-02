@@ -728,11 +728,13 @@ class PipelineOrchestrator:
             audio_urls = voice_map[sid].get("audio_urls") or []
             if not audio_urls:
                 continue
+            dialogue = str(getattr(scene, "dialogue", "") or "").strip()
             segments.append(
                 EditSegment(
                     scene_id=sid,
                     video_url=video_map[sid]["video_url"],
                     audio_url=audio_urls[0]["audio_url"],
+                    audio_type="dialogue" if dialogue else "narration",
                     subtitle_url=subtitle_map[sid].get("srt_url") or f"/static/subtitle/scene_{sid}.srt",
                     duration_seconds=video_map[sid].get("duration_seconds", request.video_duration_seconds),
                 )

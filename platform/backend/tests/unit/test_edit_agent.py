@@ -287,11 +287,16 @@ def _ffprobe_audio_probe_calls(mock_exec) -> list:
     ]
 
 
-def _segment(scene_id: int = 1, audio_url: str = "http://example.com/a1.mp3") -> EditSegment:
+def _segment(
+    scene_id: int = 1,
+    audio_url: str = "http://example.com/a1.mp3",
+    audio_type: str = "narration",
+) -> EditSegment:
     return EditSegment(
         scene_id=scene_id,
         video_url=f"http://example.com/v{scene_id}.mp4",
         audio_url=audio_url,
+        audio_type=audio_type,
         subtitle_url=f"http://example.com/s{scene_id}.srt",
     )
 
@@ -328,6 +333,24 @@ class TestH3NativeAudioMix:
         assert "amix=inputs=2:duration=longest" in cmd_str
         # 混音输出被显式映射
         assert "[aout]" in args
+
+    async def test_dialogue_keeps_h3_native_skips_tts_mix(
+        self, agent, mock_httpx_download, tmp_path
+    ):
+        """dialogue + H3 原生音轨：不叠 IndexTTS，单输入保留原声。"""
+        with patch("app.agents.edit_agent.asyncio.create_subprocess_exec") as mock_exec:
+            mock_exec.side_effect = _make_side_effect(has_audio=True)
+            await agent._process_segment(
+                _segment(audio_type="dialogue"), tmp_path, 1080, 1920, 24
+            )
+
+        ffmpeg_cmds = _ffmpeg_calls(mock_exec)
+        assert len(ffmpeg_cmds) == 1
+        args = list(ffmpeg_cmds[0].args)
+        cmd_str = " ".join(map(str, args))
+        assert "-filter_complex" not in cmd_str
+        assert "amix" not in cmd_str
+        assert args.count("-i") == 1
 
     async def test_skip_mix_when_video_has_no_audio_stream(
         self, agent, mock_httpx_download, tmp_path

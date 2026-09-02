@@ -510,6 +510,10 @@ class EditSegment(BaseModel):
     scene_id: int
     video_url: str = Field(..., description="视频片段 URL")
     audio_url: str = Field(..., description="配音音频 URL")
+    audio_type: str = Field(
+        "narration",
+        description="silence/narration/dialogue；dialogue 且 H3 有原生音轨时保留 H3 人声、不叠 IndexTTS",
+    )
     subtitle_url: str = Field("", description="SRT 字幕 URL（可空，空则不烧字幕）")
     duration_seconds: int = Field(5, description="目标时长（以音频为准）")
 

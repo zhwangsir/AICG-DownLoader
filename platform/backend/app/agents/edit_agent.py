@@ -194,9 +194,10 @@ class EditAgent(BaseAgent):
         """处理单个片段：下载素材 → 标准化 → 混音 → 烧录字幕。
 
         H3 原生音轨处理（settings.h3_native_audio_enabled）：
-        - 视频自带音轨（H3 环境音）且有人声：按增益混音，人声为主、环境音垫底
-        - 视频自带音轨但无人声（纯场景镜头）：原音轨直接随视频保留
-        - 视频无音轨（回退后端 comfyui/Wan）：仅人声（原行为，自动跳过混音）
+        - dialogue 镜头且视频自带音轨：保留 H3 原生立体声为人声，不叠 IndexTTS
+        - narration 镜头且视频自带音轨：IndexTTS 人声 + H3 环境音垫底混音
+        - 视频无音轨：IndexTTS 仅人声（H3 未产出语音时的回退）
+        - 视频自带音轨但无人声 TTS（纯场景）：原音轨直接随视频保留
         - 混音 ffmpeg 失败：降级为纯人声并记 warning，不阻断主链路
         """
         seg_dir = work_dir / f"scene_{segment.scene_id}"
@@ -229,11 +230,17 @@ class EditAgent(BaseAgent):
 
         # 用 ffprobe 探测视频是否自带音轨（不依赖 video_backend 字符串，
         # 回退后端无声轨时自动跳过混音，更健壮）
-        has_native_audio = (
-            settings.h3_native_audio_enabled
-            and audio_path is not None
-            and await self._probe_has_audio(video_path)
+        audio_type = str(getattr(segment, "audio_type", "") or "narration").strip().lower()
+        need_probe = settings.h3_native_audio_enabled and (
+            audio_type == "dialogue" or audio_path is not None
         )
+        has_native_stream = need_probe and await self._probe_has_audio(video_path)
+        # dialogue：H3 已生成对白，禁止与 IndexTTS 双轨叠音
+        if audio_type == "dialogue" and has_native_stream:
+            await self._run_ffmpeg(self._build_keep_original_cmd(video_path, vf, output_path))
+            return output_path
+
+        has_native_audio = has_native_stream and audio_path is not None
 
         if audio_path is None:
             # 纯场景镜头：单输入直出，默认映射保留原音轨（若有）

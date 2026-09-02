@@ -420,6 +420,8 @@ class TestHelpers:
             ("urpm_v2.safetensors", True),
             ("HentaiStyle.pt", True),
             ("R18-lora.safetensors", True),
+            ("10Eros_Max_h3_fl2va_beta2_pruned_int8_convrot.safetensors", True),
+            ("minimax_h3_fl2va_pruned_int8_convrot.safetensors", False),
         ],
     )
     def test_is_nsfw_name(self, name, expected):
@@ -1625,6 +1627,8 @@ class TestGenerateVideo:
         )
         i2v = next(n for n in out.values() if n["class_type"] == "MiniMaxH3ImageToVideo")
         assert i2v["inputs"]["prompt"] == "hmmotion, scene"
+        unet = next(n for n in out.values() if n["class_type"] == "UNETLoader")
+        assert unet["inputs"]["unet_name"].startswith("10Eros")
         assert i2v["inputs"]["width"] == 1280 and i2v["inputs"]["length"] == 124
         noise = next(n for n in out.values() if n["class_type"] == "RandomNoise")
         assert noise["inputs"]["noise_seed"] == 7

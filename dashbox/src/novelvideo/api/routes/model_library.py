@@ -1439,12 +1439,18 @@ def _patch_video_workflow(
     for node in workflow.values():
         ct = node.get("class_type", "")
         inputs = node.get("inputs", {})
-        if ct in ("WanImageToVideo", "MiniMaxH3ImageToVideo"):
+        if ct in ("WanImageToVideo", "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"):
             inputs["width"] = width
             inputs["height"] = height
             inputs["length"] = length
-            if ct == "MiniMaxH3ImageToVideo":
+            if ct in ("MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"):
                 inputs["prompt"] = prompt
+        elif ct == "UNETLoader":
+            name = str(inputs.get("unet_name") or "")
+            if "minimax_h3_fl2va" in name:
+                inputs["unet_name"] = "10Eros_Max_h3_fl2va_beta2_pruned_int8_convrot.safetensors"
+            elif "minimax_h3_ref2va" in name:
+                inputs["unet_name"] = "10Eros_Max_h3_ref2va_beta2_pruned_int8_convrot.safetensors"
         elif ct == "CLIPTextEncode":
             clip_encoders.append(node)
         elif ct == "LoadImage":
