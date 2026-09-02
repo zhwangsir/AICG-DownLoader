@@ -977,6 +977,7 @@ describe("Canvas 合成与质检", () => {
       title: "测试短剧",
       segments: [{ scene_id: 1, video_url: "http://v/1.mp4", audio_url: "http://a/1.wav", subtitle_url: "http://s/1.srt" }],
       output_resolution: "768x1344",
+      output_fps: 24,
     }));
     expect(store().editData?.title).toBe("成片A");
     expect(store().statusInfo).toBe("成片已合成: 成片A | 1 场景 | 3.3s");

@@ -9,6 +9,7 @@ import {
 import {
   TRANSITION_OPTIONS,
   RESOLUTION_OPTIONS,
+  FPS_OPTIONS,
   modalScrollStyle,
   sectionTitleStyle,
 } from "./shared";
@@ -30,7 +31,7 @@ export function EditModal({
   const [transition, setTransition] = useState("none");
   const [bgmUrl, setBgmUrl] = useState("");
   const [outputResolution, setOutputResolution] = useState("768x1344");
-  const [outputFps, setOutputFps] = useState(30);
+  const [outputFps, setOutputFps] = useState(FPS_OPTIONS[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -151,9 +152,11 @@ export function EditModal({
                   value={String(outputFps)}
                   onChange={(e) => setOutputFps(Number(e.target.value))}
                 >
-                  <option value="24">24</option>
-                  <option value="30">30</option>
-                  <option value="60">60</option>
+                  {FPS_OPTIONS.map((fps) => (
+                    <option key={fps} value={String(fps)}>
+                      {fps}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

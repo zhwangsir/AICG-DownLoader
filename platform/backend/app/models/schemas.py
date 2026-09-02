@@ -560,7 +560,7 @@ class EditRequest(BaseModel):
     transition: str = Field("none", description="转场类型：none / fade")
     bgm_url: str | None = Field(None, description="背景音乐 URL（可选）")
     output_resolution: str = Field("768x1344", description="输出分辨率，如 768x1344")
-    output_fps: int = Field(24, ge=1, le=60, description="输出帧率")
+    output_fps: int = Field(24, ge=1, le=60, description="输出帧率（短剧钉 24fps）")
     # 2026-09-01 新规：AI 生成微短剧须在每集明显位置添加提示标识
     ai_label_enabled: bool = Field(True, description="是否在成片右上角烧录「AI生成」标识（合规要求默认开启）")
     license_number: str = Field("", description="短剧备案号/节目编号（非空时随标识一并烧录）")
@@ -597,7 +597,7 @@ class PipelineRunRequest(BaseModel):
     ai_label_enabled: bool = Field(True, description="成片烧录「AI生成」标识（合规默认开启）")
     license_number: str = Field("", description="短剧备案号（非空时随标识烧录）")
     output_resolution: str = Field("768x1344", description="输出分辨率")
-    output_fps: int = Field(24, ge=1, le=60, description="输出帧率")
+    output_fps: int = Field(24, ge=1, le=60, description="输出帧率（短剧钉 24fps）")
     # M17.4 H3 全模态参考（仅 video_backend=h3 生效）：参考视频提供运镜/节奏/剪辑
     # 结构，独立参考音频提供 BGM 风格/声景质感；透传到每个 VideoRequest 走 ref2va
     reference_videos: list[str] = Field(

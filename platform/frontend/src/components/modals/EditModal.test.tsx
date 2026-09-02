@@ -105,7 +105,7 @@ describe("EditModal（剪辑合成成片）", () => {
     expect(screen.getByPlaceholderText("输入成片标题...")).toHaveValue("短剧成片");
     expect(formSelects().transition.value).toBe("none");
     expect(formSelects().resolution.value).toBe("768x1344");
-    expect(formSelects().fps.value).toBe("30");
+    expect(formSelects().fps.value).toBe("24");
     expect(screen.getByPlaceholderText("http://...")).toHaveValue("");
   });
 
@@ -209,6 +209,8 @@ describe("EditModal（剪辑合成成片）", () => {
     fireEvent.click(screen.getByRole("button", { name: "合成成片" }));
     await waitFor(() => expect(mockComposeVideo).toHaveBeenCalled());
     expect(mockComposeVideo.mock.calls[0][0].bgm_url).toBeNull();
+    expect(mockComposeVideo.mock.calls[0][0].output_fps).toBe(24);
+    expect(mockComposeVideo.mock.calls[0][0].output_resolution).toBe("768x1344");
   });
 
   it("合成失败：展示后端 error；无 error 回退默认文案；异常分支展示异常字符串", async () => {

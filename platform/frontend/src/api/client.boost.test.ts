@@ -246,8 +246,8 @@ describe("client boost — 各端点成功路径与请求构造", () => {
       expect(url).toBe("/api/drama/edit/compose");
       const body = JSON.parse(String(opts?.body));
       expect(body.transition).toBe("fade");
-      expect(body.output_resolution).toBe("1080p");
-      expect(body.output_fps).toBe(30);
+      expect(body.output_resolution).toBe("768x1344");
+      expect(body.output_fps).toBe(24);
       return mockJsonResponse(ok(edit));
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -257,8 +257,8 @@ describe("client boost — 各端点成功路径与请求构造", () => {
       segments: [{ scene_id: 1, video_url: "v", audio_url: "a", subtitle_url: "s", duration_seconds: 5 }],
       transition: "fade",
       bgm_url: "b",
-      output_resolution: "1080p",
-      output_fps: 30,
+      output_resolution: "768x1344",
+      output_fps: 24,
     });
     expect(resp.data?.final_video_url).toBe("u");
   });

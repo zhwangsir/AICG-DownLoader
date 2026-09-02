@@ -30,10 +30,12 @@ class TestComposeExport768P:
     def test_edit_request_defaults_768p_portrait(self):
         req = EditRequest(segments=[_seg()])
         assert req.output_resolution == "768x1344"
+        assert req.output_fps == 24
 
     def test_pipeline_run_request_defaults_768p_portrait(self):
         req = PipelineRunRequest(premise="深夜便利店偶遇")
         assert req.output_resolution == "768x1344"
+        assert req.output_fps == 24
 
     def test_landscape_768p_is_valid_export_size(self):
         req = EditRequest(segments=[_seg()], output_resolution="1344x768")

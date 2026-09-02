@@ -699,7 +699,7 @@ export default function Canvas() {
           transition: "fade",
           bgm_url: null,
           output_resolution: "768x1344",
-          output_fps: 30,
+          output_fps: 24,
         });
         if (resp.success && resp.data) {
           setEditData(resp.data);

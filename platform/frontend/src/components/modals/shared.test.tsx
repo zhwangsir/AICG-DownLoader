@@ -5,6 +5,8 @@ import {
   modalScrollStyle,
   GENRE_OPTIONS,
   STYLE_OPTIONS,
+  FPS_OPTIONS,
+  RESOLUTION_OPTIONS,
 } from "./shared";
 
 /**
@@ -94,5 +96,19 @@ describe("SmartSelect（智能下拉：自定义值自动追加）", () => {
       target: { value: "赛博朋克" },
     });
     expect(onChange).toHaveBeenCalledWith("赛博朋克");
+  });
+});
+
+describe("短剧成片导出钉（分辨率 768P / 帧率 24）", () => {
+  it("FPS_OPTIONS 默认首位 24，仍允许 30/60", () => {
+    expect(FPS_OPTIONS[0]).toBe(24);
+    expect(FPS_OPTIONS).toEqual([24, 30, 60]);
+  });
+
+  it("RESOLUTION_OPTIONS 钉 768P，不含 1080x1920", () => {
+    expect(RESOLUTION_OPTIONS).toContain("768x1344");
+    expect(RESOLUTION_OPTIONS).toContain("1344x768");
+    expect(RESOLUTION_OPTIONS).not.toContain("1080x1920");
+    expect(RESOLUTION_OPTIONS).not.toContain("1920x1080");
   });
 });
