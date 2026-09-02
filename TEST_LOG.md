@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-09-02 412f0ba dual-pushed (P1): before H3 render, spark-local Context-IR rewrite; on failure fall back to original text. LICENSE/NOTICE/ToIV untouched.
+
 - 2026-09-02 bf9fe4c dual-pushed (P0): workbench/gateway with reference uses MiniMaxH3ReferenceToVideo; PIN on = 10Eros_Max H3 UNet, off = official INT8; dialogue keeps H3 native audio only (no IndexTTS overlay); catalog resolution 768P only, fake 2K removed. NSFW also H3, not Wan/LTX. LICENSE/NOTICE/ToIV untouched.
 
 - 2026-08-31 三连运维 + M18.7 core E2E 复验：① HunyuanImage 修复完成（import 路径 + 镜像重建 torch2.8+cu128 适配 Blackwell sm_120 + 96GB swapfile + 5 组权重 ~127GB 全下载），/health loaded:true，2048×2048 测试图 4.4MB 端到端通过；GPU3 显存余量 ~13GB 列入观察。② pc02 ComfyUIWatchdog 上线（5 分钟探测 :8193/:8194，netstat 精确 PID 重启，10 分钟冷却，SYSTEM 计划任务验证无误重启）；ComfyUI-Manager 改 offline。③ core 部署 91a5752 复跑 E2E（pipeline-6cd33231a41d，都市悬疑 1集×2镜，passed=true，1627.8s，成片 2.9MB/6.62s/quality 85）：M18.7 三机制全部按设计触发——QC 拦截唯一角色定妆照 3 次不合格、隔离删除日志确证（deleted=True）、reference_images_stale_skipped=0 零污染；visual_quality 因无参考图 skipped（宁缺毋滥的预期行为）。新暴露瓶颈：SDXL 定妆照与描述匹配度低致 QC 全败（角色锁可用率待提升，候选：PromptEnhancer/换 checkpoint/QC 分档）。ToIV 未动。

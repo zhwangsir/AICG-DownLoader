@@ -14,6 +14,7 @@
 - `./start-aigcpannel.sh`：canonical。短剧后端 `:8100` + 引擎 `:8080`/`:8780`。主界面 `:8080`。活着的 `:8080` 镜像标题现为「AIGCPannel — 通用 AIGC 视频引擎」；HTML 里不再当产品名写 DashBox/虾导（web 已 rebuild，无新代码 commit）。
 - `./start-dashbox.sh`：转调同一入口。
 - `GET /api/panel/status`：product=AIGCPannel；查 downloader `config` / `models.json` 是否可读。
+- P1 H3 Context-IR（2026-09-02 `412f0ba`）：`412f0ba` 已双推（P1）：H3 出片前 spark 本地 **Context-IR** 改写，失败回退原文。LICENSE/NOTICE/ToIV 未动。
 - P0 H3 Ref2VA（2026-09-02 `bf9fe4c`）：`bf9fe4c` 已双推（P0）：工作台/网关有参考走 `MiniMaxH3ReferenceToVideo`；PIN 开用 **10Eros_Max** H3 UNet，关用官方 INT8；对白只留 H3 原生音，不叠 IndexTTS；目录分辨率只留 **768P**，假 2K 去掉。NSFW 也是 H3，不走 Wan/LTX。LICENSE/NOTICE/ToIV 未动。
 - 引擎 Settings 钉集群（2026-08-29 `7c75196`）：`7c75196` 已双推：引擎 Settings 钉到集群。custom 网关 `configured=true`，base `http://host.docker.internal:8790/v1`；LLM spark02 `.84:8000`；VLM spark01 `.82:8000`；图 ComfyUI `.127:8188` SDXL；视频 H3 `.127:8195`；TTS IndexTTS `.127:9200`；媒体 `relay=local_http`。LTX-2.5 仍配置但 `:8198` DOWN。官方 relayclaw 频道留着但 custom 模式不用。LICENSE/NOTICE/ToIV 未动。
 - 引擎对照（2026-08-28 晚）：用户已定口径：AIGCPannel **SFW** 对白/锁人=MiniMax **H3**（海螺 3.0）；空镜/预览=**LTX-2.5**（`:8198` 起来再开，代码保留）。**Wan2.2** 与 **LTX-2.3+10Eros** 留 ToIV **R18**，价值主要在 NSFW，不是短剧 SFW 空镜/无声 fallback。ToIV 不换主路；AIGCPannel 不改 ToIV。Round 1 已落：剧本加速、NAS 可读下载根、Colima prune、H3 一镜冒烟。
