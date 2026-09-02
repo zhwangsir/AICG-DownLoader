@@ -4,7 +4,7 @@ NewAPI/OpenAI 兼容协议契约面，把 DashBox CE 的全部模型调用转发
 
 | 能力 | 契约端点 | 本地目标 |
 |------|----------|----------|
-| 文本 LLM / VLM | POST /v1/chat/completions | spark02 qwen3.6-uncensored :8000/v1 |
+| 文本 LLM / VLM | POST /v1/chat/completions | spark01 qwen3.8-flash-next :8000/v1 |
 | Embedding | POST /v1/embeddings | Qwen3-Embedding-4B :9302/v1 |
 | 图像生成 | POST /v1/images/generations, /v1/images/edits | ComfyUI-LB SDXL :8188 |
 | 视频生成 | POST/GET /v1/video/generations | MiniMax H3 :8195 / LTX-2.5 :8198 |
@@ -15,7 +15,7 @@ NewAPI/OpenAI 兼容协议契约面，把 DashBox CE 的全部模型调用转发
 或：python -m local_gateway.main
 
 真机核验（2026-08-15）：
-- spark02 /v1/models 真实模型名 = qwen3.6-uncensored
+- spark01 /v1/models 真实模型名 = qwen3.8-flash-next（LLM + VLM 同模型）
 - :9302 无 /v1/models 路由，但 /v1/embeddings 可用（服务端不校验 model 名）
 - LTX-2.5 :8198 无 LTXVBaseSampler/LTXVLatentUpscale 节点；真实可用链路为
   CheckpointLoaderSimple + LTXAVTextEncoderLoader + EmptyLTXVLatentVideo + KSampler
@@ -71,7 +71,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 # 配置（环境变量可覆盖）
 # ---------------------------------------------------------------------------
 
-LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://192.168.71.84:8000/v1").rstrip("/")
+LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://192.168.71.82:8000/v1").rstrip("/")
 VLM_BASE_URL = os.getenv("LOCAL_VLM_BASE_URL", "http://192.168.71.82:8000/v1").rstrip("/")
 VLM_MODEL_NAME = os.getenv("LOCAL_VLM_MODEL", "qwen3.8-flash-next")
 VLM_LOGICAL_MODELS = {
@@ -100,7 +100,7 @@ GATEWAY_HOST = os.getenv("LOCAL_GATEWAY_HOST", "0.0.0.0")
 GATEWAY_PORT = int(os.getenv("LOCAL_GATEWAY_PORT", "8790"))
 PUBLIC_BASE_URL = os.getenv("LOCAL_GATEWAY_PUBLIC_BASE", f"http://{GATEWAY_HOST}:{GATEWAY_PORT}").rstrip("/")
 
-CHAT_MODEL_NAME = os.getenv("LOCAL_CHAT_MODEL", "qwen3.6-uncensored")
+CHAT_MODEL_NAME = os.getenv("LOCAL_CHAT_MODEL", "qwen3.8-flash-next")
 EMBEDDING_MODEL_NAME = os.getenv("LOCAL_EMBEDDING_MODEL", "Qwen3-Embedding-4B")
 
 STATIC_DIR = Path(__file__).parent / "static"

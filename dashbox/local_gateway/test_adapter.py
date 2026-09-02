@@ -112,7 +112,7 @@ def test_chat_model_mapping(make_client, client):
     assert resp.status_code == 200
     assert resp.json()["choices"][0]["message"]["content"] == "你好"
     # 任何入站模型名统一映射为本地真实模型名
-    assert captured["model"] == main.CHAT_MODEL_NAME == "qwen3.6-uncensored"
+    assert captured["model"] == main.CHAT_MODEL_NAME == "qwen3.8-flash-next"
     assert captured["messages"][0]["content"] == "hi"
 
 

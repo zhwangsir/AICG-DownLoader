@@ -26,7 +26,7 @@ from novelvideo.model_gateway_settings import (
     save_newapi_provider_channels,
 )
 
-CLUSTER_LLM = "http://192.168.71.84:8000/v1"
+CLUSTER_LLM = "http://192.168.71.82:8000/v1"
 CLUSTER_VLM = "http://192.168.71.82:8000/v1"
 CLUSTER_COMFY = "http://192.168.71.127:8188"
 

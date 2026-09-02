@@ -4,7 +4,7 @@ DramaClaw 的外部服务依赖 → 本项目本地部署服务的映射：
 
 | DramaClaw 外部依赖          | 本地替换服务                              |
 |-----------------------------|-------------------------------------------|
-| 灵山编导大模型（远程网关）  | spark02 qwen3.6-uncensored :8000（LLM）   |
+| 灵山编导大模型（远程网关）  | spark01 qwen3.8-flash-next :8000（LLM）   |
 | Gemini Flash（草图 VLM 门禁）| spark01 Qwen3-VL :8000（MacStudio studio04 已下线） |
 | NanoBanana（宫格/草图生成） | ComfyUI-LB SDXL :8188（图像）             |
 | Seedance/happyhorse（视频） | MiniMax H3 :8195 / LTX-2.5 :8198（视频）  |
@@ -91,7 +91,7 @@ class ModelGateway:
         return {
             "llm": CapabilitySpec(
                 name="llm",
-                description="主 LLM（剧本/角色/分镜/质检）：spark02 qwen3.6-uncensored",
+                description="主 LLM（剧本/角色/分镜/质检）：spark01 qwen3.8-flash-next",
                 endpoints=(s.exo_base_url.removesuffix("/v1"),),
                 health_path="/v1/models",
             ),

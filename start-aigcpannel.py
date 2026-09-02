@@ -102,10 +102,10 @@ def gateway_env() -> dict:
     env["LOCAL_GATEWAY_HOST"] = "0.0.0.0"
     env["LOCAL_GATEWAY_PORT"] = ST_GATEWAY_PORT
     env["LOCAL_GATEWAY_PUBLIC_BASE"] = "http://127.0.0.1:%s" % ST_GATEWAY_PORT
-    env["LOCAL_LLM_BASE_URL"] = env.get("LOCAL_LLM_BASE_URL", "http://192.168.71.84:8000/v1")
+    env["LOCAL_LLM_BASE_URL"] = env.get("LOCAL_LLM_BASE_URL", "http://192.168.71.82:8000/v1")
     env["LOCAL_VLM_BASE_URL"] = env.get("LOCAL_VLM_BASE_URL", "http://192.168.71.82:8000/v1")
     env["LOCAL_VLM_MODEL"] = env.get("LOCAL_VLM_MODEL", "qwen3.8-flash-next")
-    env["LOCAL_CHAT_MODEL"] = env.get("LOCAL_CHAT_MODEL", "qwen3.6-uncensored")
+    env["LOCAL_CHAT_MODEL"] = env.get("LOCAL_CHAT_MODEL", "qwen3.8-flash-next")
     env["LOCAL_COMFYUI_LB_URL"] = env.get("LOCAL_COMFYUI_LB_URL", "http://192.168.71.127:8188")
     env["LOCAL_COMFYUI_LB_BACKEND_URLS"] = env.get(
         "LOCAL_COMFYUI_LB_BACKEND_URLS",

@@ -1,6 +1,6 @@
 """剧本 Agent — 一句话创意 → JSON 结构化剧本。
 
-主 LLM 走 spark02 qwen3.6-uncensored（字段名 exo_model_glm52 仅为兼容，非 EXO GLM）。
+主 LLM 走 spark01 qwen3.8-flash-next（字段名 exo_model_glm52 仅为兼容，非 EXO GLM）。
 默认关闭 thinking（spark/qwen 思考链会烧掉数分钟），联网搜索默认关闭、按需开启。
 输出符合 §4.8 规范的剧本 JSON。
 """

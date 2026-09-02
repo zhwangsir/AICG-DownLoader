@@ -141,6 +141,28 @@ class TestMetrics:
             for ip in studio:
                 assert ip not in joined, f"{spec.name} still probes {ip}"
 
+    def test_required_llm_vlm_are_spark01_not_spark02(self, gateway, monkeypatch):
+        """Required /gateway/health LLM+VLM is spark01 flash-next; spark02 is not a hard dep."""
+        from app.config import Settings, settings
+
+        f = Settings.model_fields
+        assert f["exo_base_url"].default == "http://192.168.71.82:8000/v1"
+        assert f["exo_model_glm52"].default == "qwen3.8-flash-next"
+        assert f["exo_model_kimi"].default == "qwen3.8-flash-next"
+        assert f["visual_model_url"].default == "http://192.168.71.82:8000/v1"
+        assert f["visual_model_name"].default == "qwen3.8-flash-next"
+        monkeypatch.setattr(settings, "exo_base_url", f["exo_base_url"].default)
+        monkeypatch.setattr(settings, "visual_model_url", f["visual_model_url"].default)
+        registry = gateway._build_registry()
+        for name in ("llm", "vlm"):
+            spec = registry[name]
+            assert spec.required is True
+            joined = " ".join(spec.endpoints)
+            assert "192.168.71.84" not in joined, f"{name} still probes spark02"
+            assert "192.168.71.82:8000" in joined
+        assert "spark01" in registry["llm"].description
+        assert "qwen3.8-flash-next" in registry["llm"].description
+
     async def test_optional_demucs_does_not_fail_closed(self, gateway, monkeypatch):
         """demucs 为可选：不探测 studio01，healthy 视为通过（不失败闭合）。"""
         probed: list[str] = []

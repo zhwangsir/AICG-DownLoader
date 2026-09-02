@@ -30,23 +30,23 @@ class Settings(BaseSettings):
     )
 
     # ====================================================================
-    # LLM 入口（2026-08 架构：全部收敛 spark02 qwen3.6-uncensored）
+    # LLM 入口（2026-08 架构：剧本/角色/分镜/Context-IR 与 VLM 同走 spark01 qwen3.8-flash-next；spark02 不再是 AIGCPannel 硬依赖）
     # ====================================================================
     # 历史四层流水线（llm_l1/l2/l3 → Nemotron/EXO，llm_l4 → spark01 Euryale-70B）
     # 已全部退役：Nemotron vLLM 停用于 2026-08-05，spark01 2026-08-08 起改为
     # Omni-Captioner 音乐反推（不再是 LLM）。剧本/角色/分镜等所有交互 Agent
-    # 统一经 BaseAgent.llm_client -> exo_base_url 调用 spark02 :8000。
+    # 统一经 BaseAgent.llm_client -> exo_base_url 调用 spark01 :8000。
 
-    # 主 LLM：spark02 :8000 qwen3.6-uncensored（Qwen3.8-27B-Uncensored-FP8）
-    # （字段名沿用 exo_* 仅为兼容旧代码；实际指向 spark02，非 EXO 集群）
-    exo_base_url: str = "http://192.168.71.84:8000/v1"
+    # 主 LLM：spark01 :8000 qwen3.8-flash-next（vision + 1M context）
+    # （字段名沿用 exo_* 仅为兼容旧代码；实际指向 spark01，非 EXO 集群）
+    exo_base_url: str = "http://192.168.71.82:8000/v1"
     exo_api_key: str = "not-needed"
-    exo_model_glm52: str = "qwen3.6-uncensored"
-    exo_model_kimi: str = "qwen3.6-uncensored"
+    exo_model_glm52: str = "qwen3.8-flash-next"
+    exo_model_kimi: str = "qwen3.8-flash-next"
 
     # ====================================================================
     # 视觉质检模型（spark01 VLM，qwen3.8-flash-next：更强 + 1M 上下文 + 视觉）
-    # 与 LLM 拆分：spark01 :8000 跑 qwen3.8-flash-next；spark02 只做文本 LLM。
+    # 与 LLM 同机同模型：spark01 :8000 qwen3.8-flash-next。
     # VISUAL_MODEL_NAME / 环境变量仍可覆盖。无 .env 时不得漂回 qwen3-vl-32b。
     # ====================================================================
     visual_model_url: str = "http://192.168.71.82:8000/v1"
@@ -219,7 +219,7 @@ class Settings(BaseSettings):
     # （integrated_multimodal_description: [Shot 1] ... [Shot N] At MM:SS.mmm, the camera cuts to ...），
     # False 时回退 M11 旧版 "SHOT X:" 格式（保险丝）
     h3_native_cut_prompt_enabled: bool = True
-    # P1 local Context-IR rewrite: spark LLM (qwen3.6-uncensored) rewrites the
+    # P1 local Context-IR rewrite: spark01 LLM (qwen3.8-flash-next) rewrites the
     # prompt H3 actually receives; optional VLM retention when refs exist.
     # Fail-open to the original assembled prompt. Default on.
     h3_context_ir_rewrite_enabled: bool = True
@@ -264,7 +264,7 @@ class Settings(BaseSettings):
 
     # ====================================================================
     # M21 统一提示词扩写（场景 IR → H3/LTX 双引擎编译器）
-    # True：LLM（spark02）扩写 ShotSpec 后编译；False/LLM 失败 → 确定性模板
+    # True：LLM（spark01 qwen3.8-flash-next）扩写 ShotSpec 后编译；False/LLM 失败 → 确定性模板
     # ====================================================================
     prompt_expander_enabled: bool = True
 
