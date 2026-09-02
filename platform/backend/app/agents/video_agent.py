@@ -12,7 +12,8 @@ None/'auto' 按镜头类型路由（对白/角色一致性 → H3；空镜/动�
 - 'h3' (默认): MiniMax H3 fl2va，workstation 独立 ComfyUI 实例 :8195
 - 'comfyui': Wan 2.2 I2V 单卡，作为回退
 
-主后端（h3）失败时自动回退到 ComfyUI（保留原 Wan 2.2 工作流）。
+主后端（h3）失败时：有角色参考则回退 ComfyUI/Wan 2.2；空镜/无角色镜头留在 H3 FL2VA，
+不回退 Wan。LTX-2.5 仅在 ltx_enabled 且 :8198 健康时使用。
 """
 
 from __future__ import annotations
@@ -99,6 +100,47 @@ def _is_pure_motion_prompt(prompt: str) -> bool:
     return any(keyword in text for keyword in LTX_MOTION_KEYWORDS)
 
 
+def has_character_refs(request: VideoRequest) -> bool:
+    """角色圣经/全模态参考是否非空（图/视频/音频任一即视为有角色参考）。"""
+    return bool(
+        request.reference_images or request.reference_videos or request.reference_audios
+    )
+
+
+def engine_fallback_chain(engine: str, request: VideoRequest) -> tuple[str, ...]:
+    """P2 回退链：空镜/无角色镜头 SFW+NSFW 均留在 H3，永不回退 Wan 2.2。
+
+    有角色参考：ltx → h3 → comfyui；h3 → comfyui。
+    无角色参考：ltx → h3；h3 单引擎（显式/钉死 comfyui 仍直达，向后兼容）。
+    """
+    if has_character_refs(request):
+        chains = {
+            "ltx": ("ltx", "h3", "comfyui"),
+            "h3": ("h3", "comfyui"),
+            "comfyui": ("comfyui",),
+        }
+    else:
+        chains = {
+            "ltx": ("ltx", "h3"),
+            "h3": ("h3",),
+            "comfyui": ("comfyui",),
+        }
+    return chains[engine]
+
+
+def apply_last_frame_chain(items: list[VideoRequest]) -> None:
+    """同集相邻顺序镜头：下一镜关键帧写入当前 last_frame_url（FL2VA bootstrap）。
+
+    P2 默认开启；实际解码末帧覆盖在 VideoAgent 顺序执行路径完成。
+    就地修改 items，便于 orchestrator 与单测直接断言。
+    """
+    if not settings.h3_last_frame_chain_enabled:
+        return
+    for cur, nxt in zip(items, items[1:]):
+        if nxt.episode == cur.episode:
+            cur.last_frame_url = nxt.image_url
+
+
 def route_video_engine(request: VideoRequest, settings) -> str:
     """M21 双引擎路由判定（纯函数，便于单测）。
 
@@ -110,7 +152,8 @@ def route_video_engine(request: VideoRequest, settings) -> str:
        - 有台词（<d> 标签/dialogue:）或 reference_images/videos/audios 或
          last_frame_url（角色一致性/首尾帧锚定）→ 'h3'
        - 时长超 H3 训练上限或纯运动空镜描述（且 ltx_enabled）→ 'ltx'
-       - 其余（短剧默认）→ 'h3'
+         execute 侧会再确认 :8198 健康，否则仍降 H3（P2 空镜不走 LTX-2.3/Wan）
+       - 其余（短剧默认，含空镜/无角色）→ 'h3' FL2VA
     """
     explicit = (getattr(request, "engine", None) or "").strip().lower()
     if explicit in ("h3", "ltx", "comfyui"):
@@ -1034,22 +1077,19 @@ class VideoAgent(BaseAgent):
     ) -> AgentResponse:
         """M21 双引擎分发：route_video_engine 判定引擎，按回退链依次尝试。
 
-        回退链：ltx → h3 → comfyui；h3 → comfyui；comfyui 直达。
+        P2：空镜/无角色镜头回退链不含 Wan；LTX 仅在 :8198 健康时保留。
         全部失败时返回 success=False，error 携带各引擎错误（{engine}={err} 串联）。
         """
         start = time.time()
         engine = route_video_engine(request, settings)
+        if engine == "ltx":
+            engine = await self._ltx_or_h3()
 
         def _report(percent: int, message: str) -> None:
             if progress_callback:
                 progress_callback(percent, message)
 
-        chains = {
-            "ltx": ("ltx", "h3", "comfyui"),
-            "h3": ("h3", "comfyui"),
-            "comfyui": ("comfyui",),
-        }
-        chain = chains[engine]
+        chain = engine_fallback_chain(engine, request)
         errors: list[str] = []
         for idx, eng in enumerate(chain):
             try:
@@ -1079,6 +1119,23 @@ class VideoAgent(BaseAgent):
             ),
             elapsed_seconds=time.time() - start,
         )
+
+    async def _ltx_or_h3(self) -> str:
+        """P2：LTX-2.5 仅在 ltx_enabled 且 :8198 健康时使用；短超时，不阻塞等待。"""
+        if not settings.ltx_enabled:
+            return "h3"
+        try:
+            ok = await asyncio.wait_for(
+                model_gateway.is_healthy("video_ltx"),
+                timeout=0.6,
+            )
+        except Exception as err:
+            logger.warning("LTX-2.5 健康探测失败/超时，降级 H3 FL2VA: %s", err)
+            return "h3"
+        if not ok:
+            logger.warning("LTX-2.5 :8198 不健康，降级 H3 FL2VA")
+            return "h3"
+        return "ltx"
 
     async def _execute_via_ltx(
         self,
@@ -1165,22 +1222,45 @@ class VideoAgent(BaseAgent):
         progress_callback: Callable[[int, str], None] | None,
         start: float,
     ) -> list[AgentResponse]:
-        """逐场景调用 execute 的兜底路径（各自享有 h3 单镜 + comfyui 回退）。"""
+        """逐场景调用 execute（P2 末帧链：上一镜解码末帧 → 下一镜 last_frame）。"""
         results: list[AgentResponse] = []
-        for req in requests:
+        prev_decoded = ""
+        for i, req in enumerate(requests):
+            chained = req
+            if (
+                settings.h3_last_frame_chain_enabled
+                and prev_decoded
+                and (i == 0 or req.episode == requests[i - 1].episode)
+            ):
+                chained = req.model_copy(update={"last_frame_url": prev_decoded})
             try:
-                results.append(
-                    await self.execute(req, progress_callback=progress_callback)
-                )
+                resp = await self.execute(chained, progress_callback=progress_callback)
             except Exception as err:
                 # execute 内部已兜底返回 AgentResponse，此处防御性捕获
-                results.append(
-                    AgentResponse(
-                        success=False,
-                        error=f"视频生成失败: {err}",
-                        elapsed_seconds=time.time() - start,
-                    )
+                resp = AgentResponse(
+                    success=False,
+                    error=f"视频生成失败: {err}",
+                    elapsed_seconds=time.time() - start,
                 )
+            results.append(resp)
+            prev_decoded = ""
+            if (
+                settings.h3_last_frame_chain_enabled
+                and resp.success
+                and resp.data
+                and i < len(requests) - 1
+                and requests[i + 1].episode == req.episode
+            ):
+                try:
+                    prev_decoded = await self.publish_last_frame_url(
+                        resp.data.get("video_url", ""), req.scene_id
+                    )
+                except Exception as err:
+                    logger.warning(
+                        "末帧抽取失败，下一镜降级首帧-only: scene=%s err=%s",
+                        req.scene_id, err,
+                    )
+                    prev_decoded = ""
         return results
 
     async def _execute_multishot_group(
@@ -1509,6 +1589,29 @@ class VideoAgent(BaseAgent):
             await extract.communicate()
             return frame_path.read_bytes()
 
+    async def publish_last_frame_url(self, video_url: str, scene_id: int) -> str:
+        """下载产出视频，ffmpeg 抽末帧，落到 /static/video，返回可供下一镜 last_frame 的 URL。"""
+        video_url = (video_url or "").strip()
+        if not video_url:
+            raise RuntimeError("empty video_url for last-frame extract")
+        _MULTISHOT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        frame_name = f"chain_last_scene_{scene_id}.png"
+        frame_path = _MULTISHOT_OUTPUT_DIR / frame_name
+        with tempfile.TemporaryDirectory(prefix="h3_last_frame_") as td:
+            video_path = Path(td) / "in.mp4"
+            await self._download_to_file(video_url, video_path)
+            await _run_ffmpeg([
+                FFMPEG_BIN, "-y",
+                "-sseof", "-0.1",
+                "-i", str(video_path),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(frame_path),
+            ])
+        if not frame_path.exists() or frame_path.stat().st_size == 0:
+            raise RuntimeError(f"末帧抽取失败（输出为空）: {video_url}")
+        return f"http://localhost:{settings.backend_port}/static/video/{frame_name}"
+
     async def _execute_via_h3(
         self,
         request: VideoRequest,
@@ -1531,7 +1634,36 @@ class VideoAgent(BaseAgent):
                 )
                 if progress_callback:
                     progress_callback(20, f"ref2va 失败，回退 fl2va: {r2v_err}")
-        return await self._execute_via_h3_fl2va(request, progress_callback)
+        return await self._execute_via_h3_fl2va_with_chain(request, progress_callback)
+
+    async def _execute_via_h3_fl2va_with_chain(
+        self,
+        request: VideoRequest,
+        progress_callback: Callable[[int, str], None] | None = None,
+    ) -> AgentResponse:
+        """P2：FL2VA 末帧链失败重试一次，再降级为首帧-only。"""
+        if not (request.last_frame_url or "").strip():
+            return await self._execute_via_h3_fl2va(request, progress_callback)
+        last_err: Exception | None = None
+        for attempt in range(2):
+            try:
+                return await self._execute_via_h3_fl2va(request, progress_callback)
+            except Exception as err:
+                last_err = err
+                logger.warning(
+                    "H3 FL2VA 末帧链第 %d 次失败: scene_id=%s err=%s",
+                    attempt + 1, request.scene_id, err,
+                )
+                if progress_callback:
+                    progress_callback(20, f"末帧链失败，重试 {attempt + 1}/1: {err}")
+        degraded = request.model_copy(update={"last_frame_url": ""})
+        logger.warning(
+            "H3 FL2VA 末帧链降级为首帧-only: scene_id=%s err=%s",
+            request.scene_id, last_err,
+        )
+        if progress_callback:
+            progress_callback(25, "末帧链降级为首帧-only")
+        return await self._execute_via_h3_fl2va(degraded, progress_callback)
 
     async def _execute_via_h3_fl2va(
         self,

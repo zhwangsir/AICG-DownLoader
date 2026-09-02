@@ -153,17 +153,18 @@ class TestExecuteLtxBranch:
         mock_upload_image.side_effect = [
             RuntimeError("ltx down"),
             RuntimeError("h3 down"),
+            RuntimeError("h3 down"),
             "img.png",
         ]
         mock_get_comfyui_result.return_value = {
             "8": {"videos": [{"filename": "wan.mp4", "subfolder": "", "type": "output"}]}
         }
 
-        resp = await agent.execute(_req(engine="ltx"))
+        resp = await agent.execute(_req(engine="ltx", reference_images=["http://x/c.png"]))
 
         assert resp.success is True
         assert "wan.mp4" in resp.data["video_url"]
-        assert mock_upload_image.await_count == 3
+        assert mock_upload_image.await_count == 4
 
     async def test_all_engines_fail_reports_chain_errors(
         self, agent, monkeypatch, mock_upload_image
@@ -171,7 +172,7 @@ class TestExecuteLtxBranch:
         monkeypatch.setattr(settings, "ltx_enabled", True)
         mock_upload_image.side_effect = RuntimeError("always down")
 
-        resp = await agent.execute(_req(engine="ltx"))
+        resp = await agent.execute(_req(engine="ltx", reference_images=["http://x/c.png"]))
 
         assert resp.success is False
         # 回退链各引擎错误均入列（LTX 服务层会包装一层错误前缀）

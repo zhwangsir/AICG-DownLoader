@@ -424,19 +424,29 @@ class TestVideoAgentH3:
     ):
         """H3 抛异常 → 自动回退到 ComfyUI/Wan 2.2 并成功。"""
         monkeypatch.setattr(settings, "video_backend", "h3")
-        # H3 上传即失败；回退路径上传成功
-        mock_upload_image.side_effect = [RuntimeError("h3 OOM"), "img.png"]
+        # 有角色参考时 H3 先 r2v 再 fl2va，两次上传均失败后才回退 Wan
+        mock_upload_image.side_effect = [
+            RuntimeError("h3 OOM"),
+            RuntimeError("h3 OOM"),
+            "img.png",
+        ]
         mock_get_comfyui_result.return_value = {
             "8": {"videos": [{"filename": "fb.mp4", "subfolder": "", "type": "output"}]}
         }
 
-        request = VideoRequest(scene_id=9, image_url="http://x/sb.png", prompt="p")
+        # P2：无角色空镜不再回退 Wan；本用例带参考图以覆盖「有角色 → Wan 回退」契约
+        request = VideoRequest(
+            scene_id=9,
+            image_url="http://x/sb.png",
+            prompt="p",
+            reference_images=["http://x/char.png"],
+        )
         resp = await agent.execute(request)
 
         assert resp.success is True
         assert "fb.mp4" in resp.data["video_url"]
-        # 回退路径走 LB worker（mock 上传第二次被调用）
-        assert mock_upload_image.await_count == 2
+        # 回退路径走 LB worker（r2v 失败 + fl2va 失败 + Wan 成功）
+        assert mock_upload_image.await_count == 3
 
     async def test_h3_and_comfyui_both_fail(
         self,
@@ -448,7 +458,12 @@ class TestVideoAgentH3:
         monkeypatch.setattr(settings, "video_backend", "h3")
         mock_upload_image.side_effect = RuntimeError("always down")
 
-        request = VideoRequest(scene_id=10, image_url="http://x/sb.png", prompt="p")
+        request = VideoRequest(
+            scene_id=10,
+            image_url="http://x/sb.png",
+            prompt="p",
+            reference_images=["http://x/char.png"],
+        )
         resp = await agent.execute(request)
 
         assert resp.success is False

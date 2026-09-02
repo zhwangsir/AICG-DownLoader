@@ -214,9 +214,10 @@ class Settings(BaseSettings):
     # M17.2 原生音频方向：按组内叙事节拍确定性生成 overall_soundscape /
     # non_diegetic_music 两字段注入 prompt，引导 H3 生成真实 BGM/环境音轨
     h3_audio_direction_enabled: bool = True
-    # M17.3 FL2VA 末帧链式锚定：orchestrator 逐场景把「下一分镜关键帧」填入
-    # last_frame_url（同集相邻场景），fl2va 升级为首帧+末帧双锚定，跨镜连续性质变；
-    # 多镜组末场景取组后一镜关键帧作组末帧（组间链式）
+    # P2 / M17.3 FL2VA 末帧链（默认开）：同集顺序镜头
+    # 1) 生成前把下一镜关键帧填入 last_frame_url 作 FL2VA 双锚定 bootstrap
+    # 2) 上一镜解码末帧覆盖下一镜 last_frame_url（video_agent 顺序镜头实际消费）
+    # 失败重试一次，再降级为首帧-only（不再走 Wan）
     h3_last_frame_chain_enabled: bool = True
     # M17.4 ref2va 音视频参考上限（节点 COMFY_AUTOGROW_V3 max=3/3；H3 全模态
     # 参考文件总预算 12，图片侧已占 9 席，音视频保守各 3 以内）

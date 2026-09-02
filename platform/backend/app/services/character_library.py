@@ -102,7 +102,10 @@ class CharacterLibrary:
         asset = self.get(character_id)
         if asset is None:
             return None
-        allowed = {"name", "role", "age", "description", "personality", "appearance_lock", "locked", "consistency_level"}
+        allowed = {
+            "name", "role", "age", "description", "personality", "appearance_lock",
+            "locked", "consistency_level", "face_still", "voice_sample",
+        }
         data = asset.model_dump()
         for k, v in fields.items():
             if k in allowed and v is not None:
@@ -151,6 +154,9 @@ class CharacterLibrary:
             consistency_level=consistency_level,
             source_script_id=lineage_id,
             created_at=existing.created_at if existing else 0,
+            # P2: 重登记定妆照时保留已有面部静帧/音色，避免圣经被冲掉
+            face_still=existing.face_still if existing else "",
+            voice_sample=existing.voice_sample if existing else "",
         )
         return self.save(asset)
 

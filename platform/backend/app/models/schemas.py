@@ -104,6 +104,10 @@ class CharacterAsset(BaseModel):
     appearance_lock: str = Field("", description="外观锁定卡：分镜生成时强制注入的核心外观关键词")
     locked: bool = Field(True, description="锁定后分镜/视频生成强制引用外观锁定卡")
     consistency_level: str = "L3"
+    # P2 角色圣经：三视图（reference_images front/side/back）+ 面部静帧 + 可选 3-8s 音色。
+    # closeup 仍可放在 reference_images 中；face_still 优先作为面部静帧席。
+    face_still: str = Field("", description="面部静帧 URL（空则回退 reference_images.closeup）")
+    voice_sample: str = Field("", description="可选 3-8s 角色音色参考音频 URL，自动入 Ref2VA ref_audios")
     # M18.7 资产血缘：source_script_id 记录生成该资产三视图的剧本 project_id，
     # 空串 = legacy 旧资产（M18.7 前入库，无血缘信息）；收集阶段据此跳过跨剧本陈旧资产。
     # updated_at_iso 为 updated_at 的 ISO 8601 人类可读形式；updated_at 保留 epoch 秒 int

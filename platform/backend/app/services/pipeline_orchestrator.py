@@ -24,7 +24,11 @@ from app.agents.quality_agent import quality_agent, visual_quality_agent
 from app.agents.script_agent import script_agent
 from app.agents.storyboard_agent import storyboard_agent
 from app.agents.subtitle_agent import subtitle_agent
-from app.agents.video_agent import group_scenes_for_multishot, video_agent
+from app.agents.video_agent import (
+    apply_last_frame_chain,
+    group_scenes_for_multishot,
+    video_agent,
+)
 from app.agents.voice_agent import voice_agent
 from app.config import settings
 from app.core.node_logger import node_span
@@ -58,6 +62,18 @@ from app.services.style_anchor import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _dedupe_urls(urls: list[str]) -> list[str]:
+    """保序去重并过滤空串（角色圣经/流水线参考合并用）。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for url in urls:
+        url = (url or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
 
 # M24.2 锚点重拍：逐镜头生成参数快照根目录
 # （output/pipeline/{project_id}/shot_params.json）
@@ -339,10 +355,18 @@ class PipelineOrchestrator:
         scene_episode_map = {s.scene_id: s.episode for s in script.scenes}
         # M12.1 多镜 SHOT prompt 节拍视觉化：逐场景 narrative_beat 透传到 VideoRequest
         scene_beat_map = {s.scene_id: s.narrative_beat for s in script.scenes}
-        # H3 ref2va 角色一致性：资产库三视图参考图注入每个 VideoRequest
+        # P2 角色圣经 → Ref2VA：三视图 + 面部静帧 + 可选音色，与流水线级音视频参考合并
         # M18.7：stats 回写陈旧跨剧本资产跳过计数，入报告 steps.video
         ref_stats: dict[str, int] = {}
-        reference_images = self._collect_character_reference_images(script, stats=ref_stats)
+        reference_images, bible_videos, bible_audios = self._collect_character_bible(
+            script, stats=ref_stats
+        )
+        merged_videos = _dedupe_urls([*bible_videos, *request.reference_videos])[
+            : settings.h3_ref_max_videos
+        ]
+        merged_audios = _dedupe_urls([*bible_audios, *request.reference_audios])[
+            : settings.h3_ref_max_audios
+        ]
         # M15.1 画风锚定：H3 视频 prompt 强制追加与剧本/角色/分镜一致的画风尾，
         # 负面词注入冲突画风（如写实风排斥 anime/cartoon），防止 footage 画风漂移
         anchor = resolve_style_anchor(request.style)
@@ -367,19 +391,16 @@ class PipelineOrchestrator:
                 # VideoRequest.style 为判定基准，漏传则两层 fail-open 静默跳过
                 # （M18.5 联合 E2E 实测发现：本轮 QC 零日志即此缺口所致）
                 style=request.style,
-                # M17.4 流水线级全模态参考透传（仅 h3 后端 ref2va 消费）
-                reference_videos=list(request.reference_videos),
-                reference_audios=list(request.reference_audios),
+                # P2/M17.4 流水线级全模态参考 + 角色圣经音色/视频（仅 h3 ref2va 消费）
+                reference_videos=merged_videos,
+                reference_audios=merged_audios,
             )
             for sb in storyboards
         ]
-        # M17.3 FL2VA 链式末帧：同集相邻场景把「下一分镜关键帧」填入 last_frame_url，
-        # fl2va 升级首帧+末帧双锚定；多镜组末场景的链式末帧即「组后一镜关键帧」，
-        # 由 _execute_multishot_group 取作组末帧实现组间链式连续
-        if settings.video_backend.lower() == "h3" and settings.h3_last_frame_chain_enabled:
-            for cur, nxt in zip(items, items[1:]):
-                if nxt.episode == cur.episode:
-                    cur.last_frame_url = nxt.image_url
+        # P2 末帧链：H3 顺序镜头默认开启。bootstrap = 下一镜关键帧；
+        # 解码末帧覆盖在 video_agent 顺序执行路径（_execute_scenes_individually）。
+        if settings.video_backend.lower() == "h3":
+            apply_last_frame_chain(items)
         # P1: local Context-IR rewrite of the prompt H3 will receive.
         # Multishot groups are rewritten once in VideoAgent (combined prompt).
         # Per-scene rewrite here covers the non-multishot path and fail-opens.
@@ -540,9 +561,56 @@ class PipelineOrchestrator:
                 return await video_agent.execute_multi_shot(group)
             return [await video_agent.execute(group[0])]
 
-        group_results = await asyncio.gather(*[run_group(g) for g in groups])
         videos: list[dict[str, Any]] = []
         failed: list[int] = []
+        sequential = settings.h3_last_frame_chain_enabled
+        prev_decoded = ""
+        prev_episode: int | None = None
+        group_results: list[list[AgentResponse]] = []
+        for gi, group in enumerate(groups):
+            if (
+                sequential
+                and prev_decoded
+                and group
+                and prev_episode is not None
+                and group[0].episode == prev_episode
+            ):
+                # 上一组/上一镜解码末帧 → 下一顺序镜头 last_frame（FL2VA）
+                group[0].last_frame_url = prev_decoded
+            if sequential:
+                responses = await run_group(group)
+            else:
+                # 无末帧链时保持原并行分组
+                responses = None  # filled below
+            group_results.append(responses if responses is not None else [])
+            if sequential:
+                last_ok = next(
+                    (r for r in reversed(responses) if r.success and r.data),
+                    None,
+                )
+                nxt = groups[gi + 1] if gi + 1 < len(groups) else None
+                if (
+                    last_ok
+                    and nxt
+                    and nxt[0].episode == group[-1].episode
+                ):
+                    try:
+                        prev_decoded = await video_agent.publish_last_frame_url(
+                            last_ok.data.get("video_url", ""), group[-1].scene_id
+                        )
+                    except Exception as err:
+                        logger.warning(
+                            "组间末帧抽取失败，下一组首帧-only: group=%s err=%s",
+                            [r.scene_id for r in group], err,
+                        )
+                        prev_decoded = ""
+                else:
+                    prev_decoded = ""
+                prev_episode = group[-1].episode if group else None
+
+        if not sequential:
+            group_results = await asyncio.gather(*[run_group(g) for g in groups])
+
         for group, responses in zip(groups, group_results):
             for req, resp in zip(group, responses):
                 if resp.success and resp.data:
@@ -655,28 +723,43 @@ class PipelineOrchestrator:
     def _collect_character_reference_images(
         script: Script, stats: dict[str, int] | None = None
     ) -> list[str]:
-        """汇总剧本全部角色在资产库中的三视图参考图（H3 ref2va 角色一致性）。
+        """兼容包装：仅返回角色圣经图片 URL（三视图 + 面部静帧）。"""
+        images, _videos, _audios = PipelineOrchestrator._collect_character_bible(
+            script, stats=stats
+        )
+        return images
 
-        Scene 无角色关联字段，故取剧本全部角色；按角色顺序合并
-        reference_images，去重、保序、过滤空 URL，总量截断到
-        h3_ref_max_images（视频 Agent 侧关键帧再占 1 席后最终截断）。
+    @staticmethod
+    def _collect_character_bible(
+        script: Script, stats: dict[str, int] | None = None
+    ) -> tuple[list[str], list[str], list[str]]:
+        """P2 角色圣经：三视图 + 面部静帧 + 可选 3-8s 音色 → (images, videos, audios)。
 
-        M18.7 收集防串戏：资产带 source_script_id 且与当前剧本 project_id 不一致时
-        跳过该角色——陈旧跨剧本资产（M18.6 实测新剧本角色被 QC 拦截后静默命中旧剧本
-        同 ID 资产，ref2va 参考与漂移对照基准双双错配）。legacy 无血缘字段资产仅在
-        该角色本轮未重新生成时才可能残留（重新生成会覆盖写入血缘；QC 拦截已隔离删除），
-        兜底允许使用并记 info 日志提示陈旧。stats 非空时回写
-        reference_images_stale_skipped（跳过的陈旧资产角色数，报告 steps.video 消费）。
+        Scene 无角色关联字段，故取剧本全部角色。图片去重保序后截断到
+        h3_ref_max_images（关键帧再占 1 席）；音频截断到 h3_ref_max_audios。
+        血缘校验口径与 M18.7 一致。
         """
-        refs: list[str] = []
-        seen: set[str] = set()
+        images: list[str] = []
+        videos: list[str] = []
+        audios: list[str] = []
+        seen_img: set[str] = set()
+        seen_vid: set[str] = set()
+        seen_aud: set[str] = set()
         stale_skipped = 0
         current_script_id = script.project_id
+        three_view_keys = ("front", "side", "back")
+        face_keys = ("closeup", "face", "face_still")
+
+        def _push(bucket: list[str], seen: set[str], url: str) -> None:
+            url = (url or "").strip()
+            if url and url not in seen:
+                seen.add(url)
+                bucket.append(url)
+
         for character in script.characters:
             asset = character_library.get(character.character_id)
             if asset is None:
                 continue
-            # M18.7 血缘校验：带血缘且与当前剧本不一致 → 陈旧跨剧本资产，跳过防串戏
             if asset.source_script_id and asset.source_script_id != current_script_id:
                 stale_skipped += 1
                 logger.info(
@@ -685,19 +768,26 @@ class PipelineOrchestrator:
                 )
                 continue
             if not asset.source_script_id:
-                # legacy 无血缘资产（M18.7 前入库）：兜底可用，提示陈旧建议重新生成
                 logger.info(
                     "角色 %s 使用 legacy 无血缘资产参考图（陈旧资产兜底，建议重新生成定妆照）",
                     character.character_id,
                 )
-            for url in asset.reference_images.values():
-                url = (url or "").strip()
-                if url and url not in seen:
-                    seen.add(url)
-                    refs.append(url)
+            refs = asset.reference_images or {}
+            for key in three_view_keys:
+                _push(images, seen_img, refs.get(key, ""))
+            _push(images, seen_img, getattr(asset, "face_still", "") or "")
+            for key in face_keys:
+                _push(images, seen_img, refs.get(key, ""))
+            for url in refs.values():
+                _push(images, seen_img, url)
+            _push(audios, seen_aud, getattr(asset, "voice_sample", "") or "")
         if stats is not None:
             stats["reference_images_stale_skipped"] = stale_skipped
-        return refs[: settings.h3_ref_max_images]
+        return (
+            images[: settings.h3_ref_max_images],
+            videos[: settings.h3_ref_max_videos],
+            audios[: settings.h3_ref_max_audios],
+        )
 
     async def _step_voice(
         self, task_id: str, script: Script, report: dict
