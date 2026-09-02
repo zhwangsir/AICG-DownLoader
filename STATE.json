@@ -2,7 +2,28 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-03",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 f5a4037。canonical start ./start-aigcpannel.sh。2026-09-02 起剧本/角色/分镜/Context-IR LLM+VLM 默认 spark01 .82:8000 qwen3.8-flash-next，网关必选不再硬依赖 spark02。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 151c801。canonical start ./start-aigcpannel.sh。2026-09-02 起剧本/角色/分镜/Context-IR LLM+VLM 默认 spark01 .82:8000 qwen3.8-flash-next，网关必选不再硬依赖 spark02。代码 AICG 开发，五件套项目管家。",
+  "gateway_preview_turbo_151c801": {
+    "commit": "151c801",
+    "stacked_on": "5967131",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "preview": "preview=true OR quality=preview inserts MiniMaxH3TurboLoRA + MiniMaxH3TurboSampler (FL2VA 8 / Ref2VA 4)",
+    "final": "20 steps",
+    "content_lora": false,
+    "sfw_turbo": "not 10Eros",
+    "gateway": ":8790 restarted",
+    "confirmed_by": "设备管家",
+    "repair_preview": "still AddGuide",
+    "files": [
+      "dashbox/local_gateway/h3_video.py",
+      "dashbox/local_gateway/main.py",
+      "dashbox/tests/test_local_gateway_h3_p3.py"
+    ],
+    "note": "Gateway-side Turbo; does not erase P3 c27f6db workbench Turbo history; device-side H3 untouched",
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "h3_addguide_node_2026_09_03": {
     "source": "设备管家 + AICG object_info",
     "comfyui": "workstation :8195 0.30.0→0.34.0 git a87667f",

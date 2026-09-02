@@ -2,7 +2,7 @@
 
 **AIGCPannel** 是短剧产品。`dashbox/` 是收尾引擎（`:8080`/`:8780`），不再当独立产品。ToIV 是聚合平台；本仓不是第二个 ToIV。短剧流水线（`platform/`）和 ComfyUI 模型下载器（`src/`）是模块。仓名/目录 `ALLProject/AIGCPannel`。旧 slug 只跳转不删。
 
-目录 `ALLProject/AIGCPannel`。远程 origin [gitee.com/Winery_z/AIGCPannel](https://gitee.com/Winery_z/AIGCPannel) 与 github [github.com/zhwangsir/AIGCPannel](https://github.com/zhwangsir/AIGCPannel)，尖端 `bc85d48`（已双推，未强推）。只这一根融合仓。旧 slug `AICG-DownLoader` / `DashBox` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要删**。
+目录 `ALLProject/AIGCPannel`。远程 origin [gitee.com/Winery_z/AIGCPannel](https://gitee.com/Winery_z/AIGCPannel) 与 github [github.com/zhwangsir/AIGCPannel](https://github.com/zhwangsir/AIGCPannel)，尖端 `151c801`（已双推，未强推）。只这一根融合仓。旧 slug `AICG-DownLoader` / `DashBox` / `LibTV` / `comfy-downloader` 是本仓 rename 跳转，**不要删**。
 
 后续开发与测试归 AICG 开发；五件套归项目管家。ToIV 业务代码不在本仓改。
 
@@ -17,7 +17,7 @@
 | `origin` | https://gitee.com/Winery_z/AIGCPannel.git | Gitee，主远程 |
 | `github` | https://github.com/zhwangsir/AIGCPannel.git | GitHub 备份 |
 
-- 当前 `main` 尖端：`bc85d48`（`fix: 模型下载根使用第一个可读 NAS 路径`）。Gitee/GitHub 已双推，未强推；含 `0511598`，叠在 docs `85e0787` 上
+- 当前 `main` 尖端：`151c801`（`fix: gateway preview uses H3 Turbo sampler not 20-step`）。Gitee/GitHub 已双推，未强推；叠 `5967131`
 - 融合提交：`e3e30c0`（`feat: 产品更名为 AIGCPannel，融合下载器、短剧平台与 dashbox`）
 - 其后文档提交即 `c0b73d0`
 
@@ -32,6 +32,10 @@
 用户已定口径：AIGCPannel **SFW** 对白/锁人=MiniMax **H3**（海螺 3.0）；空镜/预览=**LTX-2.5**（`:8198` 起来再开，代码保留）。**Wan2.2** 与 **LTX-2.3+10Eros** 留 ToIV **R18**，价值主要在 NSFW，不是短剧 SFW 空镜/无声 fallback。ToIV 不换主路；AIGCPannel 不改 ToIV。Round 1 已落：剧本加速、NAS 可读下载根、Colima prune、H3 一镜冒烟。 LICENSE/NOTICE/ToIV 未动。
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
+
+## 网关 preview Turbo（2026-09-03，`151c801`）
+
+`151c801` 已双推 Gitee+GitHub（叠 `5967131`）。网关 `preview=true` 或 `quality=preview` 插 `MiniMaxH3TurboLoRA`+`MiniMaxH3TurboSampler`（FL2VA 8 / Ref2VA 4）；成片仍 20 步；不叠内容 LoRA；SFW turbo 不是 10Eros。`:8790` 已重启（设备管家确认）。修图+preview 仍 AddGuide。改 `dashbox/local_gateway/h3_video.py`、`main.py`、新增 `dashbox/tests/test_local_gateway_h3_p3.py`。网关侧 Turbo，不抹 P3 `c27f6db` 工作台 Turbo 史。设备侧 H3 未动。LICENSE/NOTICE/ToIV 未动。
 
 ## :8195 AddGuide 节点已在（2026-09-03）
 
