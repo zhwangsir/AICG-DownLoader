@@ -35,7 +35,7 @@ ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没�
 
 ## P3 Turbo 预览 / 成片 20 步（2026-09-02，`c27f6db`）
 
-`c27f6db` 已双推（P3，叠 `291d994`）：`preview=true` / `quality=preview` 开 Turbo（FL2VA 8 步、Ref2VA 4 步，`MiniMaxH3TurboLoRA`+Sampler）；成片默认 20 步、Turbo 关。SFW turbo LoRA 是 **v4 pruned**，不是 10Eros；NSFW 预览可用 `10Eros_Max_h3_TURBO_ref2va`；Turbo+内容 LoRA 直接拒绝。LICENSE/NOTICE/ToIV 未动。
+`c27f6db` 已双推（P3，叠 `291d994`）：`preview=true` / `quality=preview` 开 Turbo（`MiniMaxH3TurboLoRA`+`MiniMaxH3TurboSampler`；FL2VA 8 步、Ref2VA 4 步）。成片默认 / `preview=false` / `quality=final` 关 Turbo、原生 20 步；`h3_turbo_enabled` 配置默认仍 False。SFW turbo LoRA 是 `minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors`，不是 10Eros。NSFW 预览可用 `10Eros_Max_h3_TURBO_ref2va.safetensors`（未在 NAS 上实锤文件名）。Turbo+内容 LoRA 直接拒绝（已知 shape 错）。工作台 VideoModal「Turbo 预览」vs「生成视频」；画布一键成片传 `preview:false, quality:final`。缺口：没用官方 `minimax_h3_fl2v`/`lightx2v` 名（`:8195` 产品默认已是 v4 pruned）；一键 pipeline 不传 preview；无 `:8195` 真机 Turbo 冒烟。LICENSE/NOTICE/ToIV 未动。
 
 ## P2 尾帧串镜 / FL2VA（2026-09-02，`a284c52`）
 

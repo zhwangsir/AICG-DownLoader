@@ -9,14 +9,23 @@
     "remotes": "Gitee+GitHub",
     "stacked_on": "291d994",
     "preview": "preview=true / quality=preview enables Turbo",
-    "turbo_steps": "FL2VA 8; Ref2VA 4; MiniMaxH3TurboLoRA+Sampler",
-    "final": "default 20 steps; Turbo off",
-    "sfw_lora": "v4 pruned, not 10Eros",
-    "nsfw_preview": "10Eros_Max_h3_TURBO_ref2va allowed",
-    "reject": "Turbo + content LoRA rejected",
-    "next": "P4 AddGuide local inpaint + 漫剧 style pack",
+    "turbo_steps": "FL2VA 8; Ref2VA 4",
+    "final": "default / preview=false / quality=final: Turbo off, native 20 steps",
+    "sfw_lora": "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors (not 10Eros)",
+    "nsfw_preview": "10Eros_Max_h3_TURBO_ref2va.safetensors allowed; filename not verified on NAS",
+    "reject": "Turbo + content LoRA rejected (known shape mismatch)",
+    "next": "P4 AddGuide local inpaint + 漫剧 style pack + DaSiWa A/B only",
     "brand": "untouched",
-    "toiv": "untouched"
+    "toiv": "untouched",
+    "nodes": "MiniMaxH3TurboLoRA + MiniMaxH3TurboSampler",
+    "config_default": "h3_turbo_enabled still False",
+    "ui": "VideoModal Turbo preview vs generate; canvas one-click preview:false quality:final",
+    "tests": "backend 17 P3 + existing turbo/NSFW/P2; frontend VideoModal/Canvas/client 121",
+    "gaps": [
+      "not using official minimax_h3_fl2v/lightx2v names; :8195 product default already v4 pruned",
+      "one-click pipeline does not pass preview",
+      "no :8195 live Turbo smoke"
+    ]
   },
   "p2_h3_chain_a284c52": {
     "commit": "a284c52",
