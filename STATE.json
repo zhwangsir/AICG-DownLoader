@@ -2,7 +2,17 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-02",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 505d039。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 7df5b67。canonical start ./start-aigcpannel.sh。2026-09-02 起剧本/改写/视觉走 spark01 .82:8000 qwen3.8-flash-next，网关必选不再硬依赖 spark02 LLM。代码 AICG 开发，五件套项目管家。",
+  "spark01_llm_vlm_2026_09_02": {
+    "source": "user decision via 设备管家",
+    "llm": "spark01 .82:8000 qwen3.8-flash-next",
+    "vlm": "spark01 .82:8000 qwen3.8-flash-next",
+    "script_rewrite_vision": "all spark01; do not pull spark02 .84:8000",
+    "gateway_health": "required llm+vlm both spark01; spark02 LLM no longer hard required",
+    "spark02_services": "untouched on .84; spark02 ≠ whole-cluster retirement (ToIV may still use it)",
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "p6_24fps_505d039": {
     "commit": "505d039",
     "pushed": true,
@@ -397,7 +407,8 @@
     ],
     "ltx_required": false,
     "dashbox": "colima build; :8080/:8780 listening; panel web/api_listening true; Colima disk 20G tight; LICENSE/NOTICE/brand untouched",
-    "toiv": "untouched"
+    "toiv": "untouched",
+    "superseded_health": "2026-09-02: required llm+vlm spark01 qwen3.8-flash-next; spark02 LLM no longer hard required"
   },
   "drama_smoke_2026_08_27": {
     "code": "uncommitted",
@@ -1847,14 +1858,14 @@
   },
   "infrastructure": {
     "llm": {
-      "endpoint": "http://192.168.71.84:8000/v1",
-      "model": "qwen3.6-uncensored (qwen3.6-35b-a3b-uncensored-heretic FP8)",
-      "topology": "spark02 vLLM, TP1, max_len 32768；Nemotron vLLM（workstation GPU3）2026-08-05 退役（stop+disable），备用 spark01 llama-3.3-70b-abliterated / EXO :52415"
+      "endpoint": "http://192.168.71.82:8000/v1",
+      "model": "qwen3.8-flash-next",
+      "topology": "spark01。AIGCPannel 2026-09-02 起剧本/改写/视觉都走这里，不拉 spark02 .84:8000。spark02 不等于整集群退役（ToIV 可能仍用）。"
     },
     "visual_llm": {
-      "endpoint": "http://192.168.71.84:8000/v1",
-      "model": "qwen3.6-uncensored（实测支持 image_url 视觉输入：16x16 纯红 PNG 正确回答 Red）",
-      "topology": "spark02 vLLM；与主 LLM 同端点；旧 Nemotron 全模态已退役"
+      "endpoint": "http://192.168.71.82:8000/v1",
+      "model": "qwen3.8-flash-next",
+      "topology": "spark01；与主 LLM 同端点同模型。旧 spark02 LLM/VLM 口径已覆盖。"
     },
     "comfyui": {
       "endpoint": "http://192.168.71.127:8188",

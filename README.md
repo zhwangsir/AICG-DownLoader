@@ -33,6 +33,10 @@
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 
+## 剧本/改写/视觉改走 spark01（2026-09-02）
+
+2026-09-02 用户定口径（设备管家回写）：AIGCPannel 剧本/改写/视觉都用 spark01 `.82:8000` `qwen3.8-flash-next`。不拉 spark02 `.84:8000`。网关 `gateway/health` 必选不再含 spark02 LLM（llm+vlm 都 spark01）。`.84` 上的服务没动；spark02 不等于整集群退役（ToIV 可能仍用）。LICENSE/NOTICE/ToIV 未动。
+
 ## 短剧 compose 默认 24fps（2026-09-02，`505d039`）
 
 `505d039` 已双推（叠 `ccfe7a6`）：短剧 compose/export 默认 `output_fps=24`。Canvas compose 固定 24；EditModal 默认 `FPS_OPTIONS[0]=24`；`FPS_OPTIONS=[24,30,60]`（30/60 仍可选）。schemas Edit/Pipeline `output_fps` 描述钉 24，值本来就是 24。未改 DashBox episode compose 1080×1920，未把 1.5× 标成 2K。未 SSH spark02。仍空：voice 3–8s；`happyhorse-1.0` 仍作 H3 别名；DashBox episode compose 仍 1080×1920。LICENSE/NOTICE/ToIV 未动。
@@ -103,7 +107,7 @@ DashBox `:8780` 反代 `/api/drama/*` 到 `host.docker.internal:8100`（短剧�
 
 registry 在 NAS 不可读时明确报错，不再空列表。扫描根含 `/Users/wangzhenyu/NAS/Windows/ComfyUI/ComfyUIModel/models`。本机 MateBook `~/NAS` 已挂 NAS（非开机自动挂载），模型根可读。registry：loras 101、checkpoints 24。
 
-`gateway/health` 不再探测 studio04/01/02。必选健康：llm spark02、vlm spark01、LB :8188、H3 :8195、TTS :9200、ASR :9210。LTX required=false。集群设备仍只看 ToIV/AGENTS.md。
+`gateway/health` 不再探测 studio04/01/02。2026-08-27 当时必选含 llm spark02；**2026-09-02 覆盖**：必选健康为 llm spark01、vlm spark01（均为 `qwen3.8-flash-next` `.82:8000`）、LB :8188、H3 :8195、TTS :9200、ASR :9210。不再硬依赖 spark02 LLM。LTX required=false。集群设备仍只看 ToIV/AGENTS.md。
 
 DashBox 正在本机 web :8080 and api :8780 listening; panel web/api_listening true; Colima disk 20G tight. LICENSE/NOTICE/品牌未改。ToIV 未动。
 

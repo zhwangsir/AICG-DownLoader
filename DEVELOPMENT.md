@@ -41,6 +41,8 @@
 **2026-08-28 H3 出片冒烟（无新代码）**：H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。 LICENSE/NOTICE/ToIV 未动。
 
 
+**2026-09-02 spark01 口径**：2026-09-02 用户定口径（设备管家回写）：AIGCPannel 剧本/改写/视觉都用 spark01 `.82:8000` `qwen3.8-flash-next`。不拉 spark02 `.84:8000`。网关 `gateway/health` 必选不再含 spark02 LLM（llm+vlm 都 spark01）。`.84` 上的服务没动；spark02 不等于整集群退役（ToIV 可能仍用）。LICENSE/NOTICE/ToIV 未动。
+
 **2026-09-02 `505d039`（已双推）**：`505d039` 已双推（叠 `ccfe7a6`）：短剧 compose/export 默认 `output_fps=24`。Canvas compose 固定 24；EditModal 默认 `FPS_OPTIONS[0]=24`；`FPS_OPTIONS=[24,30,60]`（30/60 仍可选）。schemas Edit/Pipeline `output_fps` 描述钉 24，值本来就是 24。未改 DashBox episode compose 1080×1920，未把 1.5× 标成 2K。未 SSH spark02。仍空：voice 3–8s；`happyhorse-1.0` 仍作 H3 别名；DashBox episode compose 仍 1080×1920。LICENSE/NOTICE/ToIV 未动。
 
 **2026-09-02 `1d5c2be`（已双推）**：`1d5c2be` 已双推（P6，叠 `18f06d8`）：短剧 compose/export 默认 `768x1344`（横屏 `1344x768`）。`route_video_engine` 与网关 `_select_video_backend` 不再 auto-LTX；`/v1/models` 仅 `LOCAL_LTX_ENABLED=true` 才列出 LTX-2.5。LTX 代码仍在 `ltx_enabled` 后。H3 成片 768P 未改。DashBox 1.5× 未标成 2K。未 SSH spark02。缺口：voice 3–8s 仍未做；Canvas/EditModal compose fps 仍 30（schema 默认 24，AICG 接着改）；`happyhorse-1.0` 仍作 H3 别名列出；DashBox episode compose 仍 1080×1920（引擎导出，不是短剧 generate）。LICENSE/NOTICE/ToIV 未动。
