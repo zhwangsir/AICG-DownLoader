@@ -8,16 +8,17 @@
     "pushed": true,
     "remotes": "Gitee+GitHub",
     "stacked_on": "a77032a",
-    "repair": "MiniMaxH3AddGuide + LoadImageMask/SetLatentNoiseMask; lower denoise",
-    "fail_closed": "502/H3RepairUnavailable if AddGuide missing; no Wan/LTX fallback",
-    "manhua": "animagineXL40 + IPAdapter 0.85; video still H3 FL2VA/Ref2VA",
+    "repair": "MiniMaxH3AddGuide + LoadImageMask/SetLatentNoiseMask; lower BasicScheduler denoise",
+    "fail_closed": "502/H3RepairUnavailable if AddGuide missing on :8195; no Wan/LTX fallback",
+    "manhua": "animagineXL40 keyframes + IPAdapter 0.85; video still H3 FL2VA/Ref2VA",
     "nsfw_pin": "default still 10Eros",
-    "dasiwa": "nsfw_variant=dasiwa opt-in A/B only; :8195 UNETLoader has no weight; precheck fails",
-    "remix": "not wired; not on disk / not in registry",
+    "dasiwa": "nsfw_variant=dasiwa opt-in A/B hook; UNETLoader has minimax_h3_* and 10Eros, no DaSiWa; precheck fails",
+    "remix": "civitai 2879272 not wired",
     "probe_8195": {
+      "elapsed": "~1s",
       "nodes": 855,
       "has": [
-        "ImageToVideo",
+        "MiniMaxH3ImageToVideo",
         "ReferenceToVideo",
         "TurboLoRA",
         "SetLatentNoiseMask",
@@ -26,12 +27,20 @@
       "missing": [
         "MiniMaxH3AddGuide"
       ],
+      "upgrade": "Comfy-Org #15439; H3 ComfyUI must be upgraded",
       "sampler": "SamplerCustomAdvanced has no denoise_mask"
     },
     "tests": "dashbox P0+P4 25; platform P4+P3+P2+routing 67",
     "p0_p4": "code knives done",
     "brand": "untouched",
-    "toiv": "untouched"
+    "toiv": "untouched",
+    "mask": "SetLatentNoiseMask; SamplerCustomAdvanced has no denoise_mask",
+    "still_on": "P2 last-frame chain default on; P3 Turbo+content LoRA still rejected",
+    "gaps": [
+      "repair 502 until H3 ComfyUI upgraded",
+      "DaSiWa is a hook only",
+      "no standalone repair UI; optional fields on VideoGenerateParams"
+    ]
   },
   "p3_h3_turbo_c27f6db": {
     "commit": "c27f6db",

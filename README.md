@@ -35,7 +35,7 @@ ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没�
 
 ## P4 AddGuide 修复 / 漫剧 pack（2026-09-02，`16dbbd5`）
 
-`16dbbd5` 已双推（P4，叠 `a77032a`）：repair/inpaint 插 `MiniMaxH3AddGuide` + `LoadImageMask`/`SetLatentNoiseMask`，降 denoise；图里没有 AddGuide 则 fail-closed `502`/`H3RepairUnavailable`，不回退 Wan/LTX。漫剧 pack 偏 `animagineXL40` + IPAdapter 0.85，视频引擎仍 H3 FL2VA/Ref2VA。NSFW PIN 默认仍 10Eros；`nsfw_variant=dasiwa` 仅 opt-in A/B（`:8195` UNETLoader 无此权重，选了会预检失败）。Remix 未接线（盘上/注册表都没有）。`:8195` 快探 855 节点：有 ImageToVideo/ReferenceToVideo/TurboLoRA/SetLatentNoiseMask/LoadImageMask；无 `MiniMaxH3AddGuide`；`SamplerCustomAdvanced` 也没有 `denoise_mask`。P0–P4 代码刀完。LICENSE/NOTICE/ToIV 未动。
+`16dbbd5` 已双推（P4，叠 `a77032a`）：repair/inpaint 插 `MiniMaxH3AddGuide` + `LoadImageMask`/`SetLatentNoiseMask`，并降低 BasicScheduler denoise；mask 走 `SetLatentNoiseMask`（`SamplerCustomAdvanced` 无 `denoise_mask`）。`:8195` 现无 AddGuide 则 fail-closed `502`/`H3RepairUnavailable`，不回退 Wan/LTX。漫剧 pack 偏 `animagineXL40` 关键帧 + IPAdapter 0.85，视频引擎仍 H3 FL2VA/Ref2VA。NSFW PIN 默认仍 10Eros；`nsfw_variant=dasiwa` 仅 opt-in A/B（UNETLoader 只有 `minimax_h3_*` 和 10Eros，无 DaSiWa 权重，选了会预检失败）。Remix（civitai 2879272）未接线。P2 尾帧串镜仍默认开；P3 Turbo+内容 LoRA 仍拒绝。`:8195` 快探约 1s、855 节点：有 `MiniMaxH3ImageToVideo`/`ReferenceToVideo`/`TurboLoRA`/`SetLatentNoiseMask`/`LoadImageMask`；无 `MiniMaxH3AddGuide`（需升 ComfyUI，Comfy-Org #15439）。缺口：repair 会 502 直到 H3 那台 ComfyUI 升级；DaSiWa 只是 hook；没有独立 repair UI（只有 `VideoGenerateParams` 可选字段）。P0–P4 代码刀完。LICENSE/NOTICE/ToIV 未动。
 
 ## P3 Turbo 预览 / 成片 20 步（2026-09-02，`c27f6db`）
 
