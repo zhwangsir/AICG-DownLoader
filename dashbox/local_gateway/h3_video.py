@@ -322,3 +322,170 @@ def r2v_ref_images(inputs: dict[str, Any]) -> list[str]:
             seen.add(url)
             ordered.append(url)
     return ordered[:9]
+
+
+# ---------------------------------------------------------------------------
+# P3: two-speed H3 — Turbo preview vs native 20-step final
+# preview=true OR quality=preview → MiniMaxH3TurboLoRA + MiniMaxH3TurboSampler
+# omit / preview=false / quality=final → turbo OFF, native 20 steps
+# Do not stack turbo + content LoRA (skip content LoRA when turbo on)
+# ---------------------------------------------------------------------------
+
+H3_TURBO_LORA_SFW = "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors"
+H3_TURBO_LORA_NSFW = "10Eros_Max_h3_TURBO_ref2va.safetensors"
+H3_TURBO_FL2VA_STEPS = 8
+H3_TURBO_REF2VA_STEPS = 4
+H3_TURBO_STRENGTH = 1.0
+H3_TURBO_LOW_VRAM = False
+H3_TURBO_LORA_NODE = "100"
+H3_TURBO_SAMPLER_NODE = "101"
+_CONTENT_LORA_CLASS_TYPES = frozenset(
+    {
+        "LoraLoader",
+        "LoraLoaderModelOnly",
+        "PowerLoraLoader",
+        "Lora Loader",
+    }
+)
+_FINAL_QUALITY = frozenset({"final", "delivery", "baseline", "max"})
+
+
+def _truthy(src: Any) -> bool:
+    if src is True:
+        return True
+    if src is False or src is None:
+        return False
+    return str(src).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def request_h3_preview(body: dict[str, Any] | None = None) -> bool:
+    """True when preview=true OR quality=preview. quality=final forces off."""
+    if not body:
+        return False
+    meta = metadata_of(body)
+    quality = str(body.get("quality") or meta.get("quality") or "").strip().lower()
+    if quality == "preview":
+        return True
+    if quality in _FINAL_QUALITY:
+        return False
+    return _truthy(body.get("preview")) or _truthy(meta.get("preview"))
+
+
+def resolve_h3_turbo_lora_name(nsfw: bool = False) -> str:
+    """SFW product default turbo LoRA; NSFW may use 10Eros turbo. SFW never 10Eros."""
+    if nsfw:
+        name = (os.getenv("LOCAL_H3_NSFW_TURBO_LORA") or H3_TURBO_LORA_NSFW).strip()
+        if name:
+            return name
+    name = (os.getenv("LOCAL_H3_TURBO_LORA") or H3_TURBO_LORA_SFW).strip()
+    if "10eros" in name.lower():
+        return H3_TURBO_LORA_SFW
+    return name or H3_TURBO_LORA_SFW
+
+
+def h3_turbo_steps_for_mode(mode: str) -> int:
+    if (mode or "").lower() in {"r2v", "ref2va"}:
+        try:
+            return int(os.getenv("LOCAL_H3_TURBO_REF2VA_STEPS") or H3_TURBO_REF2VA_STEPS)
+        except ValueError:
+            return H3_TURBO_REF2VA_STEPS
+    try:
+        return int(os.getenv("LOCAL_H3_TURBO_FL2VA_STEPS") or H3_TURBO_FL2VA_STEPS)
+    except ValueError:
+        return H3_TURBO_FL2VA_STEPS
+
+
+def workflow_has_content_lora(workflow: dict[str, Any]) -> list[str]:
+    """Node ids of content LoRA (not MiniMaxH3TurboLoRA). Stacking causes shape error."""
+    found: list[str] = []
+    for nid, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        ct = str(node.get("class_type") or "")
+        if not ct or ct == "MiniMaxH3TurboLoRA":
+            continue
+        if ct in _CONTENT_LORA_CLASS_TYPES:
+            found.append(str(nid))
+            continue
+        lowered = ct.lower()
+        if "lora" in lowered and "turbo" not in lowered:
+            found.append(str(nid))
+    return found
+
+
+def skip_content_lora(workflow: dict[str, Any]) -> list[str]:
+    """When turbo is on, drop content LoRA and rewire consumers back to UNETLoader."""
+    removed = workflow_has_content_lora(workflow)
+    for lora_id in removed:
+        for nid, node in list(workflow.items()):
+            if not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for key, value in list(inputs.items()):
+                if isinstance(value, list) and len(value) == 2 and str(value[0]) == str(lora_id):
+                    inputs[key] = ["1", 0]
+        workflow.pop(lora_id, None)
+    return removed
+
+
+def apply_h3_turbo_to_workflow(
+    workflow: dict[str, Any],
+    *,
+    mode: str = "fl2va",
+    nsfw: bool = False,
+) -> dict[str, Any]:
+    """Insert MiniMaxH3TurboLoRA + MiniMaxH3TurboSampler. Caller already decided preview.
+
+    FL2VA 8 steps, Ref2VA 4 steps. SFW LoRA is never 10Eros. Content LoRA is skipped.
+    """
+    skip_content_lora(workflow)
+    if workflow.get("1", {}).get("class_type") != "UNETLoader":
+        return workflow
+
+    lora_node_id = H3_TURBO_LORA_NODE
+    sampler_node_id = H3_TURBO_SAMPLER_NODE
+    resolved_lora = resolve_h3_turbo_lora_name(nsfw)
+    if not nsfw and "10eros" in resolved_lora.lower():
+        resolved_lora = H3_TURBO_LORA_SFW
+    try:
+        strength = float(os.getenv("LOCAL_H3_TURBO_STRENGTH") or H3_TURBO_STRENGTH)
+    except ValueError:
+        strength = H3_TURBO_STRENGTH
+    low_vram = str(os.getenv("LOCAL_H3_TURBO_LOW_VRAM") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    resolved_steps = h3_turbo_steps_for_mode(mode)
+
+    workflow[lora_node_id] = {
+        "class_type": "MiniMaxH3TurboLoRA",
+        "inputs": {
+            "model": ["1", 0],
+            "lora_name": resolved_lora,
+            "strength": strength,
+            "low_vram": low_vram,
+        },
+    }
+    for nid, node in workflow.items():
+        if nid == lora_node_id or not isinstance(node, dict) or "inputs" not in node:
+            continue
+        for key, value in list(node["inputs"].items()):
+            if isinstance(value, list) and len(value) == 2 and value == ["1", 0]:
+                node["inputs"][key] = [lora_node_id, 0]
+
+    workflow[sampler_node_id] = {
+        "class_type": "MiniMaxH3TurboSampler",
+        "inputs": {},
+    }
+    sampler_advanced = workflow.get("34", {})
+    if isinstance(sampler_advanced, dict) and sampler_advanced.get("class_type") == "SamplerCustomAdvanced":
+        sampler_advanced.setdefault("inputs", {})["sampler"] = [sampler_node_id, 0]
+
+    scheduler = workflow.get("32", {})
+    if isinstance(scheduler, dict) and scheduler.get("class_type") == "BasicScheduler":
+        scheduler.setdefault("inputs", {})["steps"] = resolved_steps
+    return workflow

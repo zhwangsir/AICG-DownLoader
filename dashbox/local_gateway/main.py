@@ -45,10 +45,12 @@ from local_gateway.h3_context_ir import rewrite_h3_prompt as rewrite_h3_context_
 from local_gateway.h3_video import (
     H3RepairUnavailable,
     apply_h3_repair_guide,
+    apply_h3_turbo_to_workflow,
     collect_video_inputs,
     h3_resolution_scale,
     h3_unets,
     r2v_ref_images,
+    request_h3_preview,
     request_inpaint_mask,
     request_nsfw,
     request_nsfw_variant,
@@ -764,6 +766,7 @@ LOADER_FILE_FIELDS: dict[str, tuple[str, ...]] = {
     "CheckpointLoaderSimple": ("ckpt_name",),
     "LoraLoader": ("lora_name",),
     "LoraLoaderModelOnly": ("lora_name",),
+    "MiniMaxH3TurboLoRA": ("lora_name",),
     "VAELoader": ("vae_name",),
     "LTXVAudioVAELoader": ("vae_name",),
     "CLIPLoader": ("clip_name",),
@@ -1265,6 +1268,11 @@ async def video_generations(request: Request) -> Response:
                         denoise=request_repair_denoise(body),
                     )
                     task["h3_repair"] = True
+                if request_h3_preview(body):
+                    turbo_mode = "ref2va" if mode == "r2v" else "fl2va"
+                    apply_h3_turbo_to_workflow(workflow, mode=turbo_mode, nsfw=nsfw)
+                    task["h3_turbo"] = True
+                    task["h3_turbo_steps"] = workflow.get("32", {}).get("inputs", {}).get("steps")
                 missing = await _preflight_workflow(client, H3_BASE_URL, workflow)
                 if missing:
                     return _error_response(f"H3 生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
