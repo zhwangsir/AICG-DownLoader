@@ -2,7 +2,27 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-02",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 16dbbd5。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 7623d05。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "p5_h3_only_7623d05": {
+    "commit": "7623d05",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "stacked_on": "240d34d",
+    "generate_ui": "H3 only (h3-aio/h3-clean); POST rejects wan22-*; illegal preset → h3-aio",
+    "wan_json": "still on disk",
+    "h3_local": "MiniMax-H3-local 768P only; UI 768×1344 / 1344×768",
+    "one_click": "orchestrator pins engine=h3, preview=false, quality=final; quality=final overrides h3_turbo_enabled",
+    "vlm_default": "qwen3.8-flash-next (visual_model_name / LOCAL_VLM_MODEL); env override ok; user: stronger, 1M context, vision",
+    "spark02": "not SSH-verified",
+    "tests": "platform 135; dashbox Wan generate 400 + H3-local 768p; vitest NSFW/VideoModal",
+    "gaps": [
+      "LTX auto-route code still present; one-click pins H3",
+      "compose export labels still 1080x1920",
+      "voice 3–8s not done"
+    ],
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "p4_h3_addguide_16dbbd5": {
     "commit": "16dbbd5",
     "pushed": true,

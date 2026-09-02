@@ -33,6 +33,10 @@
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 
+## P5 短剧只留 H3 / VLM flash-next（2026-09-02，`7623d05`）
+
+`7623d05` 已双推（P5，叠 `240d34d`）：短剧 generate 列表/UI 只留 H3（`h3-aio`/`h3-clean`），POST 不再接受 `wan22-*`；非法 action preset 映射到 `h3-aio`。Wan JSON 仍在盘上。MiniMax-H3-local 模板只 768P；UI `768×1344`/`1344×768`。一键成片 orchestrator 钉 `engine=h3, preview=false, quality=final`，`quality=final` 压过全局 `h3_turbo_enabled`。VLM 默认 `visual_model_name` / `LOCAL_VLM_MODEL` 改为 `qwen3.8-flash-next`（用户指定：更强、100万上下文、带视觉），env 仍可覆盖。未 SSH spark02。缺口：LTX auto 路由代码还在但一键成片钉 H3；compose 导出标签仍 1080x1920；voice 3–8s 未做。LICENSE/NOTICE/ToIV 未动。
+
 ## P4 AddGuide 修复 / 漫剧 pack（2026-09-02，`16dbbd5`）
 
 `16dbbd5` 已双推（P4，叠 `a77032a`）：repair/inpaint 插 `MiniMaxH3AddGuide` + `LoadImageMask`/`SetLatentNoiseMask`，并降低 BasicScheduler denoise；mask 走 `SetLatentNoiseMask`（`SamplerCustomAdvanced` 无 `denoise_mask`）。`:8195` 现无 AddGuide 则 fail-closed `502`/`H3RepairUnavailable`，不回退 Wan/LTX。漫剧 pack 偏 `animagineXL40` 关键帧 + IPAdapter 0.85，视频引擎仍 H3 FL2VA/Ref2VA。NSFW PIN 默认仍 10Eros；`nsfw_variant=dasiwa` 仅 opt-in A/B（UNETLoader 只有 `minimax_h3_*` 和 10Eros，无 DaSiWa 权重，选了会预检失败）。Remix（civitai 2879272）未接线。P2 尾帧串镜仍默认开；P3 Turbo+内容 LoRA 仍拒绝。`:8195` 快探约 1s、855 节点：有 `MiniMaxH3ImageToVideo`/`ReferenceToVideo`/`TurboLoRA`/`SetLatentNoiseMask`/`LoadImageMask`；无 `MiniMaxH3AddGuide`（需升 ComfyUI，Comfy-Org #15439）。缺口：repair 会 502 直到 H3 那台 ComfyUI 升级；DaSiWa 只是 hook；没有独立 repair UI（只有 `VideoGenerateParams` 可选字段）。P0–P4 代码刀完。LICENSE/NOTICE/ToIV 未动。
