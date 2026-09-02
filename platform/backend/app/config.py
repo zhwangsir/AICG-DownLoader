@@ -194,6 +194,14 @@ class Settings(BaseSettings):
     h3_ref_unet_name: str = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
     h3_nsfw_unet_name: str = "10Eros_Max_h3_fl2va_beta2_pruned_int8_convrot.safetensors"
     h3_nsfw_ref_unet_name: str = "10Eros_Max_h3_ref2va_beta2_pruned_int8_convrot.safetensors"
+    # P4 A/B only — PIN/NSFW default stays 10Eros. Opt-in via VideoRequest.nsfw_variant="dasiwa".
+    # Weights are not on :8195 UNETLoader today; selecting A/B must not swap the default.
+    h3_dasiwa_unet_name: str = "DaSiWa_MiniMax_H3_fl2va.safetensors"
+    h3_dasiwa_ref_unet_name: str = "DaSiWa_REF2VA_Hybrid_v1.0.safetensors"
+    # P4 local repair: MiniMaxH3AddGuide + denoise_mask. Fail-closed if node missing.
+    h3_repair_denoise: float = 0.55
+    # P4 漫剧 pack: stronger IPAdapter lock on comic keyframes (video engine stays H3).
+    manju_ipadapter_weight: float = 0.85
     # 参考图缩放策略：'match'（默认，与画布对齐）；'max' 保真度更高但慢数倍（官方 tooltip）
     h3_ref_image_size: str = "match"
     # r2v 节点 ref_images 动态组上限（COMFY_AUTOGROW_V3 max=9，含分镜关键帧 1 席）

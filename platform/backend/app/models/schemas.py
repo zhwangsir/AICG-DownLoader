@@ -413,6 +413,26 @@ class VideoRequest(BaseModel):
         "",
         description="质量档：preview / final / 空串。preview 与 preview=True 等价；final 强制成片",
     )
+    # P4 local repair: MiniMaxH3AddGuide + denoise_mask, never Wan.
+    repair: bool = Field(
+        False,
+        description="True=局部修复/重绘（H3 AddGuide + denoise_mask）。节点缺失时失败，不回退 Wan",
+    )
+    inpaint_mask_url: str = Field(
+        "",
+        description="修复遮罩图 URL（denoise_mask）。空串则仅 AddGuide 锚定已有帧/片段",
+    )
+    repair_denoise: float | None = Field(
+        None,
+        ge=0.05,
+        le=1.0,
+        description="修复 denoise（默认 settings.h3_repair_denoise）。<1 避免整段重跑",
+    )
+    # P4 NSFW A/B only. Empty/10eros = PIN default 10Eros. dasiwa is opt-in.
+    nsfw_variant: str = Field(
+        "",
+        description="NSFW UNet A/B：空串/10eros=PIN 默认 10Eros；dasiwa=DaSiWa MiniMax H3 试验档",
+    )
 
 
 class VideoResult(BaseModel):

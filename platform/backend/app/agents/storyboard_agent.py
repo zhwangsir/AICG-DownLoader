@@ -42,6 +42,7 @@ from app.models.schemas import (
 from app.services.rag_service import rag_service
 from app.services.style_anchor import (
     StyleAnchor,
+    ipadapter_weight_for_anchor,
     resolve_style_anchor,
     sanitize_style_conflicts,
     sdxl_checkpoint_for_anchor,
@@ -519,7 +520,7 @@ class StoryboardAgent(BaseAgent):
         # 上传/装配异常回退原工作流（锚定是增强不是阻断）
         if anchor_image_url and settings.storyboard_keyframe_anchor_enabled:
             workflow = await self._inject_ipadapter_anchor(
-                workflow, worker_url, anchor_image_url
+                workflow, worker_url, anchor_image_url, style_anchor=anchor
             )
 
         result = await self.call_comfyui(worker_url, workflow)
@@ -564,7 +565,11 @@ class StoryboardAgent(BaseAgent):
         return ""
 
     async def _inject_ipadapter_anchor(
-        self, workflow: dict[str, Any], worker_url: str, anchor_image_url: str
+        self,
+        workflow: dict[str, Any],
+        worker_url: str,
+        anchor_image_url: str,
+        style_anchor: StyleAnchor | None = None,
     ) -> dict[str, Any]:
         """向 SDXL 工作流注入定妆照 IPAdapter 锚定节点。
 
@@ -602,7 +607,10 @@ class StoryboardAgent(BaseAgent):
             nodes["8"]["inputs"]["ipadapter_file"] = settings.ipadapter_sdxl_model_name
             nodes["9"]["inputs"]["clip_name"] = settings.ipadapter_clip_vision_name
             nodes["11"]["inputs"]["image"] = image_name
-            nodes["12"]["inputs"]["weight"] = settings.storyboard_keyframe_anchor_weight
+            nodes["12"]["inputs"]["weight"] = ipadapter_weight_for_anchor(
+                style_anchor,
+                default=settings.storyboard_keyframe_anchor_weight,
+            )
             workflow.update(nodes)
             workflow["5"]["inputs"]["model"] = ["12", 0]
             logger.info("分镜关键帧已注入定妆照 IPAdapter 锚定: %s", anchor_image_url)

@@ -75,6 +75,18 @@
       "model_target": ["SDXL", "ComfyUI"]
     },
     {
+      "id": "style_manju",
+      "category": "style",
+      "domain": ["image", "video"],
+      "lang": "zh",
+      "title": "漫剧",
+      "content": "漫剧风格：Chinese manhua comic-drama style, clean ink line art, cel shading, comic panel composition, expressive faces, graphic novel coloring, anime keyframe look, sequential-art staging, high contrast shadows.",
+      "tags": ["漫剧", "漫画剧", "manju", "manhua", "comic-drama", "动漫关键帧"],
+      "negative_terms": ["realistic", "photorealistic", "live action", "3d render", "western cartoon"],
+      "style_intensity": 0.8,
+      "model_target": ["SDXL", "ComfyUI"]
+    },
+    {
       "id": "style_anime",
       "category": "style",
       "domain": ["image", "video"],

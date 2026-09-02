@@ -293,3 +293,79 @@ def resolve_style_anchor(style: str | None) -> StyleAnchor:
         if _normalize(e.get("title")) == _normalize(DEFAULT_STYLE_TITLE):
             return _entry_to_anchor(e)
     return _fallback_anchor()
+
+
+# ---------------------------------------------------------------------------
+# P4 漫剧 style pack: anime/comic keyframes + same-lane H3 Ref2VA.
+# Video engine stays MiniMax H3 FL2VA/Ref2VA — never a second video model.
+# ---------------------------------------------------------------------------
+MANJU_STYLE_ALIASES = frozenset(
+    {
+        "漫剧",
+        "漫画剧",
+        "manju",
+        "style_manju",
+        "comic-drama",
+        "comic drama",
+        "manhua-drama",
+        "manhua drama",
+    }
+)
+MANJU_KEYFRAME_BIAS_EN = (
+    "Chinese manhua comic-drama style, clean ink line art, cel shading, "
+    "comic panel composition, expressive faces, graphic novel coloring"
+)
+MANJU_IPADAPTER_WEIGHT = 0.85
+MANJU_VIDEO_ENGINE = "h3"
+MANJU_VIDEO_MODES = ("fl2va", "ref2va")
+
+
+def is_manju_style_pack(style: str | StyleAnchor | None) -> bool:
+    """True when the request is the P4 漫剧 pack (or KB 漫剧 entry)."""
+    if style is None:
+        return False
+    if isinstance(style, StyleAnchor):
+        if style.key == "style_manju" or _normalize(style.title) == _normalize("漫剧"):
+            return True
+        style = style.title or style.key
+    raw = str(style or "").strip()
+    if not raw:
+        return False
+    if _normalize(raw) in {_normalize(a) for a in MANJU_STYLE_ALIASES}:
+        return True
+    anchor = resolve_style_anchor(raw)
+    return anchor.key == "style_manju" or _normalize(anchor.title) == _normalize("漫剧")
+
+
+def manju_style_pack(style: str | StyleAnchor | None = None) -> dict[str, object]:
+    """Keyframe/IPAdapter/ref bias for 漫剧. Video engine is always H3."""
+    anchor = style if isinstance(style, StyleAnchor) else resolve_style_anchor(style or "漫剧")
+    return {
+        "key": "style_manju",
+        "title": "漫剧",
+        "keyframe_prompt_bias": MANJU_KEYFRAME_BIAS_EN,
+        "ipadapter_weight": MANJU_IPADAPTER_WEIGHT,
+        "sdxl_checkpoint": sdxl_checkpoint_for_anchor(anchor) if not anchor.is_realistic else SDXL_CHECKPOINT_ANIME,
+        "video_engine": MANJU_VIDEO_ENGINE,
+        "video_modes": MANJU_VIDEO_MODES,
+        "same_lane_ref2va": True,
+    }
+
+
+def ipadapter_weight_for_anchor(
+    anchor: StyleAnchor | None,
+    default: float = 0.6,
+    style: str | None = None,
+) -> float:
+    """漫剧 pack uses a stronger IPAdapter lock; other styles keep the default."""
+    if is_manju_style_pack(anchor or style):
+        return MANJU_IPADAPTER_WEIGHT
+    return float(default)
+
+
+def video_engine_for_style(style: str | StyleAnchor | None) -> str:
+    """漫剧 stays on H3 FL2VA/Ref2VA. Other styles do not force a second engine."""
+    if is_manju_style_pack(style):
+        return MANJU_VIDEO_ENGINE
+    return MANJU_VIDEO_ENGINE  # product is H3-only; pack still must not leave H3
+

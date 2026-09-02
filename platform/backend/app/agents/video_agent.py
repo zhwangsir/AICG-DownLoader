@@ -48,9 +48,11 @@ from app.services.ltx25_video_service import (
 from app.services.model_gateway import model_gateway
 from app.services.h3_context_ir_rewriter import H3RewriteSpec, rewrite_h3_prompt
 from app.services.style_anchor import (
+    is_manju_style_pack,
     resolve_style_anchor,
     sanitize_style_conflicts,
     style_positive_tail,
+    video_engine_for_style,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,7 +114,10 @@ def engine_fallback_chain(engine: str, request: VideoRequest) -> tuple[str, ...]
 
     有角色参考：ltx → h3 → comfyui；h3 → comfyui。
     无角色参考：ltx → h3；h3 单引擎（显式/钉死 comfyui 仍直达，向后兼容）。
+    P4：repair / 漫剧 style pack 钉死 H3，永不回退 Wan。
     """
+    if is_h3_repair_request(request) or is_manju_style_pack(getattr(request, "style", "")):
+        return ("h3",)
     if has_character_refs(request):
         chains = {
             "ltx": ("ltx", "h3", "comfyui"),
@@ -161,6 +166,10 @@ def route_video_engine(request: VideoRequest, settings) -> str:
             logger.warning("LTX-2.5 未启用（ltx_enabled=False），显式 ltx 降级为 h3")
             return "h3"
         return explicit
+
+    # P4 漫剧 pack / local repair: same-lane H3 FL2VA/Ref2VA, never a second video model
+    if is_manju_style_pack(getattr(request, "style", "")) or is_h3_repair_request(request):
+        return video_engine_for_style(getattr(request, "style", "") or "漫剧")
 
     backend_default = (settings.video_backend or "h3").strip().lower()
     if backend_default == "comfyui":
@@ -519,17 +528,167 @@ _BEAT_AUDIO_PRIORITY = (
 
 
 
-def resolve_h3_unet_names(nsfw: bool | None = None) -> tuple[str, str]:
-    """SFW minimax_h3_* vs NSFW 10Eros, keyed off settings_service PIN flag."""
+H3_ADD_GUIDE_CLASS = "MiniMaxH3AddGuide"
+H3_REPAIR_DENOISE_DEFAULT = 0.55
+WAN_VIDEO_CLASS_TYPES = frozenset(
+    {
+        "WanImageToVideo",
+        "WanFunInpaintToVideo",
+        "Wan22ImageToVideoLatent",
+        "WanFirstLastFrameToVideo",
+    }
+)
+
+
+class H3RepairUnavailable(RuntimeError):
+    """Repair requested but MiniMaxH3AddGuide is not on the H3 instance."""
+
+
+def is_h3_repair_request(request: VideoRequest | None) -> bool:
+    if request is None:
+        return False
+    return bool(getattr(request, "repair", False))
+
+
+def _nsfw_variant_of(request: VideoRequest | None = None, variant: str | None = None) -> str:
+    raw = variant if variant is not None else getattr(request, "nsfw_variant", "") if request else ""
+    return str(raw or "").strip().lower()
+
+
+def resolve_h3_unet_names(
+    nsfw: bool | None = None,
+    variant: str | None = None,
+    request: VideoRequest | None = None,
+) -> tuple[str, str]:
+    """SFW minimax_h3_* vs NSFW 10Eros, keyed off settings_service PIN flag.
+
+    P4: nsfw_variant='dasiwa' is opt-in A/B only. PIN default stays 10Eros.
+    Remix is not in the local registry and is never selected.
+    """
     if nsfw is None:
         try:
             from app.services.settings_service import settings_service
             nsfw = bool(settings_service.nsfw_status().get("nsfw_enabled"))
         except Exception:
             nsfw = False
+    key = _nsfw_variant_of(request, variant)
+    if nsfw and key in {"dasiwa", "dasiwa_minimax_h3", "civitai-2877206"}:
+        return settings.h3_dasiwa_unet_name, settings.h3_dasiwa_ref_unet_name
     if nsfw:
         return settings.h3_nsfw_unet_name, settings.h3_nsfw_ref_unet_name
     return settings.h3_unet_name, settings.h3_ref_unet_name
+
+
+def h3_add_guide_available(object_info: dict[str, Any] | None) -> bool:
+    return isinstance(object_info, dict) and H3_ADD_GUIDE_CLASS in object_info
+
+
+def require_h3_add_guide(object_info: dict[str, Any] | None) -> None:
+    if h3_add_guide_available(object_info):
+        return
+    raise H3RepairUnavailable(
+        "H3 local repair requires MiniMaxH3AddGuide on :8195 plus a denoise_mask "
+        "inpaint path. The node is not available on this H3 instance. "
+        "Refusing to fall back to Wan/LTX."
+    )
+
+
+def workflow_has_wan(workflow: dict[str, Any]) -> bool:
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        ct = str(node.get("class_type") or "")
+        if ct in WAN_VIDEO_CLASS_TYPES:
+            return True
+        lowered = ct.lower()
+        if lowered.startswith("wan") and "video" in lowered:
+            return True
+    return False
+
+
+def apply_h3_repair_to_workflow(
+    workflow: dict[str, Any],
+    *,
+    mask_name: str = "",
+    guide_image_name: str = "",
+    denoise: float | None = None,
+    frame_idx: int = 0,
+) -> dict[str, Any]:
+    """Insert MiniMaxH3AddGuide + SetLatentNoiseMask denoise_mask. Never Wan."""
+    if workflow_has_wan(workflow):
+        raise H3RepairUnavailable("H3 repair graph must not contain Wan video nodes")
+    strength = (
+        float(denoise)
+        if denoise is not None
+        else float(getattr(settings, "h3_repair_denoise", H3_REPAIR_DENOISE_DEFAULT))
+    )
+    cond_src = ["20", 0]
+    latent_src = ["20", 1]
+    image_src = ["10", 0]
+    if guide_image_name:
+        workflow["110"] = {"class_type": "LoadImage", "inputs": {"image": guide_image_name}}
+        image_src = ["110", 0]
+    elif "10" in workflow:
+        image_src = ["10", 0]
+    elif "11" in workflow:
+        image_src = ["11", 0]
+    else:
+        raise H3RepairUnavailable(
+            "H3 repair needs a guide image (first frame / existing clip). "
+            "Empty T2VA repair is not supported."
+        )
+    workflow["112"] = {
+        "class_type": H3_ADD_GUIDE_CLASS,
+        "inputs": {
+            "positive": cond_src,
+            "latent": latent_src,
+            "frame_idx": int(frame_idx),
+            "vae": ["3", 0],
+            "image": image_src,
+        },
+    }
+    guider = workflow.get("33")
+    if isinstance(guider, dict) and guider.get("class_type") == "BasicGuider":
+        guider.setdefault("inputs", {})["conditioning"] = ["112", 0]
+    latent_for_sampler = latent_src
+    if mask_name:
+        workflow["111"] = {
+            "class_type": "LoadImageMask",
+            "inputs": {"image": mask_name, "channel": "red"},
+        }
+        workflow["113"] = {
+            "class_type": "SetLatentNoiseMask",
+            "inputs": {"samples": latent_src, "mask": ["111", 0]},
+        }
+        latent_for_sampler = ["113", 0]
+    sampler = workflow.get("34")
+    if isinstance(sampler, dict) and sampler.get("class_type") == "SamplerCustomAdvanced":
+        sampler.setdefault("inputs", {})["latent_image"] = latent_for_sampler
+    scheduler = workflow.get("32")
+    if isinstance(scheduler, dict) and scheduler.get("class_type") == "BasicScheduler":
+        scheduler.setdefault("inputs", {})["denoise"] = strength
+    if workflow_has_wan(workflow):
+        raise H3RepairUnavailable("H3 repair graph must not contain Wan video nodes")
+    return workflow
+
+
+def apply_h3_repair_for_request(
+    workflow: dict[str, Any],
+    request: VideoRequest | None,
+    *,
+    mask_name: str = "",
+    object_info: dict[str, Any] | None = None,
+) -> None:
+    """P4: repair=true inserts AddGuide/denoise_mask after requiring the node."""
+    if not is_h3_repair_request(request):
+        return
+    require_h3_add_guide(object_info)
+    denoise = getattr(request, "repair_denoise", None) if request else None
+    apply_h3_repair_to_workflow(
+        workflow,
+        mask_name=mask_name,
+        denoise=denoise,
+    )
 
 
 _SFW_TURBO_LORA_FALLBACK = "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors"
@@ -1202,8 +1361,18 @@ class VideoAgent(BaseAgent):
                     _report(5, "MiniMax H3 音视频联合生成")
                     return await self._execute_h3_with_style_qc(request, progress_callback)
                 # 'comfyui' → Wan 2.2 原路径
+                if is_h3_repair_request(request):
+                    raise H3RepairUnavailable(
+                        "H3 local repair refuses Wan/ComfyUI fallback"
+                    )
                 return await self._execute_via_comfyui(
                     request, progress_callback, worker_url
+                )
+            except H3RepairUnavailable as err:
+                return AgentResponse(
+                    success=False,
+                    error=str(err),
+                    elapsed_seconds=time.time() - start,
                 )
             except Exception as err:
                 errors.append(f"{eng}={err}")
@@ -1408,7 +1577,7 @@ class VideoAgent(BaseAgent):
             for url in ref_urls:
                 ref_names.append(await self.upload_image_to_comfyui(worker_url, url))
             workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3_R2V))
-            workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[1]
+            workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names(request=requests[0])[1]
             # 角色参考图动态挂接：LoadImage 节点 11/12/... → ref_images 组内 ref_image_1/2/...
             # （COMFY_AUTOGROW_V3 API 格式为嵌套 dict，扁平键执行期 TypeError）
             ref_group = workflow["20"]["inputs"].setdefault("ref_images", {})
@@ -1431,7 +1600,7 @@ class VideoAgent(BaseAgent):
             workflow["20"]["inputs"]["ref_image_size"] = settings.h3_ref_image_size
         else:
             workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3))
-            workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[0]
+            workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names(request=requests[0])[0]
             # M17.3 多镜 FL2VA 双锚定：组末帧 = 末场景的链式末帧（orchestrator 注入
             # 的组后一镜关键帧，实现组间链式连续）；无链式末帧时回退末场景自身关键帧
             last_frame_url = requests[-1].last_frame_url or requests[-1].image_url
@@ -1485,6 +1654,7 @@ class VideoAgent(BaseAgent):
         apply_h3_turbo_for_request(
             workflow, requests[0], "ref2va" if use_r2v else "fl2va"
         )
+        await self._apply_h3_repair_if_needed(workflow, requests[0], worker_url)
         workflow["60"]["inputs"]["filename_prefix"] = (
             f"video_multishot_{scene_ids[0]}_{scene_ids[-1]}"
         )
@@ -1716,6 +1886,39 @@ class VideoAgent(BaseAgent):
             raise RuntimeError(f"末帧抽取失败（输出为空）: {video_url}")
         return f"http://localhost:{settings.backend_port}/static/video/{frame_name}"
 
+    async def _probe_h3_object_info(self, worker_url: str) -> dict[str, Any] | None:
+        """Quick :8195 /object_info probe for AddGuide. Short timeout, never hang."""
+        url = f"{str(worker_url).rstrip('/')}/object_info"
+        try:
+            resp = await asyncio.wait_for(self.http.get(url), timeout=3.0)
+            if getattr(resp, "status_code", 0) != 200:
+                return None
+            data = resp.json()
+            if asyncio.iscoroutine(data):
+                data = await data
+            return data if isinstance(data, dict) else None
+        except Exception as err:
+            logger.warning("H3 object_info probe failed (repair fail-closed): %s", err)
+            return None
+
+    async def _apply_h3_repair_if_needed(
+        self,
+        workflow: dict[str, Any],
+        request: VideoRequest,
+        worker_url: str,
+    ) -> None:
+        """P4: require MiniMaxH3AddGuide then insert AddGuide + denoise_mask."""
+        if not is_h3_repair_request(request):
+            return
+        info = await self._probe_h3_object_info(worker_url)
+        mask_name = ""
+        mask_url = str(getattr(request, "inpaint_mask_url", "") or "").strip()
+        if mask_url:
+            mask_name = await self.upload_image_to_comfyui(worker_url, mask_url)
+        apply_h3_repair_for_request(
+            workflow, request, mask_name=mask_name, object_info=info
+        )
+
     async def _execute_via_h3(
         self,
         request: VideoRequest,
@@ -1828,7 +2031,7 @@ class VideoAgent(BaseAgent):
         )
 
         workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3))
-        workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[0]
+        workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names(request=request)[0]
         workflow["2"]["inputs"]["clip_name"] = settings.h3_clip_name
         workflow["3"]["inputs"]["vae_name"] = settings.h3_video_vae_name
         workflow["4"]["inputs"]["vae_name"] = settings.h3_audio_vae_name
@@ -1849,6 +2052,7 @@ class VideoAgent(BaseAgent):
         workflow["32"]["inputs"]["scheduler"] = settings.h3_scheduler
         workflow["32"]["inputs"]["steps"] = settings.h3_steps
         apply_h3_turbo_for_request(workflow, request, "fl2va")
+        await self._apply_h3_repair_if_needed(workflow, request, worker_url)
         workflow["60"]["inputs"]["filename_prefix"] = f"video_scene_{request.scene_id}"
 
         return await self._submit_h3_workflow(
@@ -1900,7 +2104,7 @@ class VideoAgent(BaseAgent):
         num_frames = _snap_h3_frames(request.duration_seconds)
 
         workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3_R2V))
-        workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[1]
+        workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names(request=request)[1]
         workflow["2"]["inputs"]["clip_name"] = settings.h3_clip_name
         workflow["3"]["inputs"]["vae_name"] = settings.h3_video_vae_name
         workflow["4"]["inputs"]["vae_name"] = settings.h3_audio_vae_name
@@ -1952,6 +2156,7 @@ class VideoAgent(BaseAgent):
         workflow["32"]["inputs"]["scheduler"] = settings.h3_scheduler
         workflow["32"]["inputs"]["steps"] = settings.h3_steps
         apply_h3_turbo_for_request(workflow, request, "ref2va")
+        await self._apply_h3_repair_if_needed(workflow, request, worker_url)
         workflow["60"]["inputs"]["filename_prefix"] = f"video_scene_{request.scene_id}"
 
         return await self._submit_h3_workflow(

@@ -101,8 +101,100 @@ def select_h3_mode(inputs: dict[str, Any]) -> str:
     return "t2va"
 
 
-def h3_unets(nsfw: bool) -> tuple[str, str]:
-    """Return (fl2va_unet, ref2va_unet) for the PIN/nsfw flag."""
+# P4 A/B only — not the PIN default. Files are not on :8195 UNETLoader today;
+# selecting the variant is opt-in and will fail preflight if weights are absent.
+H3_UNET_NSFW_DASIWA = "DaSiWa_MiniMax_H3_fl2va.safetensors"
+H3_REF_UNET_NSFW_DASIWA = "DaSiWa_REF2VA_Hybrid_v1.0.safetensors"
+# Remix (civitai 2879272) is not on :8195 / local registry → not exposed as A/B.
+H3_ADD_GUIDE_CLASS = "MiniMaxH3AddGuide"
+H3_REPAIR_DENOISE_DEFAULT = 0.55
+WAN_VIDEO_CLASS_TYPES = frozenset(
+    {
+        "WanImageToVideo",
+        "WanFunInpaintToVideo",
+        "Wan22ImageToVideoLatent",
+        "WanFirstLastFrameToVideo",
+    }
+)
+
+
+class H3RepairUnavailable(RuntimeError):
+    """Repair requested but MiniMaxH3AddGuide is not on the H3 instance."""
+
+
+def request_repair(body: dict[str, Any] | None = None) -> bool:
+    """True when the request asks for local region/clip repair (inpaint)."""
+    if not body:
+        return False
+    meta = metadata_of(body)
+    for src in (
+        body.get("repair"),
+        meta.get("repair"),
+        body.get("inpaint"),
+        meta.get("inpaint"),
+    ):
+        if src is True:
+            return True
+        if src is False:
+            continue
+        if str(src or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    return False
+
+
+def request_nsfw_variant(body: dict[str, Any] | None = None) -> str:
+    """Opt-in NSFW A/B key. Empty / 10eros = PIN default. dasiwa is P4 A/B only."""
+    if not body:
+        return ""
+    meta = metadata_of(body)
+    raw = (
+        body.get("nsfw_variant")
+        or meta.get("nsfw_variant")
+        or body.get("h3_nsfw_variant")
+        or ""
+    )
+    return str(raw or "").strip().lower()
+
+
+def request_repair_denoise(body: dict[str, Any] | None = None) -> float:
+    if not body:
+        return H3_REPAIR_DENOISE_DEFAULT
+    meta = metadata_of(body)
+    raw = body.get("repair_denoise")
+    if raw is None:
+        raw = meta.get("repair_denoise")
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return H3_REPAIR_DENOISE_DEFAULT
+    return min(1.0, max(0.05, val))
+
+
+def request_inpaint_mask(body: dict[str, Any] | None = None) -> str:
+    if not body:
+        return ""
+    meta = metadata_of(body)
+    return str(
+        body.get("inpaint_mask_url")
+        or body.get("denoise_mask")
+        or meta.get("inpaint_mask_url")
+        or meta.get("denoise_mask")
+        or ""
+    ).strip()
+
+
+def h3_unets(nsfw: bool, variant: str | None = None) -> tuple[str, str]:
+    """Return (fl2va_unet, ref2va_unet) for the PIN/nsfw flag.
+
+    NSFW default is always 10Eros. variant='dasiwa' is P4 A/B opt-in only.
+    Remix is not in the local registry and is never selected here.
+    """
+    key = str(variant or "").strip().lower()
+    if nsfw and key in {"dasiwa", "dasiwa_minimax_h3", "civitai-2877206"}:
+        return (
+            os.getenv("LOCAL_H3_DASIWA_UNET", H3_UNET_NSFW_DASIWA),
+            os.getenv("LOCAL_H3_DASIWA_REF_UNET", H3_REF_UNET_NSFW_DASIWA),
+        )
     if nsfw:
         return (
             os.getenv("LOCAL_H3_NSFW_UNET", H3_UNET_NSFW),
@@ -112,6 +204,102 @@ def h3_unets(nsfw: bool) -> tuple[str, str]:
         os.getenv("LOCAL_H3_UNET", H3_UNET_SFW),
         os.getenv("LOCAL_H3_REF_UNET", H3_REF_UNET_SFW),
     )
+
+
+def h3_add_guide_available(object_info: dict[str, Any] | None) -> bool:
+    return isinstance(object_info, dict) and H3_ADD_GUIDE_CLASS in object_info
+
+
+def require_h3_add_guide(object_info: dict[str, Any] | None) -> None:
+    """Fail-closed when MiniMaxH3AddGuide is missing. Never fall back to Wan."""
+    if h3_add_guide_available(object_info):
+        return
+    raise H3RepairUnavailable(
+        "H3 local repair requires MiniMaxH3AddGuide on :8195 plus a denoise_mask "
+        "inpaint path. The node is not available on this H3 instance. "
+        "Refusing to fall back to Wan/LTX."
+    )
+
+
+def workflow_has_wan(workflow: dict[str, Any]) -> bool:
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        ct = str(node.get("class_type") or "")
+        if ct in WAN_VIDEO_CLASS_TYPES:
+            return True
+        lowered = ct.lower()
+        if lowered.startswith("wan") and "video" in lowered:
+            return True
+    return False
+
+
+def apply_h3_repair_guide(
+    workflow: dict[str, Any],
+    *,
+    mask_name: str = "",
+    guide_image_name: str = "",
+    denoise: float = H3_REPAIR_DENOISE_DEFAULT,
+    frame_idx: int = 0,
+) -> dict[str, Any]:
+    """Insert MiniMaxH3AddGuide + denoise_mask (SetLatentNoiseMask) into an H3 graph.
+
+    Caller must have already required MiniMaxH3AddGuide. Does not switch UNet
+    or insert Wan nodes. Guide image defaults to existing LoadImage node 10.
+    """
+    if workflow_has_wan(workflow):
+        raise H3RepairUnavailable("H3 repair graph must not contain Wan video nodes")
+    cond_src = ["20", 0]
+    latent_src = ["20", 1]
+    image_src = ["10", 0]
+    if guide_image_name:
+        workflow["110"] = {"class_type": "LoadImage", "inputs": {"image": guide_image_name}}
+        image_src = ["110", 0]
+    elif "10" in workflow:
+        image_src = ["10", 0]
+    elif "11" in workflow:
+        image_src = ["11", 0]
+    else:
+        raise H3RepairUnavailable(
+            "H3 repair needs a guide image (first frame / existing clip). "
+            "Empty T2VA repair is not supported."
+        )
+    workflow["112"] = {
+        "class_type": H3_ADD_GUIDE_CLASS,
+        "inputs": {
+            "positive": cond_src,
+            "latent": latent_src,
+            "frame_idx": int(frame_idx),
+            "vae": ["3", 0],
+            "image": image_src,
+        },
+    }
+    guider = workflow.get("33")
+    if isinstance(guider, dict) and guider.get("class_type") == "BasicGuider":
+        guider.setdefault("inputs", {})["conditioning"] = ["112", 0]
+
+    latent_for_sampler = latent_src
+    if mask_name:
+        workflow["111"] = {
+            "class_type": "LoadImageMask",
+            "inputs": {"image": mask_name, "channel": "red"},
+        }
+        workflow["113"] = {
+            "class_type": "SetLatentNoiseMask",
+            "inputs": {"samples": latent_src, "mask": ["111", 0]},
+        }
+        latent_for_sampler = ["113", 0]
+    sampler = workflow.get("34")
+    if isinstance(sampler, dict) and sampler.get("class_type") == "SamplerCustomAdvanced":
+        sampler.setdefault("inputs", {})["latent_image"] = latent_for_sampler
+
+    scheduler = workflow.get("32")
+    if isinstance(scheduler, dict) and scheduler.get("class_type") == "BasicScheduler":
+        scheduler.setdefault("inputs", {})["denoise"] = float(denoise)
+
+    if workflow_has_wan(workflow):
+        raise H3RepairUnavailable("H3 repair graph must not contain Wan video nodes")
+    return workflow
 
 
 def h3_resolution_scale(resolution: str, default_scale: float) -> float:

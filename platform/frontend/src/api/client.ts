@@ -353,6 +353,13 @@ export type VideoGenerateParams = {
   preview?: boolean;
   /** P3: "preview" | "final". "preview" same as preview=true */
   quality?: "preview" | "final" | string;
+  /** P4: local H3 AddGuide + denoise_mask repair; never Wan */
+  repair?: boolean;
+  inpaint_mask_url?: string;
+  repair_denoise?: number;
+  /** P4 A/B only. Empty/10eros = PIN 10Eros; dasiwa is opt-in */
+  nsfw_variant?: string;
+  style?: string;
 };
 
 export async function generateVideo(params: VideoGenerateParams): Promise<AgentResponse<VideoData>> {

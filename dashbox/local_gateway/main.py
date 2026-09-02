@@ -43,11 +43,18 @@ from typing import Any
 
 from local_gateway.h3_context_ir import rewrite_h3_prompt as rewrite_h3_context_ir
 from local_gateway.h3_video import (
+    H3RepairUnavailable,
+    apply_h3_repair_guide,
     collect_video_inputs,
     h3_resolution_scale,
     h3_unets,
     r2v_ref_images,
+    request_inpaint_mask,
     request_nsfw,
+    request_nsfw_variant,
+    request_repair,
+    request_repair_denoise,
+    require_h3_add_guide,
     select_h3_mode,
 )
 from typing import AsyncIterator
@@ -1145,14 +1152,16 @@ async def video_generations(request: Request) -> Response:
         async with _http(timeout=60.0) as client:
             if backend == "h3":
                 if not await _h3_online(client):
-                    if nsfw:
-                        return _error_response("H3 实例离线，NSFW 视频不回退 LTX/Wan", 502)
+                    if nsfw or request_repair(body):
+                        return _error_response(
+                            "H3 实例离线，NSFW/repair 视频不回退 LTX/Wan", 502
+                        )
                     logger.warning("H3 实例离线，回退 LTX-2.5")
                     backend = "ltx"
                     task["backend"] = "ltx"
             if backend == "h3":
                 nsfw = request_nsfw(body)
-                fl2va_unet, ref2va_unet = h3_unets(nsfw)
+                fl2va_unet, ref2va_unet = h3_unets(nsfw, request_nsfw_variant(body))
                 media = collect_video_inputs(body)
                 first_frame = media["first"]
                 last_frame = media["last"]
@@ -1233,6 +1242,29 @@ async def video_generations(request: Request) -> Response:
                         first_image_name=first_name, last_image_name=last_name,
                         unet_name=fl2va_unet,
                     )
+                if request_repair(body):
+                    info = await _object_info(client, H3_BASE_URL)
+                    try:
+                        require_h3_add_guide(info)
+                    except H3RepairUnavailable as exc:
+                        return _error_response(str(exc), 502)
+                    mask_url = request_inpaint_mask(body)
+                    mask_name = ""
+                    if mask_url:
+                        mask_name = await _upload_image_to_comfyui(
+                            client, H3_BASE_URL, mask_url, "dc_h3_mask", replicate_to_lb=False
+                        )
+                    guide_name = ""
+                    if mode != "r2v":
+                        # FL2VA/I2V already uploaded first_name into node 10 when present
+                        pass
+                    apply_h3_repair_guide(
+                        workflow,
+                        mask_name=mask_name,
+                        guide_image_name=guide_name,
+                        denoise=request_repair_denoise(body),
+                    )
+                    task["h3_repair"] = True
                 missing = await _preflight_workflow(client, H3_BASE_URL, workflow)
                 if missing:
                     return _error_response(f"H3 生成前预检失败，缺失权重: {'; '.join(missing)}", 502)
