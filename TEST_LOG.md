@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-09-02 a284c52 dual-pushed (P2, on 176ab03): last-frame chain default on; fail retry once then degrade to first-frame only; character three-views + front face + optional voiceprint into Ref2VA; empty shots SFW/NSFW both H3 FL2VA, not Wan; LTX-2.5 only when ltx_enabled and :8198 up. LICENSE/NOTICE/ToIV untouched.
+
 - 2026-09-02 412f0ba dual-pushed (P1): before H3 render, spark-local Context-IR rewrite; on failure fall back to original text. LICENSE/NOTICE/ToIV untouched.
 
 - 2026-09-02 bf9fe4c dual-pushed (P0): workbench/gateway with reference uses MiniMaxH3ReferenceToVideo; PIN on = 10Eros_Max H3 UNet, off = official INT8; dialogue keeps H3 native audio only (no IndexTTS overlay); catalog resolution 768P only, fake 2K removed. NSFW also H3, not Wan/LTX. LICENSE/NOTICE/ToIV untouched.

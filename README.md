@@ -33,6 +33,10 @@
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 
+## P2 尾帧串镜 / FL2VA（2026-09-02，`a284c52`）
+
+`a284c52` 已双推（P2，叠 `176ab03`）：尾帧串镜默认开，失败重试一次再降级只首帧；角色三视图+正脸+可选声纹进 Ref2VA；空镜 SFW/NSFW 都走 H3 **FL2VA**，不走 Wan；LTX-2.5 仅 `ltx_enabled` 且 `:8198` 活着。LICENSE/NOTICE/ToIV 未动。
+
 ## P1 H3 Context-IR（2026-09-02，`412f0ba`）
 
 `412f0ba` 已双推（P1）：H3 出片前 spark 本地 **Context-IR** 改写，失败回退原文。LICENSE/NOTICE/ToIV 未动。
