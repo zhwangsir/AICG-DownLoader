@@ -86,7 +86,7 @@ export function VideoModal({
     }
   }, [selectedSceneId]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (isPreview: boolean) => {
     if (!selectedStoryboard) return;
     setLoading(true);
     setError(null);
@@ -100,6 +100,8 @@ export function VideoModal({
         negative_prompt:
           negativePrompt || "blurry, low quality, deformed, ugly, watermark, static",
         duration_seconds: durationSeconds,
+        preview: isPreview,
+        quality: isPreview ? "preview" : "final",
       });
       setStreamUrl(task.stream_url);
     } catch (e) {
@@ -237,8 +239,17 @@ export function VideoModal({
             </>
           )}
           <button
+            className="topbar-btn"
+            title="H3 Turbo 预览：FL2VA ~8 步 / Ref2VA ~4 步，不叠内容 LoRA"
+            onClick={() => handleGenerate(true)}
+            disabled={loading || rerunning !== null || !selectedStoryboard}
+          >
+            {loading ? <span className="loading"></span> : "Turbo 预览"}
+          </button>
+          <button
             className="topbar-btn topbar-btn-primary"
-            onClick={handleGenerate}
+            title="成片：原生 20 步，Turbo 关闭"
+            onClick={() => handleGenerate(false)}
             disabled={loading || rerunning !== null || !selectedStoryboard}
           >
             {loading ? <span className="loading"></span> : "生成视频"}

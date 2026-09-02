@@ -532,6 +532,71 @@ def resolve_h3_unet_names(nsfw: bool | None = None) -> tuple[str, str]:
     return settings.h3_unet_name, settings.h3_ref_unet_name
 
 
+_SFW_TURBO_LORA_FALLBACK = "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors"
+_CONTENT_LORA_CLASS_TYPES = frozenset(
+    {
+        "LoraLoader",
+        "LoraLoaderModelOnly",
+        "PowerLoraLoader",
+        "Lora Loader",
+    }
+)
+
+
+def is_h3_preview_request(request: VideoRequest | None) -> bool:
+    """P3: preview=true 或 quality=preview → Turbo 预览；quality=final 强制成片。"""
+    if request is None:
+        return False
+    quality = (request.quality or "").strip().lower()
+    if quality == "preview":
+        return True
+    if quality in {"final", "delivery", "baseline", "max"}:
+        return False
+    return bool(request.preview)
+
+
+def resolve_h3_turbo_lora_name(nsfw: bool | None = None) -> str:
+    """SFW 产品默认 turbo LoRA；NSFW 可用 10Eros turbo。SFW 永不返回 10Eros。"""
+    if nsfw is None:
+        try:
+            from app.services.settings_service import settings_service
+
+            nsfw = bool(settings_service.nsfw_status().get("nsfw_enabled"))
+        except Exception:
+            nsfw = False
+    if nsfw:
+        nsfw_name = (getattr(settings, "h3_nsfw_turbo_lora_name", "") or "").strip()
+        if nsfw_name:
+            return nsfw_name
+    name = settings.h3_turbo_lora_name or _SFW_TURBO_LORA_FALLBACK
+    if "10eros" in name.lower():
+        logger.warning("SFW turbo LoRA 拒绝 10Eros: %s，回退产品默认", name)
+        return _SFW_TURBO_LORA_FALLBACK
+    return name
+
+
+def _h3_turbo_steps_for_mode(mode: str) -> int:
+    if (mode or "").lower() == "ref2va":
+        return int(getattr(settings, "h3_turbo_ref2va_steps", 4))
+    return int(getattr(settings, "h3_turbo_fl2va_steps", 8))
+
+
+def _workflow_has_content_lora(workflow: dict[str, Any]) -> str | None:
+    """检测内容 LoRA 节点（不含 MiniMaxH3TurboLoRA）。叠 turbo+内容 LoRA 会 shape error。"""
+    for nid, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        ct = str(node.get("class_type") or "")
+        if not ct or ct == "MiniMaxH3TurboLoRA":
+            continue
+        if ct in _CONTENT_LORA_CLASS_TYPES:
+            return str(nid)
+        lowered = ct.lower()
+        if "lora" in lowered and "turbo" not in lowered:
+            return str(nid)
+    return None
+
+
 async def _rewrite_prompt_for_h3(
     assembled: str,
     *,
@@ -645,20 +710,32 @@ def _append_audio_direction(prompt: str, beats: list[str]) -> str:
     return f"{prompt}\n{direction}" if direction else prompt
 
 
-def _apply_h3_turbo_to_workflow(workflow: dict[str, Any]) -> None:
-    """将原生 H3 工作流改造为 Turbo LoRA 工作流（可选加速，默认关闭）。
+def _apply_h3_turbo_to_workflow(
+    workflow: dict[str, Any],
+    *,
+    enabled: bool | None = None,
+    steps: int | None = None,
+    lora_name: str | None = None,
+    mode: str = "fl2va",
+    nsfw: bool | None = None,
+) -> None:
+    """将原生 H3 工作流改造为 Turbo LoRA 工作流。
 
-    改造点：
-      1. 在 UNETLoader(节点 1) 后插入 MiniMaxH3TurboLoRA(节点 100)
-      2. BasicGuider/BasicScheduler 的 model 输入指向 LoRA 输出
-      3. 新增 MiniMaxH3TurboSampler(节点 101) 替换 KSamplerSelect
-      4. SamplerCustomAdvanced 的 sampler 输入指向 TurboSampler
-      5. BasicScheduler steps 改为 h3_turbo_steps
-
-    注意：Turbo 会改变扩散轨迹，M18.4 画风 QC 阈值可能需要针对 Turbo
-    重新标定；当前默认关闭以保持原生高质量。
+    P3：预览路径 enabled=True（FL2VA ~8 / Ref2VA ~4）；成片默认关闭保持 20 步。
+    全局 settings.h3_turbo_enabled 仍可作为实验开关（向后兼容旧测试）。
+    禁止与内容 LoRA 叠加载（本仓库已知 shape error）。
     """
-    if not settings.h3_turbo_enabled:
+    if enabled is None:
+        enabled = bool(settings.h3_turbo_enabled)
+    if not enabled:
+        return
+
+    content_lora_id = _workflow_has_content_lora(workflow)
+    if content_lora_id is not None:
+        logger.warning(
+            "H3 Turbo: 工作流已有内容 LoRA 节点 %s，跳过 Turbo 以免 shape error",
+            content_lora_id,
+        )
         return
 
     if workflow.get("1", {}).get("class_type") != "UNETLoader":
@@ -667,13 +744,18 @@ def _apply_h3_turbo_to_workflow(workflow: dict[str, Any]) -> None:
 
     lora_node_id = "100"
     sampler_node_id = "101"
+    resolved_lora = lora_name or resolve_h3_turbo_lora_name(nsfw)
+    if nsfw is False and "10eros" in resolved_lora.lower():
+        logger.warning("H3 Turbo: SFW 拒绝 10Eros LoRA %s", resolved_lora)
+        resolved_lora = _SFW_TURBO_LORA_FALLBACK
+    resolved_steps = settings.h3_turbo_steps if steps is None else steps
 
     # 1. 插入 Turbo LoRA 节点
     workflow[lora_node_id] = {
         "class_type": "MiniMaxH3TurboLoRA",
         "inputs": {
             "model": ["1", 0],
-            "lora_name": settings.h3_turbo_lora_name,
+            "lora_name": resolved_lora,
             "strength": settings.h3_turbo_strength,
             "low_vram": settings.h3_turbo_low_vram,
         },
@@ -701,14 +783,34 @@ def _apply_h3_turbo_to_workflow(workflow: dict[str, Any]) -> None:
     # 5. BasicScheduler steps 改为 turbo steps
     scheduler = workflow.get("32", {})
     if scheduler.get("class_type") == "BasicScheduler":
-        scheduler["inputs"]["steps"] = settings.h3_turbo_steps
+        scheduler["inputs"]["steps"] = resolved_steps
 
     logger.info(
-        "H3 Turbo 工作流已启用: lora=%s strength=%s steps=%s low_vram=%s",
-        settings.h3_turbo_lora_name,
+        "H3 Turbo 工作流已启用: lora=%s strength=%s steps=%s low_vram=%s mode=%s",
+        resolved_lora,
         settings.h3_turbo_strength,
-        settings.h3_turbo_steps,
+        resolved_steps,
         settings.h3_turbo_low_vram,
+        mode,
+    )
+
+
+def apply_h3_turbo_for_request(
+    workflow: dict[str, Any],
+    request: VideoRequest | None,
+    mode: str,
+) -> None:
+    """P3 双速：预览打开 Turbo；成片/默认保持 20 步且不插节点。"""
+    preview = is_h3_preview_request(request)
+    enabled = preview or bool(settings.h3_turbo_enabled)
+    steps = _h3_turbo_steps_for_mode(mode) if preview else None
+    lora_name = resolve_h3_turbo_lora_name() if preview else None
+    _apply_h3_turbo_to_workflow(
+        workflow,
+        enabled=enabled,
+        steps=steps,
+        lora_name=lora_name,
+        mode=mode,
     )
 
 
@@ -1380,7 +1482,9 @@ class VideoAgent(BaseAgent):
         workflow["31"]["inputs"]["sampler_name"] = settings.h3_sampler
         workflow["32"]["inputs"]["scheduler"] = settings.h3_scheduler
         workflow["32"]["inputs"]["steps"] = settings.h3_steps
-        _apply_h3_turbo_to_workflow(workflow)
+        apply_h3_turbo_for_request(
+            workflow, requests[0], "ref2va" if use_r2v else "fl2va"
+        )
         workflow["60"]["inputs"]["filename_prefix"] = (
             f"video_multishot_{scene_ids[0]}_{scene_ids[-1]}"
         )
@@ -1744,7 +1848,7 @@ class VideoAgent(BaseAgent):
         workflow["31"]["inputs"]["sampler_name"] = settings.h3_sampler
         workflow["32"]["inputs"]["scheduler"] = settings.h3_scheduler
         workflow["32"]["inputs"]["steps"] = settings.h3_steps
-        _apply_h3_turbo_to_workflow(workflow)
+        apply_h3_turbo_for_request(workflow, request, "fl2va")
         workflow["60"]["inputs"]["filename_prefix"] = f"video_scene_{request.scene_id}"
 
         return await self._submit_h3_workflow(
@@ -1847,7 +1951,7 @@ class VideoAgent(BaseAgent):
         workflow["31"]["inputs"]["sampler_name"] = settings.h3_sampler
         workflow["32"]["inputs"]["scheduler"] = settings.h3_scheduler
         workflow["32"]["inputs"]["steps"] = settings.h3_steps
-        _apply_h3_turbo_to_workflow(workflow)
+        apply_h3_turbo_for_request(workflow, request, "ref2va")
         workflow["60"]["inputs"]["filename_prefix"] = f"video_scene_{request.scene_id}"
 
         return await self._submit_h3_workflow(

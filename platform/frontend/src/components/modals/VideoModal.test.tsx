@@ -280,6 +280,8 @@ describe("VideoModal 视频生成流", () => {
         prompt: "自定义提示词",
         negative_prompt: "自定义负向",
         duration_seconds: 8,
+        preview: false,
+        quality: "final",
       })
     );
   });
@@ -301,6 +303,25 @@ describe("VideoModal 视频生成流", () => {
         prompt: "used-1",
         negative_prompt: DEFAULT_NEG,
         duration_seconds: 5,
+        preview: false,
+        quality: "final",
+      })
+    );
+  });
+
+  it("Turbo 预览 payload：preview=true 且 quality=preview", async () => {
+    mockGenerateVideoAsync.mockResolvedValue(taskResp);
+    renderModal();
+    fireEvent.click(screen.getByText("Turbo 预览"));
+    await waitFor(() =>
+      expect(mockGenerateVideoAsync).toHaveBeenCalledWith({
+        scene_id: 1,
+        image_url: "http://img/1.png",
+        prompt: "scene-prompt-1",
+        negative_prompt: "scene-neg-1",
+        duration_seconds: 5,
+        preview: true,
+        quality: "preview",
       })
     );
   });

@@ -343,13 +343,19 @@ export async function generateStoryboardBatch(params: {
   return resp.json();
 }
 
-export async function generateVideo(params: {
+export type VideoGenerateParams = {
   scene_id: number;
   image_url: string;
   prompt: string;
   negative_prompt: string;
   duration_seconds: number;
-}): Promise<AgentResponse<VideoData>> {
+  /** P3: true = H3 Turbo preview; false/omit = 20-step final */
+  preview?: boolean;
+  /** P3: "preview" | "final". "preview" same as preview=true */
+  quality?: "preview" | "final" | string;
+};
+
+export async function generateVideo(params: VideoGenerateParams): Promise<AgentResponse<VideoData>> {
   const resp = await fetchWithTimeout(
     `${API_BASE}/video/generate`,
     {
@@ -363,13 +369,7 @@ export async function generateVideo(params: {
 }
 
 export async function generateVideoBatch(params: {
-  items: Array<{
-    scene_id: number;
-    image_url: string;
-    prompt: string;
-    negative_prompt: string;
-    duration_seconds: number;
-  }>;
+  items: VideoGenerateParams[];
 }): Promise<AgentResponse<VideoBatchData>> {
   const resp = await fetchWithTimeout(
     `${API_BASE}/video/generate_batch`,
@@ -383,13 +383,7 @@ export async function generateVideoBatch(params: {
   return resp.json();
 }
 
-export async function generateVideoAsync(params: {
-  scene_id: number;
-  image_url: string;
-  prompt: string;
-  negative_prompt: string;
-  duration_seconds: number;
-}): Promise<AsyncTaskResponse> {
+export async function generateVideoAsync(params: VideoGenerateParams): Promise<AsyncTaskResponse> {
   const resp = await fetchWithTimeout(
     `${API_BASE}/video/generate_async`,
     {

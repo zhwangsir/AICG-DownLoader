@@ -348,6 +348,8 @@ export default function Canvas() {
             p.negative_prompt ||
             "blurry, low quality, deformed, ugly, watermark, static",
           duration_seconds: 3,
+          preview: false,
+          quality: "final",
         })),
       });
       if (resp.success && resp.data) {
@@ -552,6 +554,8 @@ export default function Canvas() {
             negativePrompt ||
             "blurry, low quality, deformed, ugly, watermark, static",
           duration_seconds: 3,
+          preview: false,
+          quality: "final",
         });
         const evt = await pollVideoTask(task.poll_url, undefined, (p) => {
           store.patchTask(taskId, {

@@ -806,6 +806,8 @@ describe("Canvas 视频生成", () => {
       prompt: "p1",
       negative_prompt: "n1",
       duration_seconds: 3,
+      preview: false,
+      quality: "final",
     });
     expect(store().videos).toHaveLength(1);
     expect(store().statusInfo).toBe("视频已生成: 场景 1 (3s)");

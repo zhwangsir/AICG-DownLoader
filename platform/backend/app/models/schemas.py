@@ -403,6 +403,16 @@ class VideoRequest(BaseModel):
         description="锁定的生成参数快照（JSON 对象，如 engine/steps/sampler/cfg）。"
         "非空时视频 Agent 优先采用，用于单镜头锚点重拍复现；None=按当前默认参数",
     )
+    # P3 双速 H3：preview=true 或 quality=preview → Turbo ON（FL2VA ~8 / Ref2VA ~4）；
+    # 默认 / quality=final → 原生 20 步，不插 Turbo 节点。
+    preview: bool = Field(
+        False,
+        description="True=H3 Turbo 预览（FL2VA ~8 步 / Ref2VA ~4 步）；False=成片原生 20 步",
+    )
+    quality: str = Field(
+        "",
+        description="质量档：preview / final / 空串。preview 与 preview=True 等价；final 强制成片",
+    )
 
 
 class VideoResult(BaseModel):

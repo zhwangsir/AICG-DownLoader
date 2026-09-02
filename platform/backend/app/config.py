@@ -167,11 +167,16 @@ class Settings(BaseSettings):
     # --- MiniMax-H3 Turbo LoRA（可选加速，默认关闭）---
     # 2026-08-08 部署：larryvrh/drbaph Turbo LoRA 已下载到 NAS h3/loras/
     # 开启后 20 步 → 4-8 步，约 5× 采样加速；对高质量短剧属于实验性可选项
-    h3_turbo_enabled: bool = False  # 默认关闭，保持原生高质量
+    h3_turbo_enabled: bool = False  # 默认关闭；P3 预览路径按请求打开，成片保持原生 20 步
+    # 产品默认已在 :8195 的 MiniMaxH3TurboLoRA；官方 minimax_h3_fl2v / lightx2v 仅当已是该默认时使用
     h3_turbo_lora_name: str = "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors"
-    h3_turbo_steps: int = 6  # 推荐 4-8；6 步在速度与画质间最平衡
+    h3_turbo_steps: int = 6  # 全局 Turbo 开关（非预览）回退步数；预览走 fl2va/ref2va 分档
+    h3_turbo_fl2va_steps: int = 8  # P3 预览 FL2VA ~8 步
+    h3_turbo_ref2va_steps: int = 4  # P3 预览 Ref2VA ~4 步
     h3_turbo_strength: float = 1.0  # 模糊拖影→1.05-1.2；过锐噪点→0.8-0.95
     h3_turbo_low_vram: bool = False  # 爆显存时改为 True（合并权重，画质略软）
+    # NSFW 预览可用盘上 10Eros turbo；SFW 永不加载 10Eros
+    h3_nsfw_turbo_lora_name: str = "10Eros_Max_h3_TURBO_ref2va.safetensors"
 
     # --- M20 长视频分块续写（PoC，默认关闭）---
     # 技术路线 A：H3 I2V 帧链续写 —— chunk i+1 首帧 = chunk i 末帧（ffmpeg 抽取），
