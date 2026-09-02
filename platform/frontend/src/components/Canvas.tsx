@@ -698,7 +698,7 @@ export default function Canvas() {
           segments: readyScenes,
           transition: "fade",
           bgm_url: null,
-          output_resolution: "1080x1920",
+          output_resolution: "768x1344",
           output_fps: 30,
         });
         if (resp.success && resp.data) {
@@ -1133,7 +1133,7 @@ export default function Canvas() {
               ? [
                   { label: "场景数", value: `${editData.segments_count}` },
                   { label: "总时长", value: `${editData.duration_seconds.toFixed(1)}s` },
-                  { label: "分辨率", value: "1080x1920" },
+                  { label: "分辨率", value: "768x1344" },
                   { label: "状态", value: "已合成" },
                 ]
               : [

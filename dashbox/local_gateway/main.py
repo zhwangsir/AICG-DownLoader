@@ -95,6 +95,7 @@ LTX_BASE_URL = os.getenv("LOCAL_LTX_BASE_URL", "http://192.168.71.127:8198").rst
 KREA2_BASE_URL = os.getenv("LOCAL_KREA2_BASE_URL", "http://192.168.71.127:8189").rstrip("/")
 TTS_BASE_URL = os.getenv("LOCAL_TTS_BASE_URL", "http://192.168.71.127:9200").rstrip("/")
 VIDEO_BACKEND_FORCE = os.getenv("LOCAL_VIDEO_BACKEND", "").strip().lower()  # "h3" / "ltx" 强制指定；不读 DashBox VIDEO_BACKEND
+LTX_ENABLED = os.getenv("LOCAL_LTX_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 GATEWAY_HOST = os.getenv("LOCAL_GATEWAY_HOST", "0.0.0.0")
 GATEWAY_PORT = int(os.getenv("LOCAL_GATEWAY_PORT", "8790"))
 PUBLIC_BASE_URL = os.getenv("LOCAL_GATEWAY_PUBLIC_BASE", f"http://{GATEWAY_HOST}:{GATEWAY_PORT}").rstrip("/")
@@ -869,12 +870,19 @@ VIDEO_TASKS: dict[str, dict[str, Any]] = {}
 _ltx_nodes_check: bool | str = False
 
 
+def listed_logical_models() -> list[str]:
+    """Drama product surface: hide LTX-2.5 unless ltx_enabled."""
+    if LTX_ENABLED:
+        return list(LOGICAL_MODELS)
+    return [name for name in LOGICAL_MODELS if name != "LTX-2.5"]
+
+
 @app.get("/v1/models")
 async def list_models() -> dict[str, Any]:
     start = time.time()
     data = [
         {"id": name, "object": "model", "created": int(time.time()), "owned_by": "local-gateway"}
-        for name in LOGICAL_MODELS
+        for name in listed_logical_models()
     ]
     _log("models", "-", start, "ok")
     return {"object": "list", "data": data}
@@ -1103,24 +1111,21 @@ async def _verify_ltx_nodes(client: httpx.AsyncClient) -> str:
 
 
 def _select_video_backend(body: dict[str, Any]) -> str:
-    """路由：VIDEO_BACKEND 强制 > NSFW→H3 > H3 模型名 > LTX 模型名 > 时长>15s / audio → H3，否则 LTX。
+    """Drama generate never auto-LTX.
 
+    VIDEO_BACKEND 强制 > NSFW→H3 > 显式 LTX 模型名（仅 ltx_enabled）→ 其余 H3。
     NSFW 不走 Wan 2.2 / LTX（P0：SFW/NSFW 视频引擎都是集群 :8195 MiniMax H3）。
     """
-    if VIDEO_BACKEND_FORCE in ("h3", "ltx"):
-        return VIDEO_BACKEND_FORCE
+    if VIDEO_BACKEND_FORCE == "h3":
+        return "h3"
+    if VIDEO_BACKEND_FORCE == "ltx":
+        return "ltx" if LTX_ENABLED else "h3"
     if request_nsfw(body):
         return "h3"
     model = str(body.get("model") or "").lower()
-    duration = float(body.get("duration") or 5)
-    generate_audio = bool(body.get("generate_audio"))
     if "ltx" in model:
-        return "ltx"
-    if "happyhorse" in model or "minimax-h3" in model or "minimax_h3" in model:
-        return "h3"
-    if duration > 15 or generate_audio:
-        return "h3"
-    return "ltx"
+        return "ltx" if LTX_ENABLED else "h3"
+    return "h3"
 
 
 @app.post("/v1/video/generations")
@@ -1140,7 +1145,6 @@ async def video_generations(request: Request) -> Response:
     media = collect_video_inputs(body)
     first_frame = media["first"]
     last_frame = media["last"]
-    nsfw = request_nsfw(body)
 
     task_id = f"task_{uuid.uuid4().hex[:16]}"
     task: dict[str, Any] = {
@@ -1152,13 +1156,9 @@ async def video_generations(request: Request) -> Response:
         async with _http(timeout=60.0) as client:
             if backend == "h3":
                 if not await _h3_online(client):
-                    if nsfw or request_repair(body):
-                        return _error_response(
-                            "H3 实例离线，NSFW/repair 视频不回退 LTX/Wan", 502
-                        )
-                    logger.warning("H3 实例离线，回退 LTX-2.5")
-                    backend = "ltx"
-                    task["backend"] = "ltx"
+                    return _error_response(
+                        "H3 实例离线，短剧视频不回退 LTX/Wan", 502
+                    )
             if backend == "h3":
                 nsfw = request_nsfw(body)
                 fl2va_unet, ref2va_unet = h3_unets(nsfw, request_nsfw_variant(body))

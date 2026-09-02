@@ -29,7 +29,7 @@ export function EditModal({
   const [title, setTitle] = useState("短剧成片");
   const [transition, setTransition] = useState("none");
   const [bgmUrl, setBgmUrl] = useState("");
-  const [outputResolution, setOutputResolution] = useState("1080x1920");
+  const [outputResolution, setOutputResolution] = useState("768x1344");
   const [outputFps, setOutputFps] = useState(30);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

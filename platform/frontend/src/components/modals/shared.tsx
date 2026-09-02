@@ -32,7 +32,7 @@ export const TRANSITION_OPTIONS = [
   { value: "zoom", label: "缩放" },
   { value: "wipe", label: "擦除" },
 ];
-export const RESOLUTION_OPTIONS = ["480x832", "720x1280", "1080x1920", "1280x720", "1920x1080"];
+export const RESOLUTION_OPTIONS = ["480x832", "720x1280", "768x1344", "1280x720", "1344x768"];
 export const VOICE_OPTIONS = [
   { value: "zh-CN-XiaoxiaoNeural", label: "晓晓（女·温柔）" },
   { value: "zh-CN-YunxiNeural", label: "云希（男·沉稳）" },

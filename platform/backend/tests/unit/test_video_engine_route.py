@@ -2,9 +2,7 @@
 
 路由契约：
 - engine 显式指定（h3/ltx/comfyui）→ 直达（ltx 未启用时降级 h3）
-- engine=None/'auto' → 按镜头类型路由：
-  对白（<d> 标签）/ 参考图 / 末帧锚定 → H3（角色一致性优先）
-  时长超 H3 训练上限 / 纯运动空镜描述 → LTX-2.5（ltx_enabled 为前提）
+- engine=None/'auto' → 短剧默认 H3（P6 不按时长/空镜自动 LTX）
 - settings.video_backend='comfyui' 时钉死旧行为（向后兼容既有用例）
 回退链：ltx → h3 → comfyui；h3 → comfyui。
 """
@@ -58,7 +56,7 @@ class TestExplicitEngine:
 
 
 class TestAutoRouting:
-    """engine=None/'auto' 且 video_backend='h3'/'auto' → 按镜头类型路由。"""
+    """engine=None/'auto' 且 video_backend='h3'/'auto' → 短剧钉 H3，不自动 LTX。"""
 
     @pytest.fixture(autouse=True)
     def _enable_routing(self, monkeypatch):
@@ -81,22 +79,22 @@ class TestAutoRouting:
         req = _req(last_frame_url="http://x/end.png", duration_seconds=30)
         assert route_video_engine(req, settings) == "h3"
 
-    def test_long_duration_routes_ltx(self):
-        assert route_video_engine(_req(duration_seconds=20), settings) == "ltx"
+    def test_long_duration_stays_h3_even_if_ltx_enabled(self):
+        assert route_video_engine(_req(duration_seconds=20), settings) == "h3"
 
     def test_long_duration_ltx_disabled_routes_h3(self, monkeypatch):
         monkeypatch.setattr(settings, "ltx_enabled", False)
         assert route_video_engine(_req(duration_seconds=20), settings) == "h3"
 
-    def test_pure_motion_routes_ltx(self):
+    def test_pure_motion_stays_h3_even_if_ltx_enabled(self):
         req = _req(prompt="aerial drone shot over the city, camera pans across the skyline")
-        assert route_video_engine(req, settings) == "ltx"
+        assert route_video_engine(req, settings) == "h3"
 
     def test_plain_short_prompt_routes_h3(self):
         assert route_video_engine(_req(prompt="a girl smiles at the camera"), settings) == "h3"
 
     def test_auto_keyword_behaves_like_none(self):
-        assert route_video_engine(_req(engine="auto", duration_seconds=20), settings) == "ltx"
+        assert route_video_engine(_req(engine="auto", duration_seconds=20), settings) == "h3"
 
 
 class TestLegacyBackendPin:
@@ -181,14 +179,18 @@ class TestExecuteLtxBranch:
         assert "comfyui=always down" in resp.error
         assert resp.error.count("always down") == 3
 
-    async def test_auto_long_duration_routes_to_ltx_instance(
+    async def test_auto_long_duration_stays_on_h3_instance(
         self, agent, monkeypatch, mock_upload_image, mock_call_comfyui, mock_get_comfyui_result
     ):
         monkeypatch.setattr(settings, "video_backend", "h3")
         monkeypatch.setattr(settings, "ltx_enabled", True)
-        mock_get_comfyui_result.return_value = self._ltx_outputs()
+        mock_get_comfyui_result.return_value = {
+            "60": {"videos": [{"filename": "h3.mp4", "subfolder": "", "type": "output"}]}
+        }
 
         resp = await agent.execute(_req(duration_seconds=20))
 
         assert resp.success is True
-        assert mock_call_comfyui.call_args[0][0] == settings.ltx_comfyui_url
+        assert mock_call_comfyui.call_args[0][0] == settings.h3_comfyui_url
+        workflow = mock_call_comfyui.call_args[0][1]
+        assert workflow["20"]["class_type"] == "MiniMaxH3ImageToVideo"

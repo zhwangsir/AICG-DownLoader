@@ -104,9 +104,18 @@ describe("EditModal（剪辑合成成片）", () => {
     renderModal();
     expect(screen.getByPlaceholderText("输入成片标题...")).toHaveValue("短剧成片");
     expect(formSelects().transition.value).toBe("none");
-    expect(formSelects().resolution.value).toBe("1080x1920");
+    expect(formSelects().resolution.value).toBe("768x1344");
     expect(formSelects().fps.value).toBe("30");
     expect(screen.getByPlaceholderText("http://...")).toHaveValue("");
+  });
+
+  it("分辨率选项钉 768P 竖屏/横屏，不含 1080x1920", () => {
+    renderModal();
+    const opts = Array.from(formSelects().resolution.options).map((o) => o.value);
+    expect(opts).toContain("768x1344");
+    expect(opts).toContain("1344x768");
+    expect(opts).not.toContain("1080x1920");
+    expect(opts).not.toContain("1920x1080");
   });
 
   it("表单编辑：标题（含长文本）/转场/分辨率/帧率/BGM", () => {

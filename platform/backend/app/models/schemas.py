@@ -380,11 +380,10 @@ class VideoRequest(BaseModel):
     # M18.4 H3 画风漂移治理：目标画风由 orchestrator 透传（与剧本/角色/分镜同源），
     # H3 prompt 冲突清洗 + 风格锚定 + 产出 VLM 画风质检的基准；空串跳过（向后兼容）
     style: str = Field("", description="目标画风（M18.4 H3 画风锚定/质检基准，空串跳过）")
-    # M21 双引擎路由：显式指定视频引擎（None/'auto' 按镜头类型自动路由——
-    # 对白/角色一致性 → H3；空镜/动作/长场景 → LTX-2.5）
+    # M21 双引擎路由：显式指定视频引擎。P6：None/'auto' 短剧钉 H3，不自动 LTX。
     engine: str | None = Field(
         None,
-        description="视频引擎：None/'auto' 自动路由 / 'h3' MiniMax H3 / 'ltx' LTX-2.5 / 'comfyui' Wan2.2 回退",
+        description="视频引擎：None/'auto' 短剧 H3 / 'h3' MiniMax H3 / 'ltx' LTX-2.5（需 ltx_enabled） / 'comfyui' 旧路径",
     )
     # M24.2 锚点重拍（单镜头参数锁定与复现）：
     # seed 对应 u64 语义（0 .. 2^64-1），None 表示由后端随机分配；
@@ -560,7 +559,7 @@ class EditRequest(BaseModel):
     segments: list[EditSegment] = Field(..., description="按顺序排列的片段素材")
     transition: str = Field("none", description="转场类型：none / fade")
     bgm_url: str | None = Field(None, description="背景音乐 URL（可选）")
-    output_resolution: str = Field("1080x1920", description="输出分辨率，如 1080x1920")
+    output_resolution: str = Field("768x1344", description="输出分辨率，如 768x1344")
     output_fps: int = Field(24, ge=1, le=60, description="输出帧率")
     # 2026-09-01 新规：AI 生成微短剧须在每集明显位置添加提示标识
     ai_label_enabled: bool = Field(True, description="是否在成片右上角烧录「AI生成」标识（合规要求默认开启）")
@@ -597,7 +596,7 @@ class PipelineRunRequest(BaseModel):
     run_visual_check: bool = Field(False, description="成片后是否执行视觉质检（角色漂移对照）")
     ai_label_enabled: bool = Field(True, description="成片烧录「AI生成」标识（合规默认开启）")
     license_number: str = Field("", description="短剧备案号（非空时随标识烧录）")
-    output_resolution: str = Field("1080x1920", description="输出分辨率")
+    output_resolution: str = Field("768x1344", description="输出分辨率")
     output_fps: int = Field(24, ge=1, le=60, description="输出帧率")
     # M17.4 H3 全模态参考（仅 video_backend=h3 生效）：参考视频提供运镜/节奏/剪辑
     # 结构，独立参考音频提供 BGM 风格/声景质感；透传到每个 VideoRequest 走 ref2va

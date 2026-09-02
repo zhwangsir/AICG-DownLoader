@@ -4,7 +4,7 @@ M10 升级：MiniMax H3 (33B, 原生音视频联合生成) 为主，ComfyUI(Wan 
 M11 升级：H3 多镜叙事联合生成 — 同集相邻场景合并为一次多镜推理（单 prompt
 多 SHOT），再按帧边界 ffmpeg 切分回各场景视频，提升跨镜连续性。
 M21 升级：MiniMax H3 + LTX-2.5 双引擎路由 — VideoRequest.engine 显式指定直达；
-None/'auto' 按镜头类型路由（对白/角色一致性 → H3；空镜/动作/长场景 → LTX-2.5）。
+P6：None/'auto' 短剧 generate/一键成片不自动选 LTX（空镜/动作/长镜均 H3 FL2VA）。
 回退链：ltx → h3 → comfyui；h3 → comfyui（settings.video_backend='comfyui'
 时钉死旧 ComfyUI 路径，向后兼容）。
 
@@ -153,12 +153,9 @@ def route_video_engine(request: VideoRequest, settings) -> str:
     1. engine 显式指定（h3/ltx/comfyui）→ 直达；显式 'ltx' 但 ltx_enabled=False
        时降级 'h3'（未启用的引擎不可达）。
     2. engine=None/'auto'/其他 → settings.video_backend='comfyui' 钉死旧路径
-       （向后兼容）；'ltx' 直达 LTX；'h3'/'auto' 按镜头类型路由：
-       - 有台词（<d> 标签/dialogue:）或 reference_images/videos/audios 或
-         last_frame_url（角色一致性/首尾帧锚定）→ 'h3'
-       - 时长超 H3 训练上限或纯运动空镜描述（且 ltx_enabled）→ 'ltx'
-         execute 侧会再确认 :8198 健康，否则仍降 H3（P2 空镜不走 LTX-2.3/Wan）
-       - 其余（短剧默认，含空镜/无角色）→ 'h3' FL2VA
+       （向后兼容）；'ltx' 仅当 ltx_enabled 直达 LTX。
+    P6：短剧 generate/一键成片不按时长或空镜自动选 LTX。空镜走 H3 FL2VA；
+    LTX 仅显式 engine 或 video_backend='ltx' 且 ltx_enabled；execute 再确认 :8198。
     """
     explicit = (getattr(request, "engine", None) or "").strip().lower()
     if explicit in ("h3", "ltx", "comfyui"):
@@ -177,18 +174,7 @@ def route_video_engine(request: VideoRequest, settings) -> str:
     if backend_default == "ltx":
         return "ltx" if settings.ltx_enabled else "h3"
 
-    # 'h3'/'auto'：按镜头类型在 H3 与 LTX-2.5 间路由
-    if request.reference_images or request.reference_videos or request.reference_audios:
-        return "h3"
-    if (request.last_frame_url or "").strip():
-        return "h3"
-    if _prompt_has_dialogue(request.prompt):
-        return "h3"
-    if settings.ltx_enabled:
-        if float(request.duration_seconds or 0) > H3_MAX_SINGLE_SHOT_SECONDS:
-            return "ltx"
-        if _is_pure_motion_prompt(request.prompt):
-            return "ltx"
+    # P6: drama generate/one-click never auto-LTX (empty/long/motion stay H3 FL2VA)
     return "h3"
 
 
