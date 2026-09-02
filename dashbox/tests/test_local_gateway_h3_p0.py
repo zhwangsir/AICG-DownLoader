@@ -7,6 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
+
+from local_gateway import h3_context_ir as h3_ir
 from local_gateway.h3_video import (
     H3_REF_UNET_NSFW,
     H3_REF_UNET_SFW,
@@ -19,6 +22,11 @@ from local_gateway.h3_video import (
     select_h3_mode,
 )
 from local_gateway.main import _build_h3_r2v_workflow, _build_h3_workflow, _derive_video_size
+
+
+@pytest.fixture(autouse=True)
+def _disable_h3_context_ir_rewrite(monkeypatch):
+    monkeypatch.setattr(h3_ir, "REWRITE_ENABLED", False)
 
 
 def test_refs_route_to_r2v():

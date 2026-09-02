@@ -18,8 +18,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from local_gateway import main
+from local_gateway import h3_context_ir as h3_ir
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-image-bytes"
+
+
+@pytest.fixture(autouse=True)
+def _disable_h3_context_ir_rewrite(monkeypatch):
+    monkeypatch.setattr(h3_ir, "REWRITE_ENABLED", False)
+
+
 WAV_BYTES = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"fmt fake-wav-data"
 
 

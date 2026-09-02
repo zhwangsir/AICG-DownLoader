@@ -48,6 +48,7 @@ from app.models.schemas import (
     VoiceRequest,
 )
 from app.services.character_library import character_library
+from app.services.h3_context_ir_rewriter import H3RewriteSpec, rewrite_h3_prompt
 from app.services.long_video_planner import long_video_planner
 from app.services.long_video_service import LongVideoError, LongVideoService
 from app.services.style_anchor import (
@@ -379,6 +380,13 @@ class PipelineOrchestrator:
             for cur, nxt in zip(items, items[1:]):
                 if nxt.episode == cur.episode:
                     cur.last_frame_url = nxt.image_url
+        # P1: local Context-IR rewrite of the prompt H3 will receive.
+        # Multishot groups are rewritten once in VideoAgent (combined prompt).
+        # Per-scene rewrite here covers the non-multishot path and fail-opens.
+        if settings.video_backend.lower() == "h3" and not (
+            settings.h3_multishot_enabled
+        ):
+            items = await self._rewrite_h3_video_prompts(items)
         # M24.2 锚点重拍：生成前落盘镜头参数快照（status=pending），
         # 供单镜头重拍恢复 seed/engine/prompt/lock_params 等参数
         project_id = str(report.get("project_id", task_id))
@@ -407,6 +415,41 @@ class PipelineOrchestrator:
         }
         self._progress(task_id, "video", 1, f"视频完成: {len(videos)} 成功 / {len(failed)} 失败")
         return videos
+
+    async def _rewrite_h3_video_prompts(
+        self, items: list[VideoRequest]
+    ) -> list[VideoRequest]:
+        """P1 per-scene Context-IR rewrite (non-multishot). Fail-open per item."""
+        out: list[VideoRequest] = []
+        for req in items:
+            has_refs = bool(
+                req.reference_images or req.reference_videos or req.reference_audios
+            )
+            mode = "ref2va" if has_refs else ("fl2va" if req.last_frame_url else "i2va")
+            n_pictures = (
+                1 + len(req.reference_images)
+                if has_refs
+                else (2 if req.last_frame_url else 1)
+            )
+            urls = [u for u in [req.image_url, *req.reference_images, req.last_frame_url] if u]
+            rewritten = await rewrite_h3_prompt(
+                H3RewriteSpec(
+                    prompt=req.prompt or "",
+                    mode=mode,
+                    duration_seconds=float(req.duration_seconds or 0) or 5.0,
+                    style=req.style or "",
+                    narrative_beat=req.narrative_beat or "",
+                    n_pictures=n_pictures,
+                    n_videos=len(req.reference_videos or []),
+                    n_audios=len(req.reference_audios or []),
+                    reference_image_urls=urls,
+                    original_fallback=req.prompt or "",
+                )
+            )
+            if rewritten != req.prompt:
+                req = req.model_copy(update={"prompt": rewritten})
+            out.append(req)
+        return out
 
     async def _step_video_long(
         self,

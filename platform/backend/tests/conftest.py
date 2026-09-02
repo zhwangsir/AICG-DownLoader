@@ -51,6 +51,8 @@ def _patch_settings(monkeypatch):
     # M18.3: 默认关闭关键帧定妆照 IPAdapter 锚定，避免既有用例触发参考图上传；
     # 专门测试锚定的用例可局部 monkeypatch settings.storyboard_keyframe_anchor_enabled = True
     monkeypatch.setattr(settings, "storyboard_keyframe_anchor_enabled", False)
+    # P1: rewrite off unless a test locally enables it (avoid spark LLM in unit tests)
+    monkeypatch.setattr(settings, "h3_context_ir_rewrite_enabled", False)
 
 
 @pytest.fixture(autouse=True)

@@ -41,6 +41,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from local_gateway.h3_context_ir import rewrite_h3_prompt as rewrite_h3_context_ir
 from local_gateway.h3_video import (
     collect_video_inputs,
     h3_resolution_scale,
@@ -1156,6 +1157,27 @@ async def video_generations(request: Request) -> Response:
                 first_frame = media["first"]
                 last_frame = media["last"]
                 mode = select_h3_mode(media)
+                # P1: rewrite the prompt H3 actually receives (fail-open)
+                ref_urls_for_ir = r2v_ref_images(media) if mode == "r2v" else []
+                ir_mode = (
+                    "ref2va" if mode == "r2v"
+                    else ("fl2va" if last_frame else ("i2va" if first_frame else "t2va"))
+                )
+                n_pics = (
+                    len(ref_urls_for_ir) if mode == "r2v"
+                    else ((1 if first_frame else 0) + (1 if last_frame else 0))
+                )
+                prompt = await rewrite_h3_context_ir(
+                    prompt,
+                    mode=ir_mode,
+                    duration=duration,
+                    nsfw=nsfw,
+                    n_pictures=n_pics,
+                    n_videos=len(media["ref_videos"][:3]),
+                    n_audios=len(media["ref_audios"][:3]),
+                    original_fallback=prompt,
+                    reference_image_urls=ref_urls_for_ir or [u for u in (first_frame, last_frame) if u],
+                )
                 width, height = _derive_video_size(body, "h3")
                 num_frames = _snap_h3_frames(duration)
                 seed = random.randint(0, 2**32 - 1)

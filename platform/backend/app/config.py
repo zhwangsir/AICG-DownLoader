@@ -207,6 +207,10 @@ class Settings(BaseSettings):
     # （integrated_multimodal_description: [Shot 1] ... [Shot N] At MM:SS.mmm, the camera cuts to ...），
     # False 时回退 M11 旧版 "SHOT X:" 格式（保险丝）
     h3_native_cut_prompt_enabled: bool = True
+    # P1 local Context-IR rewrite: spark LLM (qwen3.6-uncensored) rewrites the
+    # prompt H3 actually receives; optional VLM retention when refs exist.
+    # Fail-open to the original assembled prompt. Default on.
+    h3_context_ir_rewrite_enabled: bool = True
     # M17.2 原生音频方向：按组内叙事节拍确定性生成 overall_soundscape /
     # non_diegetic_music 两字段注入 prompt，引导 H3 生成真实 BGM/环境音轨
     h3_audio_direction_enabled: bool = True

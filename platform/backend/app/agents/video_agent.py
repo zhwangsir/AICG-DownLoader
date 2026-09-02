@@ -45,6 +45,7 @@ from app.services.ltx25_video_service import (
     _snap_ltx_frames,
 )
 from app.services.model_gateway import model_gateway
+from app.services.h3_context_ir_rewriter import H3RewriteSpec, rewrite_h3_prompt
 from app.services.style_anchor import (
     resolve_style_anchor,
     sanitize_style_conflicts,
@@ -486,6 +487,42 @@ def resolve_h3_unet_names(nsfw: bool | None = None) -> tuple[str, str]:
     if nsfw:
         return settings.h3_nsfw_unet_name, settings.h3_nsfw_ref_unet_name
     return settings.h3_unet_name, settings.h3_ref_unet_name
+
+
+async def _rewrite_prompt_for_h3(
+    assembled: str,
+    *,
+    request: VideoRequest,
+    mode: str,
+    n_pictures: int = 0,
+    n_videos: int = 0,
+    n_audios: int = 0,
+    last_shot: str = "Shot 1",
+    shot_count: int = 1,
+    extra_image_urls: list[str] | None = None,
+    already_rewritten: bool = False,
+    duration_seconds: float | None = None,
+) -> str:
+    """P1: replace the prompt H3 receives with official Context-IR (fail-open)."""
+    urls = list(extra_image_urls or [])
+    duration = duration_seconds if duration_seconds is not None else request.duration_seconds
+    return await rewrite_h3_prompt(
+        H3RewriteSpec(
+            prompt=assembled or request.prompt,
+            mode=mode,
+            duration_seconds=float(duration or 0) or 5.0,
+            style=request.style or "",
+            narrative_beat=request.narrative_beat or "",
+            n_pictures=n_pictures,
+            n_videos=n_videos,
+            n_audios=n_audios,
+            last_shot=last_shot,
+            shot_count=shot_count,
+            reference_image_urls=urls,
+            original_fallback=assembled,
+            already_rewritten=already_rewritten,
+        )
+    )
 
 
 def build_audio_direction(beats: list[str]) -> str:
@@ -1231,6 +1268,27 @@ class VideoAgent(BaseAgent):
                 )
             workflow["20"]["inputs"]["prompt"] = multi_prompt
 
+        # P1: rewrite the prompt H3 actually receives for the whole group (one LLM call)
+        head = requests[0]
+        n_videos_g = len(merged_videos) if use_r2v else 0
+        n_audios_g = len(merged_audios) if use_r2v else 0
+        n_pictures_g = (1 + len(merged_refs[: max(0, settings.h3_ref_max_images - 1)])) if use_r2v else (2 if (requests[-1].last_frame_url or requests[-1].image_url) else 1)
+        extra_urls = [head.image_url, *merged_refs]
+        if not use_r2v and (requests[-1].last_frame_url or requests[-1].image_url):
+            extra_urls.append(requests[-1].last_frame_url or requests[-1].image_url)
+        workflow["20"]["inputs"]["prompt"] = await _rewrite_prompt_for_h3(
+            workflow["20"]["inputs"]["prompt"],
+            request=head,
+            mode="ref2va" if use_r2v else "fl2va",
+            n_pictures=n_pictures_g,
+            n_videos=n_videos_g,
+            n_audios=n_audios_g,
+            last_shot=f"Shot {len(requests)}",
+            shot_count=len(requests),
+            extra_image_urls=extra_urls,
+            duration_seconds=float(total_seconds),
+        )
+
         workflow["2"]["inputs"]["clip_name"] = settings.h3_clip_name
         workflow["3"]["inputs"]["vae_name"] = settings.h3_video_vae_name
         workflow["4"]["inputs"]["vae_name"] = settings.h3_audio_vae_name
@@ -1522,6 +1580,16 @@ class VideoAgent(BaseAgent):
 
         # M17.2 单镜原生音频方向（节拍 → soundscape/music 字段，置 prompt 最末）
         positive = _append_audio_direction(positive, [request.narrative_beat])
+        # P1: official Context-IR rewrite replaces the prompt H3 actually receives
+        positive = await _rewrite_prompt_for_h3(
+            positive,
+            request=request,
+            mode="fl2va" if last_frame_name else "i2va",
+            n_pictures=2 if last_frame_name else 1,
+            extra_image_urls=[
+                u for u in (request.image_url, request.last_frame_url) if u
+            ],
+        )
 
         workflow = json.loads(json.dumps(WORKFLOW_TEMPLATE_H3))
         workflow["1"]["inputs"]["unet_name"] = resolve_h3_unet_names()[0]
@@ -1631,6 +1699,17 @@ class VideoAgent(BaseAgent):
         )
         positive = positive + H3_R2V_PROMPT_GUIDE + build_r2v_media_guide(n_videos, n_audios)
         positive = _append_audio_direction(positive, [request.narrative_beat])
+        # P1 Ref2VA: subject_definitions + <Picture i> in connection order (fail-open)
+        n_pictures = 1 + len(ref_names)
+        positive = await _rewrite_prompt_for_h3(
+            positive,
+            request=request,
+            mode="ref2va",
+            n_pictures=n_pictures,
+            n_videos=n_videos,
+            n_audios=n_audios,
+            extra_image_urls=[request.image_url, *ref_urls],
+        )
         workflow["20"]["inputs"]["prompt"] = positive
         workflow["30"]["inputs"]["noise_seed"] = random.randint(0, 2**32 - 1)
         workflow["31"]["inputs"]["sampler_name"] = settings.h3_sampler
