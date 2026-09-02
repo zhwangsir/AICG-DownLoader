@@ -2,7 +2,28 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-02",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 7df5b67。canonical start ./start-aigcpannel.sh。2026-09-02 起剧本/改写/视觉走 spark01 .82:8000 qwen3.8-flash-next，网关必选不再硬依赖 spark02 LLM。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 f5a4037。canonical start ./start-aigcpannel.sh。2026-09-02 起剧本/角色/分镜/Context-IR LLM+VLM 默认 spark01 .82:8000 qwen3.8-flash-next，网关必选不再硬依赖 spark02。代码 AICG 开发，五件套项目管家。",
+  "spark01_code_f5a4037": {
+    "commit": "f5a4037",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "stacked_on": "16fb242",
+    "llm_vlm": "http://192.168.71.82:8000/v1 qwen3.8-flash-next",
+    "covers": "script/character/storyboard/Context-IR chat LLM and VLM",
+    "gateway_health": "required llm+vlm spark01 .82; report no .84; required_down=[]",
+    "start": "start-aigcpannel.py / local_gateway LOCAL_LLM_BASE_URL and LOCAL_CHAT_MODEL same defaults",
+    "env_example": "platform .env.example updated",
+    "local_env": "gitignored .env updated not committed",
+    "spark02": "not SSH-verified; .84 services not stopped",
+    "local_health": ":8100/:8790 healthy; :8080 not touched",
+    "tests": "platform config/gateway 25 + H3 P2–P6/Context-IR 72; dashbox test_adapter 12; 5 LTX/auto-engine failures are P5/P6 existing pins",
+    "gaps": [
+      "some comments/RFC/drift scripts still say spark02 .84",
+      "dashbox docker settings.db not re-pinned (code CLUSTER_LLM default already spark01)"
+    ],
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "spark01_llm_vlm_2026_09_02": {
     "source": "user decision via 设备管家",
     "llm": "spark01 .82:8000 qwen3.8-flash-next",
