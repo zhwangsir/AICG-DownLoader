@@ -2,7 +2,22 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-02",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 a284c52。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 c27f6db。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "p3_h3_turbo_c27f6db": {
+    "commit": "c27f6db",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "stacked_on": "291d994",
+    "preview": "preview=true / quality=preview enables Turbo",
+    "turbo_steps": "FL2VA 8; Ref2VA 4; MiniMaxH3TurboLoRA+Sampler",
+    "final": "default 20 steps; Turbo off",
+    "sfw_lora": "v4 pruned, not 10Eros",
+    "nsfw_preview": "10Eros_Max_h3_TURBO_ref2va allowed",
+    "reject": "Turbo + content LoRA rejected",
+    "next": "P4 AddGuide local inpaint + 漫剧 style pack",
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "p2_h3_chain_a284c52": {
     "commit": "a284c52",
     "pushed": true,

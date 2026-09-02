@@ -1,5 +1,7 @@
 # TEST_LOG.md — AIGCPannel
 
+- 2026-09-02 c27f6db dual-pushed (P3, on 291d994): preview=true/quality=preview enables Turbo (FL2VA 8 steps, Ref2VA 4 steps, MiniMaxH3TurboLoRA+Sampler); final default 20 steps Turbo off. SFW turbo LoRA is v4 pruned not 10Eros; NSFW preview may use 10Eros_Max_h3_TURBO_ref2va; Turbo+content LoRA is rejected. LICENSE/NOTICE/ToIV untouched.
+
 - 2026-09-02 a284c52 dual-pushed (P2, on 176ab03): last-frame chain default on; fail retry once then degrade to first-frame only; character three-views + front face + optional voiceprint into Ref2VA; empty shots SFW/NSFW both H3 FL2VA, not Wan; LTX-2.5 only when ltx_enabled and :8198 up. LICENSE/NOTICE/ToIV untouched.
 
 - 2026-09-02 412f0ba dual-pushed (P1): before H3 render, spark-local Context-IR rewrite; on failure fall back to original text. LICENSE/NOTICE/ToIV untouched.
