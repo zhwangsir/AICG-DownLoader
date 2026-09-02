@@ -41,6 +41,8 @@
 **2026-08-28 H3 出片冒烟（无新代码）**：H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。 LICENSE/NOTICE/ToIV 未动。
 
 
+**2026-09-02 `16dbbd5`（已双推）**：`16dbbd5` 已双推（P4，叠 `a77032a`）：repair/inpaint 插 `MiniMaxH3AddGuide` + `LoadImageMask`/`SetLatentNoiseMask`，降 denoise；图里没有 AddGuide 则 fail-closed `502`/`H3RepairUnavailable`，不回退 Wan/LTX。漫剧 pack 偏 `animagineXL40` + IPAdapter 0.85，视频引擎仍 H3 FL2VA/Ref2VA。NSFW PIN 默认仍 10Eros；`nsfw_variant=dasiwa` 仅 opt-in A/B（`:8195` UNETLoader 无此权重，选了会预检失败）。Remix 未接线（盘上/注册表都没有）。`:8195` 快探 855 节点：有 ImageToVideo/ReferenceToVideo/TurboLoRA/SetLatentNoiseMask/LoadImageMask；无 `MiniMaxH3AddGuide`；`SamplerCustomAdvanced` 也没有 `denoise_mask`。P0–P4 代码刀完。LICENSE/NOTICE/ToIV 未动。
+
 **2026-09-02 `c27f6db`（已双推）**：`c27f6db` 已双推（P3，叠 `291d994`）：`preview=true` / `quality=preview` 开 Turbo（`MiniMaxH3TurboLoRA`+`MiniMaxH3TurboSampler`；FL2VA 8 步、Ref2VA 4 步）。成片默认 / `preview=false` / `quality=final` 关 Turbo、原生 20 步；`h3_turbo_enabled` 配置默认仍 False。SFW turbo LoRA 是 `minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors`，不是 10Eros。NSFW 预览可用 `10Eros_Max_h3_TURBO_ref2va.safetensors`（未在 NAS 上实锤文件名）。Turbo+内容 LoRA 直接拒绝（已知 shape 错）。工作台 VideoModal「Turbo 预览」vs「生成视频」；画布一键成片传 `preview:false, quality:final`。缺口：没用官方 `minimax_h3_fl2v`/`lightx2v` 名（`:8195` 产品默认已是 v4 pruned）；一键 pipeline 不传 preview；无 `:8195` 真机 Turbo 冒烟。LICENSE/NOTICE/ToIV 未动。
 
 **2026-09-02 `a284c52`（已双推）**：`a284c52` 已双推（P2，叠 `176ab03`）：尾帧串镜默认开，失败重试一次再降级只首帧；角色三视图+正脸+可选声纹进 Ref2VA；空镜 SFW/NSFW 都走 H3 **FL2VA**，不走 Wan；LTX-2.5 仅 `ltx_enabled` 且 `:8198` 活着。LICENSE/NOTICE/ToIV 未动。

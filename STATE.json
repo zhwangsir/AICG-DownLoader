@@ -2,7 +2,37 @@
   "project": "AIGCPannel",
   "version": "0.34.0",
   "last_updated": "2026-09-02",
-  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 c27f6db。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 16dbbd5。canonical start ./start-aigcpannel.sh。代码 AICG 开发，五件套项目管家。",
+  "p4_h3_addguide_16dbbd5": {
+    "commit": "16dbbd5",
+    "pushed": true,
+    "remotes": "Gitee+GitHub",
+    "stacked_on": "a77032a",
+    "repair": "MiniMaxH3AddGuide + LoadImageMask/SetLatentNoiseMask; lower denoise",
+    "fail_closed": "502/H3RepairUnavailable if AddGuide missing; no Wan/LTX fallback",
+    "manhua": "animagineXL40 + IPAdapter 0.85; video still H3 FL2VA/Ref2VA",
+    "nsfw_pin": "default still 10Eros",
+    "dasiwa": "nsfw_variant=dasiwa opt-in A/B only; :8195 UNETLoader has no weight; precheck fails",
+    "remix": "not wired; not on disk / not in registry",
+    "probe_8195": {
+      "nodes": 855,
+      "has": [
+        "ImageToVideo",
+        "ReferenceToVideo",
+        "TurboLoRA",
+        "SetLatentNoiseMask",
+        "LoadImageMask"
+      ],
+      "missing": [
+        "MiniMaxH3AddGuide"
+      ],
+      "sampler": "SamplerCustomAdvanced has no denoise_mask"
+    },
+    "tests": "dashbox P0+P4 25; platform P4+P3+P2+routing 67",
+    "p0_p4": "code knives done",
+    "brand": "untouched",
+    "toiv": "untouched"
+  },
   "p3_h3_turbo_c27f6db": {
     "commit": "c27f6db",
     "pushed": true,
@@ -14,7 +44,7 @@
     "sfw_lora": "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors (not 10Eros)",
     "nsfw_preview": "10Eros_Max_h3_TURBO_ref2va.safetensors allowed; filename not verified on NAS",
     "reject": "Turbo + content LoRA rejected (known shape mismatch)",
-    "next": "P4 AddGuide local inpaint + 漫剧 style pack + DaSiWa A/B only",
+    "next": "P4 landed 16dbbd5",
     "brand": "untouched",
     "toiv": "untouched",
     "nodes": "MiniMaxH3TurboLoRA + MiniMaxH3TurboSampler",

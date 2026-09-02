@@ -33,6 +33,10 @@
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 
+## P4 AddGuide 修复 / 漫剧 pack（2026-09-02，`16dbbd5`）
+
+`16dbbd5` 已双推（P4，叠 `a77032a`）：repair/inpaint 插 `MiniMaxH3AddGuide` + `LoadImageMask`/`SetLatentNoiseMask`，降 denoise；图里没有 AddGuide 则 fail-closed `502`/`H3RepairUnavailable`，不回退 Wan/LTX。漫剧 pack 偏 `animagineXL40` + IPAdapter 0.85，视频引擎仍 H3 FL2VA/Ref2VA。NSFW PIN 默认仍 10Eros；`nsfw_variant=dasiwa` 仅 opt-in A/B（`:8195` UNETLoader 无此权重，选了会预检失败）。Remix 未接线（盘上/注册表都没有）。`:8195` 快探 855 节点：有 ImageToVideo/ReferenceToVideo/TurboLoRA/SetLatentNoiseMask/LoadImageMask；无 `MiniMaxH3AddGuide`；`SamplerCustomAdvanced` 也没有 `denoise_mask`。P0–P4 代码刀完。LICENSE/NOTICE/ToIV 未动。
+
 ## P3 Turbo 预览 / 成片 20 步（2026-09-02，`c27f6db`）
 
 `c27f6db` 已双推（P3，叠 `291d994`）：`preview=true` / `quality=preview` 开 Turbo（`MiniMaxH3TurboLoRA`+`MiniMaxH3TurboSampler`；FL2VA 8 步、Ref2VA 4 步）。成片默认 / `preview=false` / `quality=final` 关 Turbo、原生 20 步；`h3_turbo_enabled` 配置默认仍 False。SFW turbo LoRA 是 `minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors`，不是 10Eros。NSFW 预览可用 `10Eros_Max_h3_TURBO_ref2va.safetensors`（未在 NAS 上实锤文件名）。Turbo+内容 LoRA 直接拒绝（已知 shape 错）。工作台 VideoModal「Turbo 预览」vs「生成视频」；画布一键成片传 `preview:false, quality:final`。缺口：没用官方 `minimax_h3_fl2v`/`lightx2v` 名（`:8195` 产品默认已是 v4 pruned）；一键 pipeline 不传 preview；无 `:8195` 真机 Turbo 冒烟。LICENSE/NOTICE/ToIV 未动。
