@@ -35,7 +35,7 @@ ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没�
 
 ## :8195 AddGuide 节点已在（2026-09-03）
 
-设备管家回写：workstation `:8195` ComfyUI **0.30.0 → 0.34.0**（git `a87667f`，含 #15439）。原生 `MiniMaxH3AddGuide` 已出现；`ImageToVideo` / `ReferenceToVideo` 仍在。P4 「repair 会 502 直到升级」的**节点缺口已关**（fail-closed 仍在：节点缺才 `502`/`H3RepairUnavailable`）。INT8/Turbo 未重下。未 SSH spark02。集群账只看 `../ToIV/AGENTS.md`。LICENSE/NOTICE 未动。
+设备管家回写、AICG 核 `object_info`：workstation `:8195` ComfyUI **0.30.0 → 0.34.0**（git `a87667f`，含 #15439）。`object_info` 现有 `MiniMaxH3AddGuide`；FL2VA/Ref2VA（`ImageToVideo` / `ReferenceToVideo`）仍在。P4 修图**不再因缺节点 502**（fail-closed 仍在：节点缺才 `502`/`H3RepairUnavailable`）。`SamplerCustomAdvanced` 仍无 `denoise_mask` 输入。INT8/Turbo 未重下。未 SSH spark02。集群账只看 `../ToIV/AGENTS.md`。LICENSE/NOTICE 未动。
 
 ## spark01 LLM/VLM 代码落地（2026-09-02，`f5a4037`）
 
