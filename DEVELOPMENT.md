@@ -41,6 +41,8 @@
 **2026-08-28 H3 出片冒烟（无新代码）**：H3 `generate_async` 已跑通（无新代码）。task `video-a54cf30392c7`，约 1.5min，mp4 768x1344 3s。HEAD 仍 `71d616f`。`:8080` 未反代 `/static/video`（410），本机静态在 `:8100`。 LICENSE/NOTICE/ToIV 未动。
 
 
+**2026-09-03 `:8195` AddGuide 已在**：设备管家回写：workstation `:8195` ComfyUI **0.30.0 → 0.34.0**（git `a87667f`，含 #15439）。原生 `MiniMaxH3AddGuide` 已出现；`ImageToVideo` / `ReferenceToVideo` 仍在。P4 「repair 会 502 直到升级」的**节点缺口已关**（fail-closed 仍在：节点缺才 `502`/`H3RepairUnavailable`）。INT8/Turbo 未重下。未 SSH spark02。集群账只看 `../ToIV/AGENTS.md`。LICENSE/NOTICE 未动。
+
 **2026-09-02 `f5a4037`（已双推）**：`f5a4037` 已双推（叠 `16fb242`）：AIGCPannel 剧本/角色/分镜/Context-IR 聊天 LLM 与 VLM 默认都是 `http://192.168.71.82:8000/v1`、模型 `qwen3.8-flash-next`。`/gateway/health` 必选 llm+vlm = spark01 `.82`，报告里不再出现 `.84`，`required_down=[]`。`start-aigcpannel.py` / local_gateway `LOCAL_LLM_BASE_URL` 与 `LOCAL_CHAT_MODEL` 同样默认。平台 `.env.example` 已改；本机 gitignored `.env` 已改未提交。未 SSH spark02，`.84` 服务未关。本机 `:8100`/`:8790` 健康；`:8080` 未动。缺口：若干注释/RFC/drift 脚本仍写 spark02 `.84`；dashbox docker `settings.db` 未重钉（代码 `CLUSTER_LLM` 默认已是 spark01）。LICENSE/NOTICE/ToIV 未动。
 
 **2026-09-02 spark01 口径**：2026-09-02 用户定口径（设备管家回写）：AIGCPannel 剧本/改写/视觉都用 spark01 `.82:8000` `qwen3.8-flash-next`。不拉 spark02 `.84:8000`。网关 `gateway/health` 必选不再含 spark02 LLM（llm+vlm 都 spark01）。`.84` 上的服务没动；spark02 不等于整集群退役（ToIV 可能仍用）。LICENSE/NOTICE/ToIV 未动。

@@ -33,6 +33,10 @@
 
 ToIV 对照细项（ToIV 开发读 `.env.example` / `engine_registry.py`，没改代码、不推）：视频主路 MiniMax **H3** `:8195`（海螺开源权重）。R18 故意留 **LTX-2.3+10Eros v14**，不跟 LTX-2.5。ToIV 侧 SFW LTX-2.5 已于 2026-08-23 退役；本地未推 Phase 4 有 `ltx25-multishot`，不是默认。无声/动作/R18 I2V 走 **Wan2.2**；编辑/转场/关键帧链仍是 **Wan2.1-VACE-14B**（产品代际，不是主路写错成 2.1）。长视频 LongCat `:8197`。图像默认 `flux2_dev_fp8mixed`，文生图可选 `qwen_image` / `z_image`；`qwen-image-edit` 在；R18 图 URPM。3D=Hunyuan3D，没挂混元视频 1.0。和 AIGCPannel 的差：ToIV 图像已是 FLUX.2/Qwen/Z-Image，AIGCPannel 仍 SDXL+IPAdapter（用户点名才追）。H3 主路两边对齐。
 
+## :8195 AddGuide 节点已在（2026-09-03）
+
+设备管家回写：workstation `:8195` ComfyUI **0.30.0 → 0.34.0**（git `a87667f`，含 #15439）。原生 `MiniMaxH3AddGuide` 已出现；`ImageToVideo` / `ReferenceToVideo` 仍在。P4 「repair 会 502 直到升级」的**节点缺口已关**（fail-closed 仍在：节点缺才 `502`/`H3RepairUnavailable`）。INT8/Turbo 未重下。未 SSH spark02。集群账只看 `../ToIV/AGENTS.md`。LICENSE/NOTICE 未动。
+
 ## spark01 LLM/VLM 代码落地（2026-09-02，`f5a4037`）
 
 `f5a4037` 已双推（叠 `16fb242`）：AIGCPannel 剧本/角色/分镜/Context-IR 聊天 LLM 与 VLM 默认都是 `http://192.168.71.82:8000/v1`、模型 `qwen3.8-flash-next`。`/gateway/health` 必选 llm+vlm = spark01 `.82`，报告里不再出现 `.84`，`required_down=[]`。`start-aigcpannel.py` / local_gateway `LOCAL_LLM_BASE_URL` 与 `LOCAL_CHAT_MODEL` 同样默认。平台 `.env.example` 已改；本机 gitignored `.env` 已改未提交。未 SSH spark02，`.84` 服务未关。本机 `:8100`/`:8790` 健康；`:8080` 未动。缺口：若干注释/RFC/drift 脚本仍写 spark02 `.84`；dashbox docker `settings.db` 未重钉（代码 `CLUSTER_LLM` 默认已是 spark01）。LICENSE/NOTICE/ToIV 未动。

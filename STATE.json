@@ -1,8 +1,23 @@
 {
   "project": "AIGCPannel",
   "version": "0.34.0",
-  "last_updated": "2026-09-02",
+  "last_updated": "2026-09-03",
   "description": "AIGCPannel 是短剧产品（ToIV 才是聚合平台）。dashbox/ 是收尾引擎 :8080/:8780，不再当独立产品。目录 ALLProject/AIGCPannel；远程 Gitee/GitHub 均名 AIGCPannel，尖端 f5a4037。canonical start ./start-aigcpannel.sh。2026-09-02 起剧本/角色/分镜/Context-IR LLM+VLM 默认 spark01 .82:8000 qwen3.8-flash-next，网关必选不再硬依赖 spark02。代码 AICG 开发，五件套项目管家。",
+  "h3_addguide_node_2026_09_03": {
+    "source": "设备管家",
+    "comfyui": "workstation :8195 0.30.0→0.34.0 git a87667f",
+    "includes": "Comfy-Org #15439 MiniMaxH3AddGuide",
+    "nodes_now": [
+      "MiniMaxH3AddGuide",
+      "ImageToVideo",
+      "ReferenceToVideo"
+    ],
+    "p4_gap": "repair 502 node-missing gap closed; fail-closed remains if node absent",
+    "weights": "INT8/Turbo not re-downloaded",
+    "spark02": "not SSH-verified",
+    "cluster_sot": "../ToIV/AGENTS.md",
+    "brand": "untouched"
+  },
   "spark01_code_f5a4037": {
     "commit": "f5a4037",
     "pushed": true,
@@ -134,7 +149,8 @@
       "repair 502 until H3 ComfyUI upgraded",
       "DaSiWa is a hook only",
       "no standalone repair UI; optional fields on VideoGenerateParams"
-    ]
+    ],
+    "node_gap_superseded": "2026-09-03 :8195 has native MiniMaxH3AddGuide after ComfyUI 0.34.0"
   },
   "p3_h3_turbo_c27f6db": {
     "commit": "c27f6db",
