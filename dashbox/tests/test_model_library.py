@@ -1767,8 +1767,8 @@ class TestGenerateVideo:
             # passthrough 到真实集群（曾触发真实提交，见调试记录）。
             with respx.mock:
                 for base, tag in [
-                    (r"http://192\.168\.71\.127:8189", ":8189"),
-                    (r"http://192\.168\.71\.115:8188", "pc01"),
+                    (r"http://192\.168\.71\.127:8196", ":8196"),
+                    (r"http://192\.168\.71\.116:8188", "pc01"),
                     (r"http://192\.168\.71\.114:8193", "pc02"),
                     (r"http://192\.168\.71\.127:8188", "lb"),
                     (r"http://192\.168\.71\.127:8195", "h3"),
@@ -1790,7 +1790,7 @@ class TestGenerateVideo:
                 assert wan_result["backend"] == "http://192.168.71.127:8188"
                 assert wan_result["video_bytes"] == b"mp4bytes"
                 # 首帧已覆盖全部三后端（LB 随机路由不丢文件）
-                assert set(uploads) == {":8189", "pc01", "pc02"}
+                assert set(uploads) == {":8196", "pc01", "pc02"}
 
                 uploads.clear()
                 h3_result = asyncio.run(_run(h3_wf))

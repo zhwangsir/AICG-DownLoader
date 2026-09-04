@@ -109,7 +109,7 @@ def gateway_env() -> dict:
     env["LOCAL_COMFYUI_LB_URL"] = env.get("LOCAL_COMFYUI_LB_URL", "http://192.168.71.127:8188")
     env["LOCAL_COMFYUI_LB_BACKEND_URLS"] = env.get(
         "LOCAL_COMFYUI_LB_BACKEND_URLS",
-        "http://192.168.71.127:8189,http://192.168.71.116:8188,http://192.168.71.114:8193",
+        "http://192.168.71.127:8196,http://192.168.71.116:8188,http://192.168.71.114:8193",
     )
     env["LOCAL_H3_BASE_URL"] = env.get("LOCAL_H3_BASE_URL", "http://192.168.71.127:8195")
     env["LOCAL_LTX_BASE_URL"] = env.get("LOCAL_LTX_BASE_URL", "http://192.168.71.127:8198")

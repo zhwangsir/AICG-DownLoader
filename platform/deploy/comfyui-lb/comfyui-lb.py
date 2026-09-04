@@ -2,10 +2,19 @@
 ComfyUI 智能负载均衡代理
 
 架构：
-  所有客户端 → 本代理:8188 → 4 个 ComfyUI 实例 (8189-8192, GPU0-3)
+  所有客户端 → 本代理:8188 → N 个 ComfyUI 后端实例
+  （当前 3 后端：本地 gpu0 :8196 + pc01 :8188 + pc02 :8193）
+
+后端清单（SoT 热更新）：
+  - 优先读 JSON 文件（env COMFY_LB_BACKENDS_FILE，默认 /opt/comfyui-lb/backends.json）；
+    文件缺失/解析失败时回退到源码内置列表 BUILTIN_BACKENDS。
+  - JSON 与内置列表同构：list of {"id","url","gpu","weight"?,"remote"?}。
+  - 健康检查循环每轮核对文件 mtime，变化即热重载：新增后端自动进入健康探测，
+    消失的后端从 health 表清理（prompt_map/file_map 不动），无需重启 LB。
+  - GET /admin/backends：只读端点，返回当前后端清单及健康状态，供下游消费方拉取。
 
 调度逻辑：
-  - /prompt POST：查询所有实例的 /queue，分发到队列最短且健康的实例，记录 prompt_id→实例映射
+  - /prompt POST：查询所有实例的 /queue，分发到加权队列最短且健康的实例，记录 prompt_id→实例映射
   - /history/{id} / /view / /api/upload：按映射路由到正确实例
   - 其他请求：轮询分发
   - 健康检查：后台每 5s 探活，掉线实例自动剔除，恢复后自动加回
@@ -13,6 +22,7 @@ ComfyUI 智能负载均衡代理
 
 import asyncio
 import json
+import os
 import time
 import logging
 import re
@@ -30,24 +40,106 @@ logging.basicConfig(
 logger = logging.getLogger("comfyui-lb")
 
 # ── 配置 ──────────────────────────────────────────────
-BACKENDS = [
-    {"id": "gpu0", "url": "http://127.0.0.1:8189", "gpu": 0},
+# 内置兜底清单（文件缺失/损坏时使用；正常态 SoT 是 backends.json，见上方 docstring）
+BUILTIN_BACKENDS = [
+    {"id": "gpu0", "url": "http://127.0.0.1:8196", "gpu": 0, "weight": 1.5},
     # pc02 远程节点(RTX 5090,经内网 IPv4 访问)
     {"id": "pc02", "url": "http://192.168.71.114:8193", "gpu": 0, "remote": True},
     # pc01 远程节点(RTX 5090,经内网 IPv4 访问)
-    {"id": "pc01", "url": "http://192.168.71.115:8188", "gpu": 0, "remote": True},
+    {"id": "pc01", "url": "http://192.168.71.116:8188", "gpu": 0, "remote": True},
 ]
+BACKENDS_FILE = os.environ.get("COMFY_LB_BACKENDS_FILE", "/opt/comfyui-lb/backends.json")
 LISTEN_PORT = 8188
 HEALTH_CHECK_INTERVAL = 5  # 秒
 HEALTH_TIMEOUT = 3        # 秒
 UPSTREAM_TIMEOUT = ClientTimeout(total=300, sock_read=120)  # ComfyUI 生图可能很慢
 
+
+def _validate_backends(data) -> list[dict]:
+    """校验后端清单结构，非法抛 ValueError。返回规范化副本。"""
+    if not isinstance(data, list) or not data:
+        raise ValueError("backends 必须是非空 list")
+    out = []
+    for i, item in enumerate(data):
+        if not isinstance(item, dict) or not item.get("id") or not item.get("url"):
+            raise ValueError(f"backends[{i}] 缺少 id/url: {item!r}")
+        out.append({
+            "id": str(item["id"]),
+            "url": str(item["url"]).rstrip("/"),
+            "gpu": item.get("gpu", 0),
+            **({"weight": float(item["weight"])} if "weight" in item else {}),
+            **({"remote": bool(item["remote"])} if "remote" in item else {}),
+        })
+    ids = [b["id"] for b in out]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"backend id 重复: {ids}")
+    return out
+
+
+def load_backends(path: Optional[str] = None) -> tuple[list[dict], str]:
+    """加载后端清单，返回 (backends, source)。
+
+    优先读 JSON 文件；文件缺失/解析失败/校验失败时回退内置列表。
+    source ∈ {"file", "builtin"}。
+    """
+    path = path or BACKENDS_FILE
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return _validate_backends(data), "file"
+    except FileNotFoundError:
+        logger.info(f"backends 文件 {path} 不存在，使用内置清单")
+    except Exception as e:
+        logger.error(f"backends 文件 {path} 加载失败({e})，回退内置清单")
+    return _validate_backends(BUILTIN_BACKENDS), "builtin"
+
+
 # ── 状态 ──────────────────────────────────────────────
+BACKENDS, _BACKENDS_SOURCE = load_backends()
 backend_health: dict[str, bool] = {b["id"]: True for b in BACKENDS}  # id → healthy
 prompt_map: dict[str, str] = {}  # prompt_id → backend_id（用于 history/view 路由）
 file_map: dict[str, str] = {}    # filename → backend_id（从 history 响应学习，用于 /view 精确路由）
 round_robin = cycle(b["id"] for b in BACKENDS)
 map_lock = asyncio.Lock()
+_backends_file_mtime: Optional[float] = None  # 上次热重载时看到的 backends 文件 mtime
+
+
+def apply_backends(new: list[dict], source: str) -> None:
+    """热替换后端清单（事件循环内调用，单线程无竞争）。
+
+    新增后端默认 healthy=True 进入探测；消失的后端从 health 表清理；
+    prompt_map/file_map 不动（历史作业的映射仍指向原 id，找不到实例时走盲试回退）。
+    """
+    global BACKENDS, round_robin
+    old_ids = [b["id"] for b in BACKENDS]
+    BACKENDS = new
+    round_robin = cycle(b["id"] for b in BACKENDS)
+    live = {b["id"] for b in new}
+    for bid in list(backend_health):
+        if bid not in live:
+            del backend_health[bid]
+    for b in new:
+        backend_health.setdefault(b["id"], True)
+    new_ids = [b["id"] for b in new]
+    if new_ids != old_ids:
+        logger.info(f"backends 热重载(source={source}): {old_ids} → {new_ids}")
+
+
+def maybe_reload_backends() -> bool:
+    """backends 文件 mtime 变化则热重载。返回是否执行了重载。失败回退内置并记日志。"""
+    global _backends_file_mtime
+    try:
+        mtime: Optional[float] = os.path.getmtime(BACKENDS_FILE)
+    except OSError:
+        mtime = None
+    if mtime == _backends_file_mtime:
+        return False
+    new, source = load_backends()
+    _backends_file_mtime = mtime
+    apply_backends(new, source)
+    if source == "builtin" and mtime is not None:
+        logger.error("backends 文件存在但不可用，已回退内置清单（修复文件后下轮自动重载）")
+    return True
 
 
 def _trim_map(m: dict, keep: int = 4000, cap: int = 5000) -> None:
@@ -118,12 +210,13 @@ async def select_backend_for_prompt(session: aiohttp.ClientSession) -> Optional[
     tasks = [get_queue_length(session, b["url"]) for b in healthy]
     queue_lengths = await asyncio.gather(*tasks)
 
-    # 选队列最短的
+    # 选加权队列最短的(weight>1 降权,反映共卡显存压力而非纯队列)
     best_idx = 0
-    best_len = queue_lengths[0]
+    best_score = queue_lengths[0] * healthy[0].get("weight", 1.0)
     for i, ql in enumerate(queue_lengths[1:], 1):
-        if ql < best_len:
-            best_len = ql
+        score = ql * healthy[i].get("weight", 1.0)
+        if score < best_score:
+            best_score = score
             best_idx = i
 
     return healthy[best_idx]
@@ -155,7 +248,8 @@ def find_backend_for_id(resource_id: str) -> Optional[dict]:
 async def health_check_loop(app: web.Application):
     session = app["session"]
     while True:
-        for backend in BACKENDS:
+        maybe_reload_backends()  # backends 文件热更新（mtime 变化才重载）
+        for backend in list(BACKENDS):
             try:
                 async with session.get(
                     f"{backend['url']}/system_stats",
@@ -463,6 +557,20 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
     return ws_client
 
 
+# 转发给后端时剥离浏览器安全元数据头：ComfyUI 的 origin_only_middleware
+# 对 Sec-Fetch-Site: cross-site 一律 403，且在 loopback Host 下校验 Origin!=Host 也 403。
+# 浏览器跨站 iframe(如 ToIV localhost:3100 嵌 :8188)会带这些头，导致 / 和 /assets/* 全 403。
+# LB 是内网可信边界，剥离后后端视为服务器间调用。
+_PROXY_DROP_HEADERS = frozenset({
+    "host", "origin",
+    "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user",
+})
+
+
+def _proxy_headers(request):
+    return {k: v for k, v in request.headers.items() if k.lower() not in _PROXY_DROP_HEADERS}
+
+
 def is_static_file(path: str) -> bool:
     """判断是否是静态文件请求"""
     return path.lower().endswith((
@@ -476,6 +584,23 @@ def get_primary_backend() -> Optional[dict]:
             return b
     # 没有本地实例，用任意健康实例
     return get_healthy_backends()[0] if get_healthy_backends() else None
+
+
+async def handle_admin_backends(request: web.Request) -> web.Response:
+    """GET /admin/backends — 只读后端清单+健康状态，供下游消费方拉取（上传扇出等）"""
+    return web.json_response({
+        "backends": [
+            {
+                "id": b["id"],
+                "url": b["url"],
+                "gpu": b.get("gpu", 0),
+                "weight": b.get("weight", 1.0),
+                "remote": b.get("remote", False),
+                "healthy": backend_health.get(b["id"], False),
+            }
+            for b in BACKENDS
+        ],
+    })
 
 
 async def handle_generic_proxy(request: web.Request) -> web.Response:
@@ -503,7 +628,7 @@ async def handle_generic_proxy(request: web.Request) -> web.Response:
             method,
             f"{backend['url']}{path}",
             data=body,
-            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+            headers=_proxy_headers(request),
             timeout=UPSTREAM_TIMEOUT,
         ) as resp:
             resp_body = await resp.read()
@@ -520,7 +645,10 @@ async def handle_generic_proxy(request: web.Request) -> web.Response:
 async def on_startup(app: web.Application):
     app["session"] = aiohttp.ClientSession()
     app["health_task"] = asyncio.create_task(health_check_loop(app))
-    logger.info(f"ComfyUI LB started on :{LISTEN_PORT}, backends: {[b['id'] for b in BACKENDS]}")
+    logger.info(
+        f"ComfyUI LB started on :{LISTEN_PORT}, backends: {[b['id'] for b in BACKENDS]}"
+        f" (source={_BACKENDS_SOURCE}, file={BACKENDS_FILE})"
+    )
 
 
 async def on_cleanup(app: web.Application):
@@ -543,6 +671,7 @@ def create_app() -> web.Application:
     app.router.add_post("/upload/mask", handle_upload)
     app.router.add_get("/queue", handle_queue)
     app.router.add_get("/system_stats", handle_system_stats)
+    app.router.add_get("/admin/backends", handle_admin_backends)
     app.router.add_get("/ws", handle_websocket)
 
     # 其他所有请求走通用代理

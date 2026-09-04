@@ -84,17 +84,55 @@ VLM_LOGICAL_MODELS = {
 }
 EMBEDDING_BASE_URL = os.getenv("LOCAL_EMBEDDING_BASE_URL", "http://192.168.71.127:9302/v1").rstrip("/")
 COMFYUI_LB_URL = os.getenv("LOCAL_COMFYUI_LB_URL", "http://192.168.71.127:8188").rstrip("/")
-# LB 三后端直连清单（2026-08-17 固化）：参考图上传必须覆盖全部后端——LB /upload
+# LB 后端直连清单（上传扇出）：SoT 是 LB 的 GET /admin/backends。
+# env 留空（默认）时首次使用惰性从 LB 拉取；拉取失败回退内置静态清单并记 warning。
+# 背景（2026-08-17 固化）：参考图上传必须覆盖全部后端——LB /upload
 # 轮询单实例而 /prompt 加权随机选实例，只传 LB 入口时约 2/3 概率 LoadImage 在
 # 另一后端找不到文件（Invalid image file → 502，画布 R18 节点实测复现）。
-COMFYUI_LB_BACKEND_URLS = os.getenv(
-    "LOCAL_COMFYUI_LB_BACKEND_URLS",
-    "http://192.168.71.127:8189,http://192.168.71.116:8188,http://192.168.71.114:8193",
-)
+COMFYUI_LB_BACKEND_URLS = os.getenv("LOCAL_COMFYUI_LB_BACKEND_URLS", "")
+_LB_BACKEND_URLS_FALLBACK = [
+    "http://192.168.71.127:8196",
+    "http://192.168.71.116:8188",
+    "http://192.168.71.114:8193",
+]
+_lb_backend_urls_cache: list[str] | None = None
+
+
+async def _resolve_lb_backend_urls() -> list[str]:
+    """解析 LB 后端直连清单：env 显式配置 > LB /admin/backends 拉取 > 内置静态清单。
+
+    成功结果（env/拉取）做模块级缓存；拉取失败不缓存，下次使用重试。
+    """
+    global _lb_backend_urls_cache
+    if _lb_backend_urls_cache is not None:
+        return _lb_backend_urls_cache
+    env_urls = [u.strip().rstrip("/") for u in COMFYUI_LB_BACKEND_URLS.split(",") if u.strip()]
+    if env_urls:
+        _lb_backend_urls_cache = env_urls
+        return env_urls
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{COMFYUI_LB_URL}/admin/backends")
+            resp.raise_for_status()
+            urls = [
+                str(b["url"]).rstrip("/")
+                for b in resp.json().get("backends", [])
+                if isinstance(b, dict) and b.get("url")
+            ]
+            if urls:
+                logger.info(f"LB 后端清单拉取自 {COMFYUI_LB_URL}/admin/backends: {urls}")
+                _lb_backend_urls_cache = urls
+                return urls
+            logger.warning(f"{COMFYUI_LB_URL}/admin/backends 返回空清单，回退内置静态清单")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"拉取 {COMFYUI_LB_URL}/admin/backends 失败({e})，回退内置静态清单")
+    return list(_LB_BACKEND_URLS_FALLBACK)
+
+
 H3_BASE_URL = os.getenv("LOCAL_H3_BASE_URL", "http://192.168.71.127:8195").rstrip("/")
 LTX_BASE_URL = os.getenv("LOCAL_LTX_BASE_URL", "http://192.168.71.127:8198").rstrip("/")
-# Krea2 专用实例（workstation GPU0 ComfyUI :8189 直连，不经 LB——TE 只在本地）
-KREA2_BASE_URL = os.getenv("LOCAL_KREA2_BASE_URL", "http://192.168.71.127:8189").rstrip("/")
+# Krea2 专用实例（workstation GPU0 ComfyUI :8196 直连，不经 LB——TE 只在本地）
+KREA2_BASE_URL = os.getenv("LOCAL_KREA2_BASE_URL", "http://192.168.71.127:8196").rstrip("/")
 TTS_BASE_URL = os.getenv("LOCAL_TTS_BASE_URL", "http://192.168.71.127:9200").rstrip("/")
 VIDEO_BACKEND_FORCE = os.getenv("LOCAL_VIDEO_BACKEND", "").strip().lower()  # "h3" / "ltx" 强制指定；不读 DashBox VIDEO_BACKEND
 LTX_ENABLED = os.getenv("LOCAL_LTX_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
@@ -684,8 +722,9 @@ async def _upload_image_to_comfyui(
 ) -> str:
     """下载 HTTP URL 图片并上传到 ComfyUI input 目录，返回文件名。
 
-    配置 LOCAL_COMFYUI_LB_BACKEND_URLS（逗号分隔直连后端清单）时以同一文件名
-    复制到全部后端（LB /upload 轮询单实例而 /prompt 按负载选实例，避免 LoadImage
+    上传扇出目标由 _resolve_lb_backend_urls() 决定（env 显式清单 > LB
+    /admin/backends 拉取 > 内置静态清单）：以同一文件名复制到全部后端
+    （LB /upload 轮询单实例而 /prompt 按负载选实例，避免 LoadImage
     跨后端找不到文件）；部分后端失败仍继续，全部失败抛错。
     H3 专用实例必须 replicate_to_lb=False，只传到 :8195。
     """
@@ -695,7 +734,7 @@ async def _upload_image_to_comfyui(
     img_bytes = img_resp.content
     filename = f"{prefix}_{uuid.uuid4().hex[:8]}.png"
 
-    backends = [u.strip().rstrip("/") for u in COMFYUI_LB_BACKEND_URLS.split(",") if u.strip()]
+    backends = (await _resolve_lb_backend_urls()) if replicate_to_lb else []
     targets = (backends or [base_url]) if replicate_to_lb else [base_url]
     ok = 0
     last_err = ""

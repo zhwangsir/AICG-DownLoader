@@ -10,7 +10,7 @@
 6. 真人专项：打斗 / 微表情 / 对白
 
 执行后端（2026-08-22 真机核验）：
-- WS  = workstation GPU0 直连 :8189（SDXL 首帧 + Wan2.2 I2V；154 loras 全在位）
+- WS  = workstation GPU0 直连 :8196（SDXL 首帧 + Wan2.2 I2V；154 loras 全在位）
 - H3  = MiniMax H3 专用实例 :8195（fl2va/ref2va + 14 NSFW/combat loras）
 - COSY= CosyVoice2 :9201（OpenAI /v1/audio/speech 兼容）
 
@@ -30,7 +30,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-WS = "http://192.168.71.127:8189"
+WS = "http://192.168.71.127:8196"
 H3 = "http://192.168.71.127:8195"
 COSY = "http://192.168.71.127:9201"
 FFMPEG = "/opt/homebrew/bin/ffmpeg"
@@ -787,7 +787,7 @@ def save_state(st: dict) -> None:
 
 TASKS: dict[str, dict] = {}
 
-# ---- 首帧图（:8189 SDXL，30 步约 40-90s/张）----
+# ---- 首帧图（:8196 SDXL，30 步约 40-90s/张）----
 TASKS["F_N1"] = {"kind": "first", "spec": {
     "prompt": "masterpiece, best quality, anime key visual, a girl with silver hair standing on the platform of a night train station, cherry blossom petals drifting in the wind, steam rising, city lights bokeh, wind blowing her hair, cinematic composition, vibrant anime colors",
     "ckpt": CKPT["anime"], "seed": 20260822, "prefix": "F_N1"}}
@@ -837,7 +837,7 @@ TASKS["F_R7"] = {"kind": "first", "spec": {
     "prompt": "RAW photo, full body reference sheet of a nude young woman standing, front view, athletic slim figure, natural lighting, neutral studio background, photorealistic skin detail, uncensored",
     "ckpt": CKPT["nsfw_real"], "seed": 20960837, "prefix": "F_R7"}}
 
-# ---- Wan 2.2 5s（:8189，~5min/支）----
+# ---- Wan 2.2 5s（:8196，~5min/支）----
 TASKS["N1"] = {"kind": "wan", "deps": ["F_N1"], "spec": {
     "prefix": "N1_anime_5s",
     "prompt": "anime girl with silver hair standing on a night train station platform, cherry blossom petals swirling in the wind, steam drifting, her hair and dress flowing in the breeze, camera slowly dollies in, cinematic anime style, Authentic film look, High-fidelity details",
@@ -1084,7 +1084,7 @@ def main() -> None:
     allow_r18 = args.allow_r18 == "1"
 
     st = load_state()
-    ctx = {"ws": Comfy(WS, "ws:8189"), "h3": Comfy(H3, "h3:8195"), "st": st}
+    ctx = {"ws": Comfy(WS, "ws:8196"), "h3": Comfy(H3, "h3:8195"), "st": st}
 
     # 按依赖循环调度
     idle_rounds = 0

@@ -86,11 +86,11 @@ def real_settings(monkeypatch):
     monkeypatch.setattr(settings, "long_video_chunk_seconds", CHUNK_SECONDS)
     monkeypatch.setattr(settings, "long_video_max_chunks", N_CHUNKS)
     monkeypatch.setattr(settings, "image_backend", "sdxl")
-    # 覆盖 conftest 全局占位地址。直连 workstation :8189 后端（而非 LB :8188）：
+    # 覆盖 conftest 全局占位地址。直连 workstation :8196 后端（而非 LB :8188）：
     # animagine 动漫 ckpt 全集群缺失（实测 2026-08-10），majicMIX 仅 workstation/pc01
     # 持有，LB 路由到 pc02 会 400；直连确定性最高，漂移验证不受路由随机性干扰
-    monkeypatch.setattr(settings, "comfyui_image_hq", "http://192.168.71.127:8189")
-    monkeypatch.setattr(settings, "comfyui_image_fast", "http://192.168.71.127:8189")
+    monkeypatch.setattr(settings, "comfyui_image_hq", "http://192.168.71.127:8196")
+    monkeypatch.setattr(settings, "comfyui_image_fast", "http://192.168.71.127:8196")
     monkeypatch.setattr(settings, "character_view_qc_enabled", False)  # 控时：本测试不做三视图 QC
     monkeypatch.setattr(settings, "visual_model_url", "http://192.168.71.84:8000/v1")
     monkeypatch.setattr(settings, "visual_model_name", "qwen3.6-uncensored")

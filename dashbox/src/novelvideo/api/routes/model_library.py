@@ -1377,11 +1377,13 @@ PRESET_DIR = Path(
 )
 # Wan 路线：LB 三后端直连（首帧必须全覆盖，否则 LB 随机路由 2/3 概率
 # LoadImage 找不到文件）；H3 路线：专用实例单点。
+# SoT 为 LB /admin/backends（workstation :8188）；此处默认值仅是静态快照，
+# 后端漂移时以 LB 为准并用 DASHBOX_WAN_BACKENDS 显式覆盖。
 WAN_BACKENDS = [
     u.strip().rstrip("/")
     for u in os.environ.get(
         "DASHBOX_WAN_BACKENDS",
-        "http://192.168.71.127:8189,http://192.168.71.115:8188,http://192.168.71.114:8193",
+        "http://192.168.71.127:8196,http://192.168.71.116:8188,http://192.168.71.114:8193",
     ).split(",")
     if u.strip()
 ]
