@@ -48,7 +48,7 @@ curl -X POST http://192.168.71.127:8195/prompt -H "Content-Type: application/jso
 
 | 后端 | input 目录 |
 |---|---|
-| workstation :8189（LB 本地） | `/opt/ComfyUI/instances/gpu0/input`（⚠️ 不是 /opt/ComfyUI/input） |
+| workstation :8196（LB 本地） | `/opt/ComfyUI/instances/gpu0/input`（⚠️ 不是 /opt/ComfyUI/input） |
 | pc01 / pc02 | `C:\ComfyUI\input` |
 | H3 :8195 | `/home/merlin/ComfyUI-h3-eval/input` |
 

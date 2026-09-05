@@ -1932,8 +1932,8 @@
     },
     "comfyui": {
       "endpoint": "http://192.168.71.127:8188",
-      "rule": "统一 LB 入口 8188，禁止直连单卡 8189",
-      "backends": "3 后端轮询：本地 gpu0 (:8189) + pc01(:8188) + pc02(:8193)；专用独立实例（不入池）：H3 :8195 / LongCat :8197 / 超分 fleet :8261-8263。LTX-2.5 :8198 已彻底退役（2026-08-23 disable --now），不要当活引擎。"
+      "rule": "统一 LB 入口 8188，禁止直连单卡；池后端改 workstation /opt/comfyui-lb/backends.json 热重载（2026-09-03 起）",
+      "backends": "3 后端轮询：本地 gpu0-alt (:8196) + pc01(:8188) + pc02(:8193)；专用独立实例（不入池）：H3 :8195 / LongCat :8197 / 超分 fleet :8261-8263。LTX-2.5 :8198 已彻底退役（2026-08-23 disable --now），不要当活引擎。"
     },
     "video_engines": {
       "h3": {
